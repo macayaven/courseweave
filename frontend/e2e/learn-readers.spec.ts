@@ -82,20 +82,27 @@ test('production Learner rejects a delayed destination outcome after newer conte
   expect(api.unhandledRequests ?? 0).toBe(0);
 });
 
-test('production Learner accepts a delayed destination outcome after newer context confirms B', async ({ page }) => {
-  const api = { active: true, surfaceId: 'html-lesson', authenticatedRequests: 0 };
+test('production Learner accepts a delayed HTML destination outcome only after newer context confirms B', async ({ page }) => {
+  const api = { active: true, surfaceId: 'video-lesson', authenticatedRequests: 0 };
   const learn = await mountLearner(page, api);
   await page.evaluate(() => { document.documentElement.dataset.deferReaderOutcome = 'true'; });
-  await learn.getByRole('button', { name: 'Open Second video' }).click();
-  api.surfaceId = 'video-lesson';
+  await learn.getByRole('button', { name: 'Open Second lesson' }).click();
+  api.surfaceId = 'html-lesson';
   const requestCount = api.authenticatedRequests;
   await notifyContextChanged(page);
   await expect.poll(() => api.authenticatedRequests).toBeGreaterThan(requestCount);
+
+  const htmlReader = learn.locator('iframe[title="Second lesson"]');
+  await expect(htmlReader).toHaveCount(0);
+  await expect(learn.getByLabel('Course reader').getByRole('status')).toContainText('This course surface is unavailable.');
+
   await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('#learn-frame');
-    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'video-lesson', htmlSource: null }, location.origin);
+    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', htmlSource: `${location.origin}/content/html-lesson` }, location.origin);
   });
 
-  await expect(learn.locator('video[title="Second video"]')).toBeVisible();
+  await expect(htmlReader).toBeVisible();
+  await expect(htmlReader).toHaveAttribute('src', 'http://127.0.0.1:4173/content/html-lesson');
+  await expect(htmlReader).toHaveAttribute('sandbox', 'allow-scripts');
   expect(api.unhandledRequests ?? 0).toBe(0);
 });
