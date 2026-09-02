@@ -54,7 +54,7 @@ export function ProposalDrawer({ proposals, client, onRefresh, onProposal, draft
       if (alive.current) setPending((previous) => ({ ...previous, [proposalId]: false }));
     }
   }
-  const orphanDrafts = Object.entries(drafts).filter(([id, value]) => value.trim().length > 0 && !proposals.some((proposal) => proposal.id === id));
+  const orphanDrafts = Object.entries(drafts).filter(([id, value]) => value.trim().length > 0 && !proposals.some((proposal) => proposal.id === id && proposal.status === 'pending'));
   if (proposals.length === 0 && orphanDrafts.length === 0) return <EmptyState title="No pending proposals"><p>Teacher suggestions appear here after REST persistence.</p></EmptyState>;
   return <aside aria-label="Proposals">{notice ? <p role="status">{notice}</p> : null}{proposals.map((proposal) => {
     const disabled = recovery || pending[proposal.id] === true;

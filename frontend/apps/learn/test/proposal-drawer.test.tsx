@@ -76,6 +76,13 @@ describe('ProposalDrawer', () => {
     expect(screen.queryByRole('button', { name: 'Save edit' })).not.toBeInTheDocument();
   });
 
+  it.each(['accepted', 'rejected', 'superseded', 'failed'] as const)('keeps a draft orphaned when its same-ID proposal is %s', (status) => {
+    const drafts = { 'proposal-1': 'do not retarget me' };
+    render(<ProposalDrawer proposals={[{ ...pending, status }]} state={{ revision: 8 }} client={client()} onRefresh={vi.fn()} onProposal={vi.fn()} drafts={drafts} onDraftsChange={vi.fn()} />);
+    expect(screen.getByLabelText('Unsent edit for proposal-1')).toHaveValue('do not retarget me');
+    expect(screen.queryByRole('button', { name: 'Save edit' })).not.toBeInTheDocument();
+  });
+
   it('keeps draft input editable but disables every proposal mutation during recovery', () => {
     const api = client();
     render(<ProposalDrawer proposals={[pending]} state={{ revision: 7 }} client={api} onRefresh={vi.fn()} onProposal={vi.fn()} recovery />);

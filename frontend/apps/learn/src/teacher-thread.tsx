@@ -26,6 +26,7 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
   const active = useRef<AbortController | null>(null);
   const candidateFlights = useRef(new Map<string, AbortController>());
   const shareTrigger = useRef<HTMLSpanElement>(null);
+  const pendingShareFocus = useRef(false);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; active.current?.abort(); candidateFlights.current.forEach((controller) => controller.abort()); }; }, []);
   useEffect(() => { onDraftChange?.(composer.trim().length > 0); }, [composer, onDraftChange]);
@@ -39,6 +40,17 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
     setCandidates([]);
     setTranscript((items) => items.filter((item) => item.state !== 'streaming'));
   }, [recovery]);
+  const restoreShareFocus = () => {
+    const trigger = shareTrigger.current?.querySelector<HTMLButtonElement>('button');
+    if (trigger?.disabled) { pendingShareFocus.current = true; return; }
+    trigger?.focus();
+  };
+  useEffect(() => {
+    if (!pending && !recovery && composer.trim().length > 0 && pendingShareFocus.current) {
+      pendingShareFocus.current = false;
+      shareTrigger.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    }
+  }, [pending, recovery, composer]);
 
   function finishPartial(id: string, state: TranscriptItem['state']) {
     setTranscript((items) => items.map((item) => item.id === id ? { ...item, state } : item));
@@ -117,5 +129,5 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
     }
   }
 
-  return <section aria-label="Teacher thread"><h2>Teacher</h2>{transcript.map((item) => <p key={item.id} data-state={item.state} data-testid={item.state === 'interrupted' ? 'interrupted-stream' : undefined}>{item.text}</p>)}<label>Ask the teacher<textarea value={composer} onChange={(event) => setComposer(event.target.value)} /></label><Button type="button" disabled={recovery || pending || composer.trim().length === 0} onClick={() => void send()}>Ask teacher</Button>{allowedShareKinds.length > 0 ? <span ref={shareTrigger}><Button type="button" disabled={recovery || pending || composer.trim().length === 0} onClick={() => setShareOpen(true)}>Share before asking</Button></span> : null}{shareOpen ? <ShareDialog maxChars={maxShareChars} allowedKinds={allowedShareKinds} onCancel={() => setShareOpen(false)} onConfirm={send} restoreFocus={() => shareTrigger.current?.querySelector('button')?.focus()} /> : null}{candidates.map((candidate) => <section key={candidate.id}><p>Suggested change ready for review.</p><Button type="button" disabled={recovery || candidate.pending} onClick={() => void persistCandidate(candidate.id)}>Save suggested change</Button></section>)}{notice ? <p role="status">{notice}</p> : null}{notice && composer.trim().length > 0 ? <Button type="button" disabled={recovery || pending} onClick={() => void send()}>Retry</Button> : null}</section>;
+  return <section aria-label="Teacher thread"><h2>Teacher</h2>{transcript.map((item) => <p key={item.id} data-state={item.state} data-testid={item.state === 'interrupted' ? 'interrupted-stream' : undefined}>{item.text}</p>)}<label>Ask the teacher<textarea value={composer} onChange={(event) => setComposer(event.target.value)} /></label><Button type="button" disabled={recovery || pending || composer.trim().length === 0} onClick={() => void send()}>Ask teacher</Button>{allowedShareKinds.length > 0 ? <span ref={shareTrigger}><Button type="button" disabled={recovery || pending || composer.trim().length === 0} onClick={() => setShareOpen(true)}>Share before asking</Button></span> : null}{shareOpen ? <ShareDialog maxChars={maxShareChars} allowedKinds={allowedShareKinds} onCancel={() => setShareOpen(false)} onConfirm={send} restoreFocus={restoreShareFocus} /> : null}{candidates.map((candidate) => <section key={candidate.id}><p>Suggested change ready for review.</p><Button type="button" disabled={recovery || candidate.pending} onClick={() => void persistCandidate(candidate.id)}>Save suggested change</Button></section>)}{notice ? <p role="status">{notice}</p> : null}{notice && composer.trim().length > 0 ? <Button type="button" disabled={recovery || pending} onClick={() => void send()}>Retry</Button> : null}</section>;
 }

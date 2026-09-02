@@ -15,6 +15,7 @@ const props: LearnHeaderProps = {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 function dispatchRuntime(capabilityToken = 'runtime-test-token'): void {
@@ -27,6 +28,13 @@ function dispatchRuntime(capabilityToken = 'runtime-test-token'): void {
 }
 
 describe('learner shell header', () => {
+  it('offers an explicit runtime retry while connecting', () => {
+    const postMessage = vi.spyOn(window.parent, 'postMessage');
+    render(<LearnApp />);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry connection' }));
+    expect(postMessage).toHaveBeenCalledTimes(2);
+  });
+
   it('renders course, module, phase, time budget, and provider status', () => {
     render(<LearnHeader {...props} />);
     expect(screen.getByRole('banner')).toHaveTextContent('Agent Harnessing');
@@ -201,6 +209,28 @@ describe('learner shell header', () => {
     expect(await screen.findByLabelText('Ask the teacher')).toHaveValue('survives rebootstrap');
     expect(screen.getByLabelText('Edit summary')).toHaveValue('orphan-safe edit');
     expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/course'))).toHaveLength(2);
+  });
+
+  it('uses neutral connecting copy rather than claiming a blank draft is unsent', async () => {
+    const course = { title: 'Agent Harnessing', modules: [] };
+    let contextCalls = 0;
+    const fetch = vi.fn((url: string) => {
+      if (url.includes('/context?') && contextCalls++ === 1) return Promise.resolve(new Response(JSON.stringify({ code: 'forbidden', message: 'Reconnect', details: {} }), { status: 401, headers: { 'content-type': 'application/json' } }));
+      const body = url.endsWith('/course') ? course : url.endsWith('/state') ? { revision: 1 } : url.endsWith('/proposals') ? [] : { context: { source_id: 'notebook-a' }, resolved: { module_id: null, phase_id: null, surface_id: null, reason: 'empty_course' } };
+      return Promise.resolve(new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetch);
+    render(<LearnApp />);
+    dispatchRuntime();
+    await screen.findByText('Teacher status unknown');
+    const changed = new MessageEvent('message', { data: { type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, source: window.parent });
+    Object.defineProperty(changed, 'origin', { value: 'https://courseweave.test' });
+    act(() => window.dispatchEvent(changed));
+    await screen.findByRole('heading', { name: 'Reconnect to CourseWeave' });
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+    expect(await screen.findByRole('button', { name: 'Retry connection' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Unsent drafts')).not.toBeInTheDocument();
+    expect(screen.queryByText('Your draft is unsent.')).not.toBeInTheDocument();
   });
 
   it('keeps provider status unknown after successful read-side routes', async () => {

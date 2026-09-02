@@ -138,7 +138,8 @@ export function LearnApp() {
   }, [runtime.status, runtime.runtime, runtime.contextVersion]);
 
   if (runtime.status !== 'ready') {
-    return <main className="cw-rail" data-testid="learn-rail"><EmptyState title="Connecting to CourseWeave"><p>Waiting for the trusted JupyterLab bridge.</p>{data !== null ? <UnsentDrafts composer={teacherComposer} onComposer={setTeacherComposer} proposalDrafts={proposalDrafts} onProposalDraft={(id, value) => setProposalDrafts((drafts) => ({ ...drafts, [id]: value }))} /> : null}</EmptyState></main>;
+    const hasDraft = teacherComposer.trim().length > 0 || Object.values(proposalDrafts).some((draft) => draft.trim().length > 0);
+    return <main className="cw-rail" data-testid="learn-rail"><EmptyState title="Connecting to CourseWeave"><p>Waiting for the trusted JupyterLab bridge.</p><Button type="button" onClick={runtime.retry}>Retry connection</Button>{data !== null && hasDraft ? <UnsentDrafts composer={teacherComposer} onComposer={setTeacherComposer} proposalDrafts={proposalDrafts} onProposalDraft={(id, value) => setProposalDrafts((drafts) => ({ ...drafts, [id]: value }))} /> : null}</EmptyState></main>;
   }
   if (recovery && data === null) {
     return <main className="cw-rail" data-testid="learn-rail"><ReconnectPanel hasDraft={false} onReconnect={reconnect} /></main>;

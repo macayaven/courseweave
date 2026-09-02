@@ -64,12 +64,14 @@ describe('TeacherThread', () => {
     const postGuide = vi.fn().mockRejectedValue({ code: 'provider_error' });
     render(<TeacherThread client={{ postGuide, share, createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['selection']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'ask safely' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Share before asking' }));
+    const trigger = screen.getByRole('button', { name: 'Share before asking' });
+    fireEvent.click(trigger);
     fireEvent.change(screen.getByLabelText('Share content'), { target: { value: 'private excerpt' } });
     fireEvent.click(screen.getByRole('button', { name: 'Share and ask' }));
     await vi.waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({ run_id: expect.any(String), kind: 'selection', content: 'private excerpt', source_id: 'source-a' }), expect.any(AbortSignal)));
     expect(await screen.findByText('Teacher unavailable')).toBeInTheDocument();
     expect(screen.queryByLabelText('Share content')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   it('returns focus to the Share trigger after consent is cancelled with Escape', async () => {
@@ -79,6 +81,31 @@ describe('TeacherThread', () => {
     fireEvent.click(trigger);
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'Share with teacher' }), { key: 'Escape' });
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
+  it('returns focus to the Share trigger after consent is cancelled', async () => {
+    render(<TeacherThread client={{ postGuide: vi.fn(), share: vi.fn(), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['selection']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'ask safely' } });
+    const trigger = screen.getByRole('button', { name: 'Share before asking' });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
+  it('restores focus to the Share trigger after a successful Share and guide settlement', async () => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('00000000-0000-4000-8000-000000000001').mockReturnValueOnce('00000000-0000-4000-8000-000000000002').mockReturnValueOnce('00000000-0000-4000-8000-000000000003');
+    const wire = 'data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\ndata: {"type":"RUN_FINISHED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\n';
+    render(<TeacherThread client={{ share: vi.fn().mockResolvedValue(undefined), postGuide: vi.fn().mockResolvedValue(new Response(wire)), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['selection']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'ask safely' } });
+    const trigger = screen.getByRole('button', { name: 'Share before asking' });
+    fireEvent.click(trigger);
+    fireEvent.change(screen.getByLabelText('Share content'), { target: { value: 'excerpt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Share and ask' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'next request' } });
+    await vi.waitFor(() => expect(trigger).not.toBeDisabled());
     expect(trigger).toHaveFocus();
   });
 
