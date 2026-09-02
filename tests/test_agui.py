@@ -389,7 +389,7 @@ def test_guide_never_reemits_explicitly_shared_content_in_agui_events(tmp_path: 
 
     assert response.status_code == 200
     assert "private" not in response.text
-    assert _events(response)[-3]["delta"] == "[Shared content omitted.]"
+    assert [event["delta"] for event in _events(response) if event["type"] == "TEXT_MESSAGE_CONTENT"] == []
 
 
 def test_in_stream_provider_failure_emits_run_error_and_leaves_no_durable_or_shared_state(tmp_path: Path) -> None:
@@ -754,6 +754,33 @@ def test_shared_provider_chunks_arrive_before_completion_without_split_excerpt_l
     assert b"pri" not in streamed
     assert b"vate" not in streamed
     assert b"safe " in streamed and b"tail" in streamed
+
+
+@pytest.mark.parametrize(
+    "excerpt",
+    ["Shared", "content", "[Shared content omitted.]"],
+)
+def test_shared_stream_omits_marker_collision_excerpts_split_across_provider_chunks(
+    tmp_path: Path, excerpt: str
+) -> None:
+    # Defect caught: a redaction replacement re-emits a Share excerpt that is
+    # a substring of the replacement marker. The installed TestModel splits
+    # standalone words in half and multiword output on spaces.
+    client, app = _client(tmp_path, max_shared_chars=len(excerpt))
+    model = CountingTestModel(call_tools=[], custom_output_text=excerpt)
+    app.state.professor_model_factory = _configured_factory(model)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+    assert client.post(
+        "/api/share", headers=AUTH,
+        json={"run_id": "run-one", "kind": "text", "content": excerpt},
+    ).status_code == 200
+
+    response = client.post("/api/guide", headers=AUTH, json=_run_input())
+    deltas = [event["delta"] for event in _events(response) if event["type"] == "TEXT_MESSAGE_CONTENT"]
+
+    assert response.status_code == 200
+    assert all(excerpt not in delta for delta in deltas)
+    assert excerpt not in "".join(deltas)
 
 
 def test_client_thread_id_cannot_select_another_server_session_history(tmp_path: Path) -> None:

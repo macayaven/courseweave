@@ -69,7 +69,6 @@ from courseweave.store import (
 
 _STATIC_ROOT = Path(__file__).parent / "static"
 _SESSION_COOKIE = "courseweave_session"
-_REDACTED_SHARED_CONTENT = "[Shared content omitted.]"
 
 
 class _CapabilityTokenMiddleware:
@@ -740,7 +739,7 @@ def _redact_shared_content(
 ) -> str:
     """Do not reflect a private excerpt through an AG-UI content event."""
     if shared is not None and (excerpt := shared["content"]):
-        content = content.replace(excerpt, "[Shared content omitted.]")
+        content = content.replace(excerpt, "")
     return content
 
 
@@ -766,7 +765,6 @@ class _SharedChunkRedactor:
                 self.carry = tail[-overlap:] if overlap else ""
                 return "".join(output)
             output.append(combined[position:match])
-            output.append(_REDACTED_SHARED_CONTENT)
             position = match + len(self.excerpt)
 
     def flush(self) -> str:
