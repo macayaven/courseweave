@@ -167,6 +167,33 @@ def test_chat_capability_denial_happens_before_model_construction() -> None:
     assert model.calls == 0
 
 
+@pytest.mark.parametrize("prompt", ["", "Hello", "  hi! ", "Thanks", "thank you."])
+def test_disabled_learner_chat_never_constructs_a_provider_for_social_or_empty_input(
+    prompt: str,
+) -> None:
+    # Defect caught: social or empty chat bypasses a resolved chat=false capability.
+    from courseweave.professor import CHAT_DISABLED_MESSAGE, ProfessorService
+
+    factory_calls = 0
+
+    def factory(_config: ProviderConfig) -> ModelResult:
+        nonlocal factory_calls
+        factory_calls += 1
+        raise AssertionError("chat=false must not construct a provider")
+
+    professor = ProfessorService(
+        manifest_for(chat=False), resolved(), LearnerState(), "learner",
+        ProviderConfig(provider="openai", model="local", api_key="not-a-secret"),
+        model_factory=factory,
+    )
+
+    outcome = professor.respond_sync(prompt)
+
+    assert outcome.status == "blocked"
+    assert outcome.content == CHAT_DISABLED_MESSAGE
+    assert factory_calls == 0
+
+
 def test_prediction_gate_requires_the_exact_prediction_record_before_model_call() -> None:
     # Defect caught: a missing or wrong prediction record permits result-seeking help.
     from courseweave.professor import PREDICTION_REQUIRED_MESSAGE, ProfessorService

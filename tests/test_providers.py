@@ -24,6 +24,16 @@ from courseweave.cli import app
 from courseweave.providers import ProviderConfig, create_model
 
 
+class _CloseTracker:
+    """Minimal owned-client double whose close is observable at the adapter boundary."""
+
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+
+
 class _StubHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -214,6 +224,35 @@ def test_missing_configuration_is_a_structured_not_configured_result() -> None:
     assert result.status == "not_configured"
     assert result.adapter is None
     assert result.missing == ("OPENAI_MODEL", "OPENAI_API_KEY")
+
+
+def test_timeout_client_is_closed_when_model_construction_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Defect caught: a timeout-owned HTTP client leaks if provider construction raises.
+    import courseweave.providers as providers
+
+    tracker = _CloseTracker()
+
+    def fail_provider(**_kwargs: object):
+        raise RuntimeError("provider construction failed")
+
+    monkeypatch.setattr(providers.httpx2, "AsyncClient", lambda **_kwargs: tracker)
+    monkeypatch.setattr(providers, "OpenAIProvider", fail_provider)
+
+    async def construct() -> None:
+        with pytest.raises(RuntimeError, match="provider construction failed"):
+            create_model(
+                ProviderConfig(
+                    provider="openai",
+                    model="stub-model",
+                    api_key="not-a-secret",
+                    timeout_seconds=1,
+                )
+            )
+        await asyncio.sleep(0)
+
+    asyncio.run(construct())
+
+    assert tracker.close_calls == 1
 
 
 @pytest.mark.parametrize(

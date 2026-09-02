@@ -90,7 +90,7 @@ class StagedProposal:
 
 
 class ProposalStager:
-    """Own proposal creation for one provider run and commit only after success."""
+    """Collect one validated, inert proposal candidate for one provider run."""
 
     def __init__(self) -> None:
         self._requests: list[ProposalRequest] = []
@@ -104,13 +104,9 @@ class ProposalStager:
         self._requests.append(request.model_copy(update={"id": proposal_id}))
         return StagedProposal(id=proposal_id)
 
-    def commit(self, store: CourseStore) -> list[Proposal]:
-        committed = [
-            store.create_proposal(request, f"teacher-suggestion-{request.id}")
-            for request in self._requests
-        ]
-        self._requests.clear()
-        return committed
+    def candidates(self) -> tuple[ProposalRequest, ...]:
+        """Return validated candidate data without performing a durable mutation."""
+        return tuple(self._requests)
 
     def discard(self) -> None:
         self._requests.clear()
@@ -251,11 +247,13 @@ class ProfessorService:
         self, request: str, model_result: ModelResult
     ) -> ProfessorOutcome:
         """Run a provider that was safely preflighted before stream creation."""
-        agent = self._agent_for(model_result)
         try:
+            agent = self._agent_for(model_result)
             result = await agent.run(request)
         except Exception:
             return ProfessorOutcome("provider_error", PROVIDER_ERROR_MESSAGE, self.policy)
+        finally:
+            await model_result.adapter.aclose()  # type: ignore[union-attr]
         return ProfessorOutcome("ok", str(result.output), self.policy)
 
     @asynccontextmanager
@@ -273,13 +271,16 @@ class ProfessorService:
         ``proposal_stager`` deliberately remains in-memory until the transport
         observes complete provider output and performs its post-run commit.
         """
-        agent = self._agent_for(
-            model_result,
-            proposal_stager=proposal_stager,
-            allow_proposals=allow_proposals,
-        )
-        async with agent.run_stream(request, message_history=message_history) as result:
-            yield result
+        try:
+            agent = self._agent_for(
+                model_result,
+                proposal_stager=proposal_stager,
+                allow_proposals=allow_proposals,
+            )
+            async with agent.run_stream(request, message_history=message_history) as result:
+                yield result
+        finally:
+            await model_result.adapter.aclose()  # type: ignore[union-attr]
 
     def respond_sync(self, request: str) -> ProfessorOutcome:
         """Synchronous convenience seam for non-AG-UI service callers."""
@@ -409,9 +410,7 @@ def gate_professor_request(
     policy: ProfessorPolicy, state: LearnerState, request: str
 ) -> ProfessorOutcome | None:
     """Evaluate deterministic policy before provider configuration or calls."""
-    if _is_substantive(request) and (
-        policy.capabilities is not None and not policy.capabilities.chat
-    ):
+    if policy.role == "learner" and policy.capabilities is not None and not policy.capabilities.chat:
         return ProfessorOutcome("blocked", CHAT_DISABLED_MESSAGE, policy)
     if _requires_prediction(policy, state) and _is_substantive(request):
         return ProfessorOutcome("blocked", PREDICTION_REQUIRED_MESSAGE, policy)

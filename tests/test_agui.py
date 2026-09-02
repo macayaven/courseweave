@@ -117,6 +117,16 @@ class CompletionTrackingModel(CountingTestModel):
         self.stream_closed = True
 
 
+class CloseTrackingClient:
+    """A fake timeout client used only to verify CourseWeave's ownership cleanup."""
+
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+
+
 def _manifest(
     *,
     kind: str = "read",
@@ -218,6 +228,15 @@ def _configured_factory(model: TestModel):
     return factory
 
 
+def _configured_factory_with_client(model: TestModel, client: CloseTrackingClient):
+    def factory(_config: ProviderConfig) -> ModelResult:
+        adapter = ProviderAdapter(model)
+        adapter.http_client = client
+        return ModelResult(status="configured", adapter=adapter)
+
+    return factory
+
+
 @pytest.mark.parametrize("kind", ["selection", "cell", "output", "text"])
 def test_share_accepts_each_contract_kind_and_returns_metadata_only(tmp_path: Path, kind: str) -> None:
     # Defect caught: Share accepts an undocumented kind or reflects private excerpt content.
@@ -254,6 +273,140 @@ def test_share_enforces_exact_size_boundary_and_hides_rejected_content(tmp_path:
     assert rejected.status_code == 422
     assert rejected.json()["code"] == "validation_error"
     assert "secret-8" not in rejected.text
+
+
+def test_share_is_admitted_and_consumed_only_by_its_cookie_session_role_and_source(
+    tmp_path: Path,
+) -> None:
+    # Defect caught: a client-chosen run ID lets another session, role, or source consume private Share text.
+    _unused, app = _client(tmp_path, max_shared_chars=100)
+    model = CountingTestModel(call_tools=[], custom_output_text="safe guidance")
+    app.state.professor_model_factory = _configured_factory(model)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+    with TestClient(app) as learner_a, TestClient(app) as learner_b:
+        for source_id in ("source-a", "source-b"):
+            assert learner_a.post(
+                "/api/context", headers=AUTH,
+                json={
+                    "source_id": source_id, "sequence": 1, "active_path": "lesson.md",
+                    "active_cell_id": None, "active_cell_tags": [], "surface_kind": None,
+                    "explicit_module_id": None, "explicit_phase_id": None,
+                    "video_seconds": None, "terminal_surface_id": None,
+                },
+            ).status_code == 200
+        admitted = learner_a.post(
+            "/api/share", headers=AUTH,
+            json={"run_id": "bound-run", "kind": "text", "content": "learner-a-secret", "source_id": "source-a"},
+        )
+        cross_session = learner_b.post(
+            "/api/guide", headers=AUTH,
+            json=_run_input(run_id="bound-run", forwardedProps={"source_id": "source-a"}),
+        )
+        cross_role = learner_a.post(
+            "/api/author/guide", headers=AUTH,
+            json=_run_input(run_id="bound-run", forwardedProps={"source_id": "source-a"}),
+        )
+        cross_source = learner_a.post(
+            "/api/guide", headers=AUTH,
+            json=_run_input(run_id="bound-run", forwardedProps={"source_id": "source-b"}),
+        )
+
+    assert admitted.status_code == 200
+    assert "courseweave_session" in admitted.headers["set-cookie"]
+    assert cross_session.status_code == 200
+    assert cross_role.status_code == 200
+    assert cross_source.status_code == 403
+    received = [
+        part.content
+        for request in model.request_messages
+        for message in request
+        for part in message.parts
+        if isinstance(getattr(part, "content", None), str)
+    ]
+    assert "learner-a-secret" not in received
+
+
+def test_share_entries_expire_lazily_and_evict_oldest_entries_at_the_bound(tmp_path: Path) -> None:
+    # Defect caught: abandoned Share excerpts remain indefinitely or grow without a process-local bound.
+    client, app = _client(tmp_path, max_shared_chars=100)
+    model = CountingTestModel(call_tools=[], custom_output_text="safe guidance")
+    app.state.professor_model_factory = _configured_factory(model)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+    now = [0.0]
+    app.state.ephemeral_clock = lambda: now[0]
+    assert client.post(
+        "/api/share", headers=AUTH,
+        json={"run_id": "expired-run", "kind": "text", "content": "expired-secret"},
+    ).status_code == 200
+    now[0] = 301.0
+    expired = client.post("/api/guide", headers=AUTH, json=_run_input(run_id="expired-run"))
+    for number in range(65):
+        assert client.post(
+            "/api/share", headers=AUTH,
+            json={"run_id": f"bounded-{number}", "kind": "text", "content": "x"},
+        ).status_code == 200
+
+    assert expired.status_code == 200
+    received = [
+        part.content
+        for request in model.request_messages
+        for message in request
+        for part in message.parts
+        if isinstance(getattr(part, "content", None), str)
+    ]
+    assert "expired-secret" not in received
+    assert len(app.state.shared_runs) == 64
+
+
+def test_guide_state_uses_a_bounded_history_window_and_expires_sessions(tmp_path: Path) -> None:
+    # Defect caught: a long-lived service retains unbounded history or reuses expired identities.
+    client, app = _client(tmp_path)
+    model = CountingTestModel(call_tools=[], custom_output_text="assistant reply")
+    app.state.professor_model_factory = _configured_factory(model)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+    now = [0.0]
+    app.state.ephemeral_clock = lambda: now[0]
+    for number in range(17):
+        assert client.post(
+            "/api/guide", headers=AUTH,
+            json=_run_input(run_id=f"history-{number}", prompt=f"turn-{number}"),
+        ).status_code == 200
+
+    history = next(iter(app.state.guide_history.values()))
+    assert len(history) == 32
+    assert all("turn-0" not in str(message.parts) for message in history)
+    now[0] = 1801.0
+    renewed = client.post(
+        "/api/guide", headers=AUTH, json=_run_input(run_id="renewed", prompt="fresh turn"),
+    )
+
+    assert "courseweave_session" in renewed.headers["set-cookie"]
+    fresh_history = next(iter(app.state.guide_history.values()))
+    assert len(fresh_history) == 2
+    assert "fresh turn" in str(fresh_history[0].parts)
+
+
+def test_process_local_session_and_interruption_markers_evict_deterministically(tmp_path: Path) -> None:
+    # Defect caught: unique cookie sessions or interrupted run markers grow without an exact bounded lifetime.
+    import courseweave.api as api
+
+    unused_client, app = _client(tmp_path, chat=False)
+    del unused_client
+    now = [0.0]
+    app.state.ephemeral_clock = lambda: now[0]
+    for number in range(65):
+        with TestClient(app) as client:
+            client.post("/api/guide", headers=AUTH, json=_run_input(run_id=f"session-{number}"))
+        api._mark_interrupted(app, f"session-{number}", "learner", "source", f"run-{number}")
+
+    assert len(app.state.guide_sessions) == 64
+    assert len(app.state.interrupted_runs) == 64
+    assert all(key[-1] != "run-0" for key in app.state.interrupted_runs)
+    now[0] = 1801.0
+    api._cleanup_ephemeral_state(app)
+
+    assert app.state.guide_sessions == {}
+    assert app.state.interrupted_runs == {}
 
 
 @pytest.mark.parametrize(
@@ -326,6 +479,7 @@ def test_fixed_gate_streams_before_provider_configuration_and_clears_that_run_sh
         "/api/share", headers=AUTH,
         json={"run_id": "run-one", "kind": "text", "content": "private"},
     )
+    session_cookie = client.cookies["courseweave_session"]
     response = client.post("/api/guide", headers=AUTH, json=_run_input(prompt="Explain it."))
 
     assert response.status_code == 200
@@ -454,12 +608,14 @@ def test_closing_an_active_guide_stream_marks_interruption_and_clears_share(tmp_
     # Defect caught: a client disconnect leaves run-scoped Share data or silently resumable work behind.
     client, app = _client(tmp_path)
     model = CountingTestModel(custom_output_text="trusted response")
-    app.state.professor_model_factory = _configured_factory(model)
+    timeout_client = CloseTrackingClient()
+    app.state.professor_model_factory = _configured_factory_with_client(model, timeout_client)
     app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
     client.post(
         "/api/share", headers=AUTH,
         json={"run_id": "run-one", "kind": "text", "content": "private"},
     )
+    session_cookie = client.cookies["courseweave_session"]
 
     body = json.dumps(_run_input()).encode()
 
@@ -483,7 +639,7 @@ def test_closing_an_active_guide_stream_marks_interruption_and_clears_share(tmp_
                 "path": "/api/guide",
                 "raw_path": b"/api/guide",
                 "query_string": b"",
-                "headers": [(b"authorization", f"Bearer {TOKEN}".encode()), (b"content-type", b"application/json")],
+                "headers": [(b"authorization", f"Bearer {TOKEN}".encode()), (b"content-type", b"application/json"), (b"cookie", f"courseweave_session={session_cookie}".encode())],
                 "client": ("127.0.0.1", 12345),
                 "server": ("127.0.0.1", 8000),
             },
@@ -493,7 +649,8 @@ def test_closing_an_active_guide_stream_marks_interruption_and_clears_share(tmp_
     )
 
     assert app.state.shared_runs == {}
-    assert "run-one" in app.state.interrupted_runs
+    assert any(key[-1] == "run-one" for key in app.state.interrupted_runs)
+    assert timeout_client.close_calls == 1
 
 
 def test_second_share_for_a_run_is_rejected_without_replacing_the_first_excerpt(tmp_path: Path) -> None:
@@ -511,9 +668,8 @@ def test_second_share_for_a_run_is_rejected_without_replacing_the_first_excerpt(
     assert first.status_code == 200
     assert second.status_code == 409
     assert second.json()["code"] == "validation_error"
-    assert app.state.shared_runs["run-one"] == {
-        "kind": "text", "label": None, "content": "first"
-    }
+    shared = next(iter(app.state.shared_runs.values()))
+    assert (shared.kind, shared.label, shared.content) == ("text", None, "first")
 
 
 def test_server_phase_sharing_policy_rejects_before_provider_and_clears_share(tmp_path: Path) -> None:
@@ -522,15 +678,13 @@ def test_server_phase_sharing_policy_rejects_before_provider_and_clears_share(tm
     model = CountingTestModel(custom_output_text="must not run")
     app.state.professor_model_factory = _configured_factory(model)
     app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
-    assert client.post(
+    admitted = client.post(
         "/api/share", headers=AUTH,
         json={"run_id": "run-one", "kind": "selection", "content": "private"},
-    ).status_code == 200
+    )
 
-    response = client.post("/api/guide", headers=AUTH, json=_run_input())
-
-    assert response.status_code == 403
-    assert response.json()["code"] == "forbidden"
+    assert admitted.status_code == 403
+    assert admitted.json()["code"] == "forbidden"
     assert model.calls == 0
     assert app.state.shared_runs == {}
 
@@ -542,6 +696,7 @@ def test_malformed_agui_input_with_recoverable_run_id_clears_pending_share(tmp_p
         "/api/share", headers=AUTH,
         json={"run_id": "run-one", "kind": "text", "content": "private"},
     ).status_code == 200
+    session_cookie = client.cookies["courseweave_session"]
 
     response = client.post(
         "/api/guide", headers=AUTH,
@@ -582,6 +737,75 @@ def test_provider_failure_discards_proposals_staged_during_that_run(tmp_path: Pa
 
     assert [event["type"] for event in _events(response)] == ["RUN_STARTED", "RUN_ERROR"]
     assert app.state.course_store.list_proposals() == []
+
+
+def test_successful_agui_proposal_is_an_inert_candidate_until_rest_persists_it(tmp_path: Path) -> None:
+    # Defect caught: guide output writes a durable proposal instead of emitting an inert candidate.
+    client, app = _client(tmp_path, course_proposal=True)
+    model = ProposalSuccessModel()
+    app.state.professor_model_factory = _configured_factory(model)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+
+    response = client.post("/api/guide", headers=AUTH, json=_run_input())
+    events = _events(response)
+
+    candidate_events = [event for event in events if event["type"] == "CUSTOM"]
+    assert response.status_code == 200
+    assert app.state.course_store.get_state().revision == 0
+    assert app.state.course_store.list_proposals() == []
+    assert len(candidate_events) == 1
+    assert candidate_events[0]["name"] == "courseweave.proposal_candidate"
+    candidate = candidate_events[0]["value"]["candidate"]
+    assert candidate["origin"] == "teacher_suggested"
+    assert [event["type"] for event in events][-2:] == ["CUSTOM", "RUN_FINISHED"]
+
+    with TestClient(app) as other_session:
+        rejected = other_session.post(
+            "/api/proposals",
+            headers={**AUTH, "Idempotency-Key": "wrong-session"},
+            json={"candidate_id": candidate["id"]},
+        )
+
+    persisted = client.post(
+        "/api/proposals",
+        headers={**AUTH, "Idempotency-Key": "persist-agui-candidate"},
+        json={"candidate_id": candidate["id"]},
+    )
+
+    assert rejected.status_code == 403
+    assert persisted.status_code == 201
+    assert persisted.json()["id"] == candidate["id"]
+    assert len(app.state.course_store.list_proposals()) == 1
+
+
+def test_agui_candidate_failure_and_cancellation_emit_nothing_and_keep_no_candidate(tmp_path: Path) -> None:
+    # Defect caught: failed or cancelled guide work leaves an inert proposal candidate consumable.
+    client, app = _client(tmp_path, course_proposal=True)
+    failing = ProposalThenFailModel()
+    app.state.professor_model_factory = _configured_factory(failing)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+
+    failed = client.post("/api/guide", headers=AUTH, json=_run_input())
+
+    assert [event["type"] for event in _events(failed)] == ["RUN_STARTED", "RUN_ERROR"]
+    assert app.state.proposal_candidates == {}
+    assert app.state.course_store.list_proposals() == []
+
+
+@pytest.mark.parametrize("model", [CountingTestModel(custom_output_text="ok"), FailingTestModel()])
+def test_guide_closes_its_owned_timeout_client_on_success_and_provider_error(
+    tmp_path: Path, model: CountingTestModel
+) -> None:
+    # Defect caught: a guide-owned timeout client remains open after either terminal provider path.
+    client, app = _client(tmp_path)
+    timeout_client = CloseTrackingClient()
+    app.state.professor_model_factory = _configured_factory_with_client(model, timeout_client)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+
+    response = client.post("/api/guide", headers=AUTH, json=_run_input())
+
+    assert response.status_code == 200
+    assert timeout_client.close_calls == 1
 
 
 def test_normal_runs_keep_only_server_owned_user_and_assistant_history(tmp_path: Path) -> None:
@@ -654,6 +878,7 @@ def test_mid_provider_disconnect_cancels_token_stream_and_discards_run_state(tmp
         "/api/share", headers=AUTH,
         json={"run_id": "run-one", "kind": "text", "content": "private"},
     ).status_code == 200
+    session_cookie = client.cookies["courseweave_session"]
     body = json.dumps(_run_input()).encode()
     content_started = asyncio.Event()
 
@@ -674,7 +899,7 @@ def test_mid_provider_disconnect_cancels_token_stream_and_discards_run_state(tmp
                 "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
                 "method": "POST", "scheme": "http", "path": "/api/guide",
                 "raw_path": b"/api/guide", "query_string": b"",
-                "headers": [(b"authorization", f"Bearer {TOKEN}".encode()), (b"content-type", b"application/json")],
+                "headers": [(b"authorization", f"Bearer {TOKEN}".encode()), (b"content-type", b"application/json"), (b"cookie", f"courseweave_session={session_cookie}".encode())],
                 "client": ("127.0.0.1", 12345), "server": ("127.0.0.1", 8000),
             }, receive, send,
         )
@@ -682,7 +907,7 @@ def test_mid_provider_disconnect_cancels_token_stream_and_discards_run_state(tmp
 
     assert model.calls == 1
     assert app.state.shared_runs == {}
-    assert "run-one" in app.state.interrupted_runs
+    assert any(key[-1] == "run-one" for key in app.state.interrupted_runs)
 
 
 def test_provider_text_is_forwarded_as_multiple_agui_content_chunks(tmp_path: Path) -> None:
@@ -731,7 +956,7 @@ def test_terminal_send_failure_discards_staged_proposal_and_server_history(tmp_p
 
     assert app.state.course_store.list_proposals() == []
     assert app.state.guide_history == {}
-    assert "run-one" in app.state.interrupted_runs
+    assert any(key[-1] == "run-one" for key in app.state.interrupted_runs)
 
 
 def test_shared_provider_chunks_arrive_before_completion_without_full_excerpt_leak(tmp_path: Path) -> None:
@@ -744,6 +969,7 @@ def test_shared_provider_chunks_arrive_before_completion_without_full_excerpt_le
         "/api/share", headers=AUTH,
         json={"run_id": "run-one", "kind": "text", "content": "private"},
     ).status_code == 200
+    session_cookie = client.cookies["courseweave_session"]
     body = json.dumps(_run_input()).encode()
     observed: list[tuple[bytes, bool]] = []
 
@@ -763,7 +989,7 @@ def test_shared_provider_chunks_arrive_before_completion_without_full_excerpt_le
                 "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
                 "http_version": "1.1", "method": "POST", "scheme": "http",
                 "path": "/api/guide", "raw_path": b"/api/guide", "query_string": b"",
-                "headers": [(b"authorization", f"Bearer {TOKEN}".encode()), (b"content-type", b"application/json")],
+                "headers": [(b"authorization", f"Bearer {TOKEN}".encode()), (b"content-type", b"application/json"), (b"cookie", f"courseweave_session={session_cookie}".encode())],
                 "client": ("127.0.0.1", 12345), "server": ("127.0.0.1", 8000),
             }, receive, capture,
         )

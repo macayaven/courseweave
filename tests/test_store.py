@@ -570,7 +570,7 @@ class TestStateAndProposalAPI:
             json={
                 "id": "api-profile",
                 "type": "profile_patch",
-                "origin": "teacher_suggested",
+                "origin": "student_requested",
                 "summary": "Remember pace",
                 "target": "learner_profile",
                 "payload": {"changes": {"pace": "measured"}},
@@ -616,7 +616,7 @@ class TestStateAndProposalAPI:
             json={
                 "id": "editable",
                 "type": "profile_patch",
-                "origin": "teacher_suggested",
+                "origin": "student_requested",
                 "summary": "Initial",
                 "target": "learner_profile",
                 "payload": {"changes": {"pace": "slow"}},

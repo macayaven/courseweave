@@ -113,6 +113,13 @@ class ProviderAdapter:
     """Runs a configured Pydantic AI model and normalizes provider failures."""
 
     model: OpenAIChatModel | AnthropicModel
+    http_client: httpx2.AsyncClient | None = field(default=None, repr=False)
+
+    async def aclose(self) -> None:
+        """Close the per-run timeout client exactly once when this adapter owns it."""
+        if self.http_client is not None:
+            client, self.http_client = self.http_client, None
+            await client.aclose()
 
     async def complete(self, prompt: str, *, stream: bool = False) -> ProviderCallResult:
         """Return provider text or a typed, credential-safe failure."""
@@ -142,25 +149,36 @@ def create_model(config: ProviderConfig) -> ModelResult:
         if config.timeout_seconds is not None
         else None
     )
-    if config.provider == "openai":
-        provider = OpenAIProvider(
-            base_url=config.base_url,
-            api_key=config.api_key,
-            http_client=http_client,
-        )
-        return ModelResult(
-            status="configured",
-            adapter=ProviderAdapter(OpenAIChatModel(config.model, provider=provider)),
-        )
-    provider = AnthropicProvider(
-        base_url=config.base_url,
-        api_key=config.api_key,
-        http_client=http_client,
-    )
-    return ModelResult(
-        status="configured",
-        adapter=ProviderAdapter(AnthropicModel(config.model, provider=provider)),
-    )
+    try:
+        if config.provider == "openai":
+            provider = OpenAIProvider(
+                base_url=config.base_url,
+                api_key=config.api_key,
+                http_client=http_client,
+            )
+            model = OpenAIChatModel(config.model, provider=provider)
+        else:
+            provider = AnthropicProvider(
+                base_url=config.base_url,
+                api_key=config.api_key,
+                http_client=http_client,
+            )
+            model = AnthropicModel(config.model, provider=provider)
+    except BaseException:
+        if http_client is not None:
+            _close_construction_client(http_client)
+        raise
+    return ModelResult(status="configured", adapter=ProviderAdapter(model, http_client))
+
+
+def _close_construction_client(client: httpx2.AsyncClient) -> None:
+    """Close a just-created client in either sync or async factory callers."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(client.aclose())
+    else:
+        loop.create_task(client.aclose())
 
 
 def _nonempty(value: object) -> str | None:
