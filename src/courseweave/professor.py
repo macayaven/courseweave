@@ -8,6 +8,7 @@ automatic context contributes identifiers and never shared workspace content.
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -45,8 +46,18 @@ _POSTURES = {
     "ship": "Present named verification and learner-recorded receipts without inflating claims.",
 }
 _GENERAL_POSTURE = "Provide general course orientation without assuming an active phase."
-_RESULT_SEEKING_TERMS = ("answer", "result", "solution", "outcome", "what happens")
 _NON_SUBSTANTIVE_REQUESTS = {"", "hello", "hi", "thanks", "thank you"}
+_PREDICTION_REVEAL_PATTERN = re.compile(
+    r"\b(?:correct|pass|expected|answer|result|output|solution|observe|outcome|reveal)\b"
+)
+_PREDICTION_PROCESS_PATTERN = re.compile(
+    r"\b(?:how|where)\b.*\b(?:record|submit)\b.*\bprediction\b"
+)
+_PREDICTION_STATEMENT_PREFIXES = (
+    "i predict",
+    "my prediction is",
+    "my hypothesis is",
+)
 
 
 class ProfessorPolicyError(ValueError):
@@ -188,7 +199,7 @@ class ProfessorService:
             self.policy.capabilities is not None and not self.policy.capabilities.chat
         ):
             return ProfessorOutcome("blocked", CHAT_DISABLED_MESSAGE, self.policy)
-        if _requires_prediction(self.policy, self.learner_state) and _is_result_seeking(request):
+        if _requires_prediction(self.policy, self.learner_state) and not _prediction_request_allowed(request):
             return ProfessorOutcome("blocked", PREDICTION_REQUIRED_MESSAGE, self.policy)
         if (
             self.policy.phase_kind == "audit"
@@ -255,7 +266,7 @@ class ProfessorService:
             name="courseweave-professor",
         )
         for proposal_type in sorted(self.policy.proposal_types):
-            agent.tool(
+            agent.tool_plain(
                 self._suggestion_tool(proposal_type),
                 name=f"suggest_{proposal_type}",
                 description="Create one inert pending teacher suggestion for learner review.",
@@ -317,9 +328,16 @@ def _requires_prediction(policy: ProfessorPolicy, state: LearnerState) -> bool:
     return key not in state.predictions
 
 
-def _is_result_seeking(request: str) -> bool:
-    text = request.casefold()
-    return any(term in text for term in _RESULT_SEEKING_TERMS)
+def _prediction_request_allowed(request: str) -> bool:
+    """Allow only narrow non-answer-seeking help before a prediction exists."""
+    text = request.strip().casefold()
+    if _PREDICTION_REVEAL_PATTERN.search(text):
+        return False
+    if text.strip(" .,!?:;") in _NON_SUBSTANTIVE_REQUESTS:
+        return True
+    if _PREDICTION_PROCESS_PATTERN.search(text):
+        return True
+    return text.startswith(_PREDICTION_STATEMENT_PREFIXES)
 
 
 def _is_substantive(request: str) -> bool:

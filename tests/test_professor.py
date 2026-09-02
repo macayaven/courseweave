@@ -29,6 +29,17 @@ class CountingTestModel(TestModel):
         return await super().request(*args, **kwargs)
 
 
+class ProposalTestModel(CountingTestModel):
+    """Local model that makes one specified valid inert-proposal tool call."""
+
+    def __init__(self, tool_args: dict[str, object]) -> None:
+        super().__init__(call_tools=list(tool_args), custom_output_text="suggested")
+        self.tool_args = tool_args
+
+    def gen_tool_args(self, tool_def):  # type: ignore[override]
+        return self.tool_args[tool_def.name]
+
+
 def manifest_for(
     kind: str = "read",
     *,
@@ -203,6 +214,51 @@ def test_prediction_gate_opens_after_the_exact_prediction_record_exists() -> Non
     assert model.calls == 1
 
 
+@pytest.mark.parametrize(
+    ("prompt", "allowed"),
+    [
+        ("Hello", True),
+        ("Thanks!", True),
+        ("Where do I record my prediction?", True),
+        ("How do I submit a prediction?", True),
+        ("I predict the loop will stop.", True),
+        ("My prediction is that the graph has a cycle.", True),
+        ("My hypothesis is the values are equal.", True),
+        ("Show me the expected output.", False),
+        ("Did the test pass?", False),
+        ("Reveal the correct response.", False),
+        ("What should I observe?", False),
+        ("Can you help with my prediction?", False),
+        ("Record my prediction for me.", False),
+        ("I predict the correct answer is C.", False),
+        ("How do I submit the expected output?", False),
+    ],
+)
+def test_prediction_gate_blocks_every_substantive_request_outside_its_narrow_allowlist(
+    prompt: str, allowed: bool
+) -> None:
+    # Defect caught: result-seeking paraphrases or near-miss prediction prompts bypass predict-first.
+    from courseweave.professor import PREDICTION_REQUIRED_MESSAGE, ProfessorService
+
+    model = CountingTestModel(custom_output_text="model answer")
+    professor = ProfessorService(
+        manifest_for("predict", teacher_mode="socratic_guide"), resolved(), LearnerState(), "learner",
+        ProviderConfig(provider="openai", model="local", api_key="not-a-secret"),
+        model_factory=configured_factory(model),
+    )
+
+    outcome = professor.respond_sync(prompt)
+
+    if allowed:
+        assert outcome.status == "ok"
+        assert outcome.content == "model answer"
+        assert model.calls == 1
+    else:
+        assert outcome.status == "blocked"
+        assert outcome.content == PREDICTION_REQUIRED_MESSAGE
+        assert model.calls == 0
+
+
 def test_observer_audit_denial_happens_before_model_construction() -> None:
     # Defect caught: observer audit help is delegated to a model instead of deterministically locked.
     from courseweave.professor import OBSERVER_ONLY_MESSAGE, ProfessorService
@@ -281,6 +337,65 @@ def test_learner_proposal_types_follow_phase_capabilities_exactly(
     )
 
     assert policy.proposal_types == expected
+
+
+def test_learner_agent_exposes_exact_phase_tools_and_a_model_call_creates_pending_proposal(
+    tmp_path: Path,
+) -> None:
+    # Defect caught: model-visible proposal tools differ from policy or bypass pending store creation.
+    from courseweave.professor import ProfessorService
+
+    store = CourseStore(tmp_path)
+    model = ProposalTestModel(
+        {
+            "suggest_profile_patch": {
+                "summary": "Remember the learner prefers examples.",
+                "target": "learner_profile",
+                "payload": {"changes": {"preference": "examples"}},
+            }
+        }
+    )
+    professor = ProfessorService(
+        manifest_for(profile=True, course=True, workspace=True), resolved(), store.get_state(), "learner",
+        ProviderConfig(provider="openai", model="local", api_key="not-a-secret"),
+        store=store,
+        model_factory=configured_factory(model),
+    )
+
+    outcome = professor.respond_sync("Suggest a profile preference.")
+
+    assert outcome.status == "ok"
+    assert {
+        tool.name for tool in model.last_model_request_parameters.function_tools
+    } == {
+        "suggest_profile_patch",
+        "suggest_manifest_replace",
+        "suggest_workspace_file_replace",
+    }
+    proposals = store.list_proposals()
+    assert len(proposals) == 1
+    assert proposals[0].status == "pending"
+    assert proposals[0].origin == "teacher_suggested"
+    assert store.get_state().profile == {}
+
+
+def test_author_agent_exposes_only_the_manifest_suggestion_tool() -> None:
+    # Defect caught: Author agent wiring exposes learner proposal tools at the model boundary.
+    from courseweave.professor import ProfessorService
+
+    model = CountingTestModel(call_tools=[], custom_output_text="review")
+    professor = ProfessorService(
+        manifest_for(profile=True, course=False, workspace=True), resolved(), LearnerState(), "author",
+        ProviderConfig(provider="openai", model="local", api_key="not-a-secret"),
+        model_factory=configured_factory(model),
+    )
+
+    outcome = professor.respond_sync("Review the course outline.")
+
+    assert outcome.status == "ok"
+    assert {
+        tool.name for tool in model.last_model_request_parameters.function_tools
+    } == {"suggest_manifest_replace"}
 
 
 def test_allowed_suggestion_creates_only_a_pending_teacher_proposal(tmp_path: Path) -> None:

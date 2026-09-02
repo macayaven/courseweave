@@ -94,3 +94,73 @@ No blocking concerns. Deterministic request classifiers intentionally use a
 small fixed vocabulary for result-seeking and a fixed set of social-only
 messages; Task 3C can pass the same raw user prompt to this service without
 granting the model authority to reinterpret a denied request.
+
+## Fix round 1/5: predict-first allowlist and verified model-tool wiring
+
+### Findings addressed
+
+- Predict-first now blocks every request while its required record is absent,
+  except greetings/thanks, narrow `how`/`where` record-or-submit questions, and
+  clear learner-owned statements beginning `I predict`, `My prediction is`, or
+  `My hypothesis is`. Validation/reveal vocabulary (`correct`, `pass`,
+  `expected`, `answer`, `result`, `output`, `solution`, `observe`, `outcome`,
+  and `reveal`) overrides those allow paths and remains blocked.
+- Pydantic AI proposal callbacks are now registered as plain tools. Focused
+  tests exercise the actual model-visible schemas: learner gets exactly profile,
+  manifest, and workspace suggestion tools when enabled; Author gets only
+  manifest suggestion. A local test model invokes the profile tool through the
+  agent and the real store records only a pending `teacher_suggested` proposal.
+
+### RED evidence
+
+The first test edit used pytest's reserved `request` parameter name. This was a
+test-collection mistake, corrected before evaluating the production behavior:
+
+```text
+$ uv run pytest tests/test_professor.py -q
+ERROR tests/test_professor.py
+'request' is a reserved name and cannot be used in @pytest.mark.parametrize
+1 error in 1.11s
+```
+
+The corrected RED command then exposed the intended production defects:
+
+```text
+$ uv run pytest tests/test_professor.py -q
+9 failed, 28 passed in 1.53s
+```
+
+Seven common result-seeking or near-miss prompts returned `ok` before a
+prediction. The two model-tool tests failed with Pydantic AI's explicit schema
+error that the proposal callback was registered as a context-taking tool even
+though it has no `RunContext` parameter.
+
+### GREEN and full-suite evidence
+
+```text
+$ uv run pytest tests/test_professor.py -q
+.....................................                                    [100%]
+37 passed in 1.09s
+```
+
+The subsequent complete-suite command and output are recorded below after the
+staged diff review:
+
+```text
+$ git diff --check && uv run pytest -q
+........................................................................ [ 38%]
+........................................................................ [ 77%]
+.........................................                                [100%]
+185 passed in 16.49s
+```
+
+### Fix self-review
+
+- The reveal-term check precedes every allow condition, so `I predict the
+  correct answer ...` and process-question near misses remain deterministic
+  denials.
+- Model tool names are asserted at the Pydantic AI model boundary, rather than
+  only in the local policy object.
+- The executed tool test uses the real `CourseStore`; it checks pending status,
+  teacher origin, and unchanged learner profile, so no automatic target mutation
+  can satisfy the test.
