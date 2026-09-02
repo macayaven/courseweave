@@ -12,14 +12,33 @@ import {
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
+import { PageConfig } from '@jupyterlab/coreutils';
 import { Widget } from '@lumino/widgets';
 
 const PLUGIN_ID = 'courseweave:bridge';
 const OPEN_GUIDE_COMMAND = 'courseweave:open-guide';
 const GUIDE_WIDGET_ID = 'courseweave-guide';
 
-/** Default loopback origin of the CourseWeave service. */
+/**
+ * Non-persisted page-config option carrying the CourseWeave service URL.
+ * Task 6 injects it into the authenticated Jupyter server page configuration
+ * from the `COURSEWEAVE_URL` environment variable of the owned child process;
+ * nothing is read from disk.
+ */
+const SERVICE_URL_OPTION = 'courseweaveServiceUrl';
+
+/** Loopback fallback used only when the page config provides no URL. */
 const DEFAULT_SERVICE_ORIGIN = 'http://127.0.0.1:8765';
+
+/**
+ * Resolve the service origin from Jupyter page configuration, so custom
+ * ports and hosts chosen at launch work without rebuilding. The capability
+ * token is server-side state and never appears in the iframe URL.
+ */
+function resolveServiceOrigin(): string {
+  const configured = PageConfig.getOption(SERVICE_URL_OPTION).replace(/\/+$/, '');
+  return configured || DEFAULT_SERVICE_ORIGIN;
+}
 
 /**
  * The sandboxed guide iframe. `allow-scripts` and `allow-same-origin` let the
@@ -34,7 +53,7 @@ class CourseWeaveGuide extends Widget {
     const iframe = document.createElement('iframe');
     iframe.className = 'cw-Guide-iframe';
     iframe.title = 'CourseWeave guide';
-    iframe.src = `${serviceOrigin.replace(/\/+$/, '')}/learn/`;
+    iframe.src = `${serviceOrigin}/learn/`;
     iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
     iframe.setAttribute('referrerpolicy', 'no-referrer');
     node.appendChild(iframe);
@@ -65,20 +84,31 @@ function installOriginGuard(serviceOrigin: string): void {
 const plugin: JupyterFrontEndPlugin<void> = {
   id: PLUGIN_ID,
   description:
-    'Persistent CourseWeave guide rail: one sandboxed iframe, origin-guarded messages, no React.',
+    'Persistent CourseWeave guide rail: one sandboxed iframe, origin-guarded messages.',
   autoStart: true,
   requires: [ILabShell],
   activate: (app: JupyterFrontEnd, shell: ILabShell): void => {
-    const serviceOrigin = DEFAULT_SERVICE_ORIGIN;
+    const serviceOrigin = resolveServiceOrigin();
     let guide: CourseWeaveGuide | null = null;
 
     const openGuide = (): void => {
-      if (!guide) {
-        guide = new CourseWeaveGuide(serviceOrigin);
-        guide.title.closable = true;
-        shell.add(guide, 'right', { rank: 900 });
+      let current = guide;
+      if (current === null || current.isDisposed) {
+        current = new CourseWeaveGuide(serviceOrigin);
+        const widget = current;
+        // Clear the tracked reference when the widget is closed/disposed so
+        // the command recreates the guide instead of touching a disposed
+        // widget.
+        widget.disposed.connect(() => {
+          if (guide === widget) {
+            guide = null;
+          }
+        });
+        guide = current;
+        current.title.closable = true;
+        shell.add(current, 'right', { rank: 900 });
       }
-      shell.activateById(guide.id);
+      shell.activateById(current.id);
     };
 
     app.commands.addCommand(OPEN_GUIDE_COMMAND, {
