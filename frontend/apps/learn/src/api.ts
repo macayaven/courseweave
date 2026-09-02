@@ -110,6 +110,20 @@ export function createCourseweaveClient(runtime: RuntimeConfiguration) {
     return body as T;
   }
 
+  async function streamRequest(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+    const response = await fetch(`${serviceOrigin}${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${capabilityToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body), signal, credentials: 'include', cache: 'no-store'
+    });
+    if (!response.ok) {
+      const error: unknown = await response.json().catch(() => null);
+      throw new CourseweaveApiError(response.status, asErrorEnvelope(error, capabilityToken));
+    }
+    if (response.body === null) throw new CourseweaveApiError(502, { code: 'invalid_stream', message: 'CourseWeave returned an invalid teacher stream.', details: {} });
+    return response;
+  }
+
   return {
     getCourse: (signal?: AbortSignal) => request<CourseManifest>('/api/course', {}, signal),
     getState: (signal?: AbortSignal) => request<LearnerState>('/api/state', {}, signal),
@@ -121,6 +135,9 @@ export function createCourseweaveClient(runtime: RuntimeConfiguration) {
       }
       return context;
     },
+    postGuide: (body: { threadId: string; runId: string; messages: Array<{ id: string; role: 'user'; content: string }>; tools: []; context: []; forwardedProps: { source_id?: string } }, signal?: AbortSignal) => streamRequest('/api/guide', body, signal),
+    share: (body: { run_id: string; kind: 'selection' | 'cell' | 'output' | 'text'; content: string; label?: string; source_id?: string }, signal?: AbortSignal) => request<{ run_id: string; kind: string; char_count: number }>('/api/share', { method: 'POST', body: JSON.stringify(body) }, signal),
+    createProposal: (candidateId: string, signal?: AbortSignal) => request<Proposal>('/api/proposals', { method: 'POST', headers: { 'Idempotency-Key': uuid() }, body: JSON.stringify({ candidate_id: candidateId }) }, signal),
     patchState: (
       body: { expected_revision: number; operation: StateOperation },
       signal?: AbortSignal

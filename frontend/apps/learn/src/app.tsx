@@ -7,6 +7,8 @@ import { Dashboard } from './dashboard';
 import { PhaseCard } from './phase-card';
 import { PredictionCard } from './prediction-card';
 import { ProposalDrawer } from './proposal-drawer';
+import { TeacherThread } from './teacher-thread';
+import { ReconnectPanel } from './reconnect';
 import { useRuntimeBootstrap } from './runtime';
 
 export interface LearnHeaderProps {
@@ -59,7 +61,7 @@ export function LearnHeader({ course, active, provider, timeBudget, children }: 
 export function LearnApp() {
   const runtime = useRuntimeBootstrap();
   const [data, setData] = useState<{ course: CourseManifest; state: LearnerState; proposals: Proposal[]; context: StoredContext | null } | null>(null);
-  const [provider] = useState<ProviderStatus>('unknown');
+  const [provider, setProvider] = useState<ProviderStatus>('unknown');
   const [recovery, setRecovery] = useState(false);
   const loadedSource = useRef<string | null>(null);
 
@@ -111,7 +113,7 @@ export function LearnApp() {
     return <main className="cw-rail" data-testid="learn-rail"><EmptyState title="Connecting to CourseWeave"><p>Waiting for the trusted JupyterLab bridge.</p><Button onClick={runtime.retry}>Retry connection</Button></EmptyState></main>;
   }
   if (recovery) {
-    return <main className="cw-rail" data-testid="learn-rail"><EmptyState title="Reconnect to CourseWeave"><p>The authenticated connection is unavailable. No course changes were retried.</p><Button onClick={() => { setRecovery(false); runtime.retry(); }}>Reconnect</Button></EmptyState></main>;
+    return <main className="cw-rail" data-testid="learn-rail"><ReconnectPanel hasDraft={false} onReconnect={async () => { setRecovery(false); runtime.retry(); }} /></main>;
   }
   if (data === null) return <main className="cw-rail" data-testid="learn-rail"><p aria-live="polite">Loading course guide…</p></main>;
   const resolved = data.context?.resolved ?? null;
@@ -120,6 +122,11 @@ export function LearnApp() {
   const activeSurface = activePhase === null || resolved?.surface_id === null || resolved === null ? null : findSurface(data.course, activeModule!.id, activePhase.id, resolved.surface_id);
   const active = activeModule !== null && activePhase !== null ? { moduleId: activeModule.id, phaseId: activePhase.id } : null;
   const client = createCourseweaveClient(runtime.runtime);
+  const allowedShareKinds = activePhase === null ? [] : [
+    ...(activePhase.capabilities.share_selection ? ['selection', 'text'] as const : []),
+    ...(activePhase.capabilities.share_cell ? ['cell'] as const : []),
+    ...(activePhase.capabilities.share_output ? ['output'] as const : [])
+  ];
   const applyStateOperation = async (operation: StateOperation, signal?: AbortSignal) => {
     const next = await client.patchState({ expected_revision: data.state.revision, operation }, signal);
     setData((current) => current === null ? current : { ...current, state: next });
@@ -127,6 +134,7 @@ export function LearnApp() {
   return <LearnHeader course={data.course} active={active} provider={provider} timeBudget={data.state.time_budget_minutes ?? null}>
     {activePhase !== null && activeModule !== null ? <PhaseCard key={`phase:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} serviceOrigin={runtime.runtime.serviceOrigin} surfaceId={activeSurface?.id ?? null} videoSeconds={data.context?.context.video_seconds} onStateOperation={applyStateOperation} onRefresh={refreshDurableData} /> : null}
     {activePhase?.kind === 'predict' && activeModule !== null ? <PredictionCard key={`prediction:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} client={client} onState={(state) => setData((current) => current === null ? current : { ...current, state })} onRefresh={refreshDurableData} /> : null}
+    <TeacherThread client={client} sourceId={runtime.runtime.sourceId} allowedShareKinds={allowedShareKinds} maxShareChars={data.course.policies?.max_shared_chars ?? 8192} onProvider={setProvider} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.some((item) => item.id === proposal.id) ? current.proposals.map((item) => item.id === proposal.id ? proposal : item) : [...current.proposals, proposal] })} onRefresh={refreshDurableData} />
     <ProposalDrawer proposals={data.proposals} state={data.state} client={client} onRefresh={refreshDurableData} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.map((item) => item.id === proposal.id ? proposal : item) })} />
     <Dashboard course={data.course} serviceOrigin={runtime.runtime.serviceOrigin} />
   </LearnHeader>;

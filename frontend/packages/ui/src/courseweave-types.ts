@@ -47,6 +47,7 @@ export interface CourseModule {
 export interface CourseManifest {
   title: string;
   modules: CourseModule[];
+  policies?: { max_shared_chars: number };
 }
 
 export interface LearnerState {
