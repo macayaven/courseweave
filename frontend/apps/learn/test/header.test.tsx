@@ -111,7 +111,15 @@ describe('learner shell header', () => {
     expect(screen.getByRole('button', { name: 'Close guide' })).toBeInTheDocument();
   });
 
+  it.each(['', '   '])('rejects an empty accessible IconButton name at runtime: %j', (label) => {
+    expect(() => render(<IconButton aria-label={label}>×</IconButton>)).toThrow('IconButton requires a non-empty aria-label.');
+  });
+
   // @ts-expect-error IconButton cannot omit its accessible name.
   const unnamedIconButton = <IconButton />;
   void unnamedIconButton;
+
+  // @ts-expect-error IconButton cannot use a literal empty accessible name.
+  const emptyIconButton = <IconButton aria-label="" />;
+  void emptyIconButton;
 });

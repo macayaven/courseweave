@@ -7,12 +7,15 @@ export function Button(props: ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button {...props} className={`cw-button ${props.className ?? ''}`.trim()} />;
 }
 
-export type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label'> & {
-  'aria-label': string;
+type NonEmptyLiteral<Label extends string> = Label extends '' ? never : Label;
+
+export type IconButtonProps<Label extends string = string> = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label'> & {
+  'aria-label': NonEmptyLiteral<Label>;
   children?: ReactNode;
 };
 
-export function IconButton({ 'aria-label': label, ...props }: IconButtonProps) {
+export function IconButton<const Label extends string>({ 'aria-label': label, ...props }: IconButtonProps<Label>) {
+  if (label.trim().length === 0) throw new Error('IconButton requires a non-empty aria-label.');
   return <button {...props} aria-label={label} className={`cw-icon-button ${props.className ?? ''}`.trim()} />;
 }
 
