@@ -15,6 +15,7 @@ export interface PhaseCardProps {
   videoSeconds?: number | null;
   onStateOperation?(operation: StateOperation, signal?: AbortSignal): Promise<void>;
   onRefresh?(): Promise<void>;
+  recovery?: boolean;
 }
 
 function SurfaceAction({ label, serviceOrigin, moduleId, phase, surfaceId }: Pick<PhaseCardProps, 'serviceOrigin' | 'moduleId' | 'phase' | 'surfaceId'> & { label: string }) {
@@ -23,7 +24,7 @@ function SurfaceAction({ label, serviceOrigin, moduleId, phase, surfaceId }: Pic
   return <Button type="button" onClick={() => postOpenSurface(serviceOrigin, { moduleId, phaseId: phase.id, surfaceId: surface.id })}>{label}</Button>;
 }
 
-export function PhaseCard({ moduleId, phase, state, serviceOrigin, surfaceId, videoSeconds, onStateOperation, onRefresh }: PhaseCardProps) {
+export function PhaseCard({ moduleId, phase, state, serviceOrigin, surfaceId, videoSeconds, onStateOperation, onRefresh, recovery = false }: PhaseCardProps) {
   const [orientOpen, setOrientOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reflection, setReflection] = useState('');
@@ -38,10 +39,15 @@ export function PhaseCard({ moduleId, phase, state, serviceOrigin, surfaceId, vi
     alive.current = true;
     return () => { alive.current = false; reviewFlight.current?.abort(); };
   }, []);
+  useEffect(() => {
+    if (!recovery) return;
+    reviewFlight.current?.abort();
+    setReviewPending(false);
+  }, [recovery]);
   void state;
   if (phase === null) return <EmptyState title="No active course document"><p>Select a course surface to continue.</p></EmptyState>;
   async function submitReview(operation: Extract<StateOperation, { type: 'record_reflection' | 'record_evidence' }>) {
-    if (reviewPending || onStateOperation === undefined) return;
+    if (recovery || reviewPending || onStateOperation === undefined) return;
     const controller = new AbortController();
     reviewFlight.current = controller;
     setReviewPending(true);
@@ -77,7 +83,7 @@ export function PhaseCard({ moduleId, phase, state, serviceOrigin, surfaceId, vi
     case 'predict': return <section aria-label="Prediction prompt"><h2>{phase.title}</h2><p>Record your prediction below before requesting results.</p></section>;
     case 'experiment': return <section><h2>{phase.title}</h2><HintLadder level={phase.capabilities.hint_level} /></section>;
     case 'lab': return <section aria-label="Lab ownership checklist"><h2>{phase.title}</h2><p>Keep the implementation yours.</p><label><input type="checkbox" checked={labChecks.protocol} onChange={(event) => setLabChecks((checks) => ({ ...checks, protocol: event.target.checked }))} />I read the protocol</label><label><input type="checkbox" checked={labChecks.checks} onChange={(event) => setLabChecks((checks) => ({ ...checks, checks: event.target.checked }))} />I ran my own checks</label></section>;
-    case 'review': return <section aria-label="Review actions"><h2>{phase.title}</h2><Button type="button" aria-expanded={reviewOpen} onClick={() => setReviewOpen((open) => !open)}>Reflection and evidence</Button>{reviewOpen ? <><label>Reflection<textarea value={reflection} onChange={(event) => setReflection(event.target.value)} /></label><Button type="button" disabled={reviewPending || reflection.trim().length === 0 || onStateOperation === undefined} onClick={() => void submitReview({ type: 'record_reflection', module_id: moduleId, phase_id: phase.id, record_id: crypto.randomUUID(), text: reflection })}>Record reflection</Button><label>Evidence reference<input value={evidence} onChange={(event) => setEvidence(event.target.value)} /></label><Button type="button" disabled={reviewPending || evidence.trim().length === 0 || onStateOperation === undefined} onClick={() => void submitReview({ type: 'record_evidence', module_id: moduleId, phase_id: phase.id, record_id: crypto.randomUUID(), reference: evidence })}>Record evidence</Button>{reviewNotice ? <p role="status">{reviewNotice}</p> : null}</> : null}</section>;
+    case 'review': return <section aria-label="Review actions"><h2>{phase.title}</h2><Button type="button" aria-expanded={reviewOpen} onClick={() => setReviewOpen((open) => !open)}>Reflection and evidence</Button>{reviewOpen ? <><label>Reflection<textarea value={reflection} onChange={(event) => setReflection(event.target.value)} /></label><Button type="button" disabled={recovery || reviewPending || reflection.trim().length === 0 || onStateOperation === undefined} onClick={() => void submitReview({ type: 'record_reflection', module_id: moduleId, phase_id: phase.id, record_id: crypto.randomUUID(), text: reflection })}>Record reflection</Button><label>Evidence reference<input value={evidence} onChange={(event) => setEvidence(event.target.value)} /></label><Button type="button" disabled={recovery || reviewPending || evidence.trim().length === 0 || onStateOperation === undefined} onClick={() => void submitReview({ type: 'record_evidence', module_id: moduleId, phase_id: phase.id, record_id: crypto.randomUUID(), reference: evidence })}>Record evidence</Button>{reviewNotice ? <p role="status">{reviewNotice}</p> : null}</> : null}</section>;
     case 'audit': return <section><h2>{phase.title}</h2><p role="status" aria-label="Teacher help is locked during audit">Teacher help is locked during audit</p></section>;
     case 'ship': return <section aria-label="Ship verification checklist"><h2>{phase.title}</h2><label><input type="checkbox" checked={shipVerified} onChange={(event) => setShipVerified(event.target.checked)} />I verified the named checks</label></section>;
   }

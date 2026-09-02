@@ -64,4 +64,14 @@ describe('PredictionCard', () => {
     rerender(<PredictionCard key="s01/predict-b" moduleId="s01" phase={{ ...phase, id: 'predict-b', completion: { type: 'prediction_recorded', record_id: 'prediction-b' } }} state={{ revision: 2, predictions: {} }} client={{ recordPrediction: vi.fn() }} onState={vi.fn()} onRefresh={vi.fn()} />);
     expect(screen.getByLabelText('Your prediction')).toHaveValue('');
   });
+
+  it('keeps a prediction draft editable but does not write during recovery', () => {
+    const recordPrediction = vi.fn();
+    render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction }} onState={vi.fn()} onRefresh={vi.fn()} recovery />);
+    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'keep it' } });
+    expect(screen.getByLabelText('Your prediction')).toHaveValue('keep it');
+    expect(screen.getByRole('button', { name: 'Save prediction' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
+    expect(recordPrediction).not.toHaveBeenCalled();
+  });
 });

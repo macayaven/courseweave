@@ -10,8 +10,10 @@ type ProposalClient = {
   editProposal(id: string, body: { expected_revision: number; request: ProposalEditRequest }, signal?: AbortSignal): Promise<Proposal>;
 };
 
-export function ProposalDrawer({ proposals, client, onRefresh, onProposal, onDraftChange, recovery = false }: { proposals: Proposal[]; state: LearnerState; client: ProposalClient; onRefresh(): Promise<void>; onProposal(proposal: Proposal): void; onDraftChange?(hasDraft: boolean): void; recovery?: boolean }) {
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+export function ProposalDrawer({ proposals, client, onRefresh, onProposal, drafts: controlledDrafts, onDraftsChange, onDraftChange, recovery = false }: { proposals: Proposal[]; state: LearnerState; client: ProposalClient; onRefresh(): Promise<void>; onProposal(proposal: Proposal): void; drafts?: Record<string, string>; onDraftsChange?(drafts: Record<string, string>): void; onDraftChange?(hasDraft: boolean): void; recovery?: boolean }) {
+  const [internalDrafts, setInternalDrafts] = useState<Record<string, string>>({});
+  const drafts = controlledDrafts ?? internalDrafts;
+  const setDrafts = onDraftsChange ?? setInternalDrafts;
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const alive = useRef(true);
@@ -28,7 +30,7 @@ export function ProposalDrawer({ proposals, client, onRefresh, onProposal, onDra
     setPending({});
   }, [recovery]);
   async function request(proposalId: string, action: (signal: AbortSignal) => Promise<Proposal>) {
-    if (pending[proposalId]) return;
+    if (recovery || pending[proposalId]) return;
     const controller = new AbortController();
     flights.current.set(proposalId, controller);
     setPending((previous) => ({ ...previous, [proposalId]: true }));
@@ -52,9 +54,10 @@ export function ProposalDrawer({ proposals, client, onRefresh, onProposal, onDra
       if (alive.current) setPending((previous) => ({ ...previous, [proposalId]: false }));
     }
   }
-  if (proposals.length === 0) return <EmptyState title="No pending proposals"><p>Teacher suggestions appear here after REST persistence.</p></EmptyState>;
+  const orphanDrafts = Object.entries(drafts).filter(([id, value]) => value.trim().length > 0 && !proposals.some((proposal) => proposal.id === id));
+  if (proposals.length === 0 && orphanDrafts.length === 0) return <EmptyState title="No pending proposals"><p>Teacher suggestions appear here after REST persistence.</p></EmptyState>;
   return <aside aria-label="Proposals">{notice ? <p role="status">{notice}</p> : null}{proposals.map((proposal) => {
-    const disabled = pending[proposal.id] === true;
-    return <article key={proposal.id}><h2>{proposal.summary}</h2><p>Status: {proposal.status}</p><pre>{typeof proposal.payload.diff === 'string' ? proposal.payload.diff : JSON.stringify(proposal.payload, null, 2)}</pre>{proposal.status === 'pending' ? <><label>Edit summary<input aria-label="Edit summary" disabled={disabled} value={drafts[proposal.id] ?? ''} onChange={(event) => setDrafts((previous) => ({ ...previous, [proposal.id]: event.target.value }))} /></label><Button type="button" disabled={disabled} onClick={() => void request(proposal.id, (signal) => client.acceptProposal(proposal.id, { expected_revision: proposal.revision }, signal))}>Accept</Button><Button type="button" disabled={disabled} onClick={() => void request(proposal.id, (signal) => client.rejectProposal(proposal.id, { expected_revision: proposal.revision }, signal))}>Reject</Button><Button type="button" disabled={disabled} onClick={() => void request(proposal.id, (signal) => client.editProposal(proposal.id, { expected_revision: proposal.revision, request: drafts[proposal.id] ? { summary: drafts[proposal.id] } : {} }, signal))}>Save edit</Button></> : null}</article>;
-  })}</aside>;
+    const disabled = recovery || pending[proposal.id] === true;
+    return <article key={proposal.id}><h2>{proposal.summary}</h2><p>Status: {proposal.status}</p><pre>{typeof proposal.payload.diff === 'string' ? proposal.payload.diff : JSON.stringify(proposal.payload, null, 2)}</pre>{proposal.status === 'pending' ? <><label>Edit summary<input aria-label="Edit summary" disabled={false} value={drafts[proposal.id] ?? ''} onChange={(event) => setDrafts({ ...drafts, [proposal.id]: event.target.value })} /></label><Button type="button" disabled={disabled} onClick={() => void request(proposal.id, (signal) => client.acceptProposal(proposal.id, { expected_revision: proposal.revision }, signal))}>Accept</Button><Button type="button" disabled={disabled} onClick={() => void request(proposal.id, (signal) => client.rejectProposal(proposal.id, { expected_revision: proposal.revision }, signal))}>Reject</Button><Button type="button" disabled={disabled} onClick={() => void request(proposal.id, (signal) => client.editProposal(proposal.id, { expected_revision: proposal.revision, request: drafts[proposal.id] ? { summary: drafts[proposal.id] } : {} }, signal))}>Save edit</Button></> : null}</article>;
+  })}{orphanDrafts.length > 0 ? <section aria-label="Unsent proposal edits"><h2>Unsent proposal edits</h2>{orphanDrafts.map(([id, value]) => <label key={id}>Unsent edit for {id}<input value={value} onChange={(event) => setDrafts({ ...drafts, [id]: event.target.value })} /></label>)}</section> : null}</aside>;
 }

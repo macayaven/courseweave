@@ -47,4 +47,22 @@ describe('consumeAguiStream', () => {
     const malformed = valid.replace('"target_hash":null', '"target_hash":null,"unexpected":true');
     await expect(consumeAguiStream(stream([`${prefix}data: ${malformed}\n\n${suffix}`]), { threadId: 'thread-a', runId: 'run-a' }, () => undefined)).rejects.toThrow('Invalid teacher stream.');
   });
+
+  it('cancels a pending reader on abort and rejects message-less RUN_ERROR events', async () => {
+    let cancelled = false;
+    const pending = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+    const controller = new AbortController();
+    const interrupted = consumeAguiStream(pending, { threadId: 'thread-a', runId: 'run-a' }, () => undefined, controller.signal);
+    controller.abort();
+    await expect(interrupted).resolves.toEqual({ status: 'interrupted', text: '', candidates: [] });
+    expect(cancelled).toBe(true);
+    await expect(consumeAguiStream(stream(['data: {"type":"RUN_STARTED","threadId":"thread-a","runId":"run-a"}\n\ndata: {"type":"RUN_ERROR"}\n\n']), { threadId: 'thread-a', runId: 'run-a' }, () => undefined)).rejects.toThrow('Invalid teacher stream.');
+  });
+
+  it('accepts a 121-emoji candidate summary because its limit is code points', async () => {
+    const prefix = 'data: {"type":"RUN_STARTED","threadId":"thread-a","runId":"run-a"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\n';
+    const suffix = 'data: {"type":"RUN_FINISHED","threadId":"thread-a","runId":"run-a"}\n\n';
+    const candidate = { id: 'candidate-a', type: 'profile_patch', origin: 'teacher_suggested', summary: '😀'.repeat(121), target: 'profile', payload: {}, target_hash: null };
+    await expect(consumeAguiStream(stream([`${prefix}data: ${JSON.stringify({ type: 'CUSTOM', name: 'courseweave.proposal_candidate', value: { candidate } })}\n\n${suffix}`]), { threadId: 'thread-a', runId: 'run-a' }, () => undefined)).resolves.toMatchObject({ candidates: ['candidate-a'] });
+  });
 });

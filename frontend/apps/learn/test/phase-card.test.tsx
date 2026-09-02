@@ -98,4 +98,15 @@ describe('PhaseCard', () => {
     rerender(<PhaseCard key="m01/ship" moduleId="m01" phase={{ ...review, id: 'ship', kind: 'ship' }} state={{ revision: 3 }} serviceOrigin="https://courseweave.test" surfaceId={null} onRefresh={vi.fn()} />);
     expect(screen.getByRole('checkbox', { name: 'I verified the named checks' })).not.toBeChecked();
   });
+
+  it('keeps review text editable but does not write during recovery', () => {
+    const onStateOperation = vi.fn();
+    const review = { id: 'review', title: 'Review', kind: 'review' as const, capabilities, completion: { type: 'manual' as const }, surfaces: [] };
+    render(<PhaseCard moduleId="m01" phase={review} state={{ revision: 3 }} serviceOrigin="https://courseweave.test" surfaceId={null} onStateOperation={onStateOperation} onRefresh={vi.fn()} recovery />);
+    fireEvent.click(screen.getByRole('button', { name: 'Reflection and evidence' }));
+    fireEvent.change(screen.getByLabelText('Reflection'), { target: { value: 'keep this' } });
+    expect(screen.getByRole('button', { name: 'Record reflection' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Record reflection' }));
+    expect(onStateOperation).not.toHaveBeenCalled();
+  });
 });

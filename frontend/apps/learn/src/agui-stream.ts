@@ -35,7 +35,7 @@ function candidateId(event: AguiEvent): string | null {
   return typeof value.id === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value.id) && value.id.length <= 80
     && ['profile_patch', 'manifest_replace', 'workspace_file_replace', 'phase_record'].includes(value.type as string)
     && value.origin === 'teacher_suggested'
-    && typeof value.summary === 'string' && value.summary.trim().length > 0 && value.summary.length <= 240
+    && typeof value.summary === 'string' && value.summary.trim().length > 0 && Array.from(value.summary).length <= 240
     && isJsonValue(value.target)
     && typeof value.payload === 'object' && value.payload !== null && !Array.isArray(value.payload) && isJsonValue(value.payload)
     && (value.target_hash === null || typeof value.target_hash === 'string') ? value.id : null;
@@ -73,6 +73,7 @@ export async function consumeAguiStream(
       if (event.type !== 'RUN_STARTED' || event.runId !== expected.runId || event.threadId !== expected.threadId) return invalid();
       stage = 'message';
     } else if (event.type === 'RUN_ERROR') {
+      if (typeof event.message !== 'string' || event.message.trim().length === 0) return invalid();
       stage = 'terminal';
       outcome = { status: 'error', text, candidates, message: 'The teacher run failed. Try again with a new request.' };
     } else if (stage === 'message') {
@@ -101,6 +102,8 @@ export async function consumeAguiStream(
     return true;
   };
 
+  const cancelReader = () => { void reader.cancel(); };
+  signal?.addEventListener('abort', cancelReader, { once: true });
   try {
     while (!signal?.aborted) {
       const part = await reader.read();
@@ -108,9 +111,16 @@ export async function consumeAguiStream(
       buffer += decoder.decode(part.value, { stream: true });
       while (drain()) { /* Drain post-terminal records too. */ }
     }
+    if (signal?.aborted) return { status: 'interrupted', text, candidates };
     buffer += decoder.decode();
     while (drain()) { /* A decoder flush can complete the final record. */ }
     if (buffer.trim().length > 0) invalid();
-  } finally { reader.releaseLock(); }
+  } catch (error) {
+    if (signal?.aborted) return { status: 'interrupted', text, candidates };
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', cancelReader);
+    reader.releaseLock();
+  }
   return outcome ?? { status: 'interrupted', text, candidates };
 }

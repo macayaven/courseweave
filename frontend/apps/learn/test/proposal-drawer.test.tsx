@@ -66,4 +66,22 @@ describe('ProposalDrawer', () => {
     await vi.waitFor(() => expect(onProposal).toHaveBeenCalledOnce());
     expect(screen.getByRole('button', { name: 'Accept' })).not.toBeDisabled();
   });
+
+  it('keeps an orphaned controlled edit draft visible and non-actionable after refresh removes its proposal', () => {
+    const drafts = { 'proposal-1': 'do not lose me' };
+    const { rerender } = render(<ProposalDrawer proposals={[pending]} state={{ revision: 7 }} client={client()} onRefresh={vi.fn()} onProposal={vi.fn()} drafts={drafts} onDraftsChange={vi.fn()} />);
+    rerender(<ProposalDrawer proposals={[]} state={{ revision: 8 }} client={client()} onRefresh={vi.fn()} onProposal={vi.fn()} drafts={drafts} onDraftsChange={vi.fn()} />);
+    expect(screen.getByRole('region', { name: 'Unsent proposal edits' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Unsent edit for proposal-1')).toHaveValue('do not lose me');
+    expect(screen.queryByRole('button', { name: 'Save edit' })).not.toBeInTheDocument();
+  });
+
+  it('keeps draft input editable but disables every proposal mutation during recovery', () => {
+    const api = client();
+    render(<ProposalDrawer proposals={[pending]} state={{ revision: 7 }} client={api} onRefresh={vi.fn()} onProposal={vi.fn()} recovery />);
+    expect(screen.getByLabelText('Edit summary')).not.toBeDisabled();
+    for (const name of ['Accept', 'Reject', 'Save edit']) expect(screen.getByRole('button', { name })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    expect(api.acceptProposal).not.toHaveBeenCalled();
+  });
 });

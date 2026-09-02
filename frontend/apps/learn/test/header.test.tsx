@@ -17,9 +17,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function dispatchRuntime(): void {
+function dispatchRuntime(capabilityToken = 'runtime-test-token'): void {
   const reply = new MessageEvent('message', {
-    data: { type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token', sourceId: 'notebook-a' },
+    data: { type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken, sourceId: 'notebook-a' },
     source: window.parent
   });
   Object.defineProperty(reply, 'origin', { value: 'https://courseweave.test' });
@@ -167,11 +167,40 @@ describe('learner shell header', () => {
     expect(screen.getByLabelText('Ask the teacher')).toHaveValue('unsent question');
     expect(screen.getByLabelText('Edit summary')).toHaveValue('unsent edit');
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+    dispatchRuntime();
     await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'Reconnect to CourseWeave' })).not.toBeInTheDocument());
     expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/course'))).toHaveLength(2);
     expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/state'))).toHaveLength(2);
     expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/proposals'))).toHaveLength(2);
     expect(fetch.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST' || (init as RequestInit | undefined)?.method === 'PATCH')).toHaveLength(0);
+  });
+
+  it('rebootstraps with a fresh runtime and restores controlled drafts after a recovery 401', async () => {
+    const course = { title: 'Agent Harnessing', modules: [{ id: 's01', title: 'Foundations', phases: [{ id: 'read', title: 'Read', kind: 'read', completion: { type: 'manual' }, capabilities: { chat: true, hint_level: 'none', share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [] }] }] };
+    const proposal = { id: 'proposal-1', revision: 1, type: 'profile_patch', origin: 'teacher_suggested', status: 'pending', summary: 'Improve profile', created_at: '2026-09-02T00:00:00Z', target: 'profile', payload: {}, target_hash: null, result: null };
+    let contextCalls = 0;
+    const fetch = vi.fn((url: string) => {
+      if (url.includes('/context?') && contextCalls++ === 1) return Promise.resolve(new Response(JSON.stringify({ code: 'forbidden', message: 'Reconnect', details: {} }), { status: 401, headers: { 'content-type': 'application/json' } }));
+      const body = url.endsWith('/course') ? course : url.endsWith('/state') ? { revision: 1 } : url.endsWith('/proposals') ? [proposal] : { context: { source_id: 'notebook-a' }, resolved: { module_id: 's01', phase_id: 'read', surface_id: null, reason: 'explicit_phase' } };
+      return Promise.resolve(new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const postMessage = vi.spyOn(window.parent, 'postMessage');
+    render(<LearnApp />);
+    dispatchRuntime('first-token');
+    expect(await screen.findByLabelText('Ask the teacher')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'survives rebootstrap' } });
+    fireEvent.change(screen.getByLabelText('Edit summary'), { target: { value: 'orphan-safe edit' } });
+    const changed = new MessageEvent('message', { data: { type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, source: window.parent });
+    Object.defineProperty(changed, 'origin', { value: 'https://courseweave.test' });
+    act(() => window.dispatchEvent(changed));
+    await screen.findByRole('heading', { name: 'Reconnect to CourseWeave' });
+    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledTimes(2));
+    dispatchRuntime('second-token');
+    expect(await screen.findByLabelText('Ask the teacher')).toHaveValue('survives rebootstrap');
+    expect(screen.getByLabelText('Edit summary')).toHaveValue('orphan-safe edit');
+    expect(fetch.mock.calls.filter(([url]) => String(url).endsWith('/course'))).toHaveLength(2);
   });
 
   it('keeps provider status unknown after successful read-side routes', async () => {

@@ -93,7 +93,7 @@ describe('TeacherThread', () => {
     await vi.waitFor(() => expect(postGuide).toHaveBeenCalledOnce());
     await act(async () => controller!.enqueue(new TextEncoder().encode('data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_CONTENT","messageId":"assistant","delta":"partial"}\n\n')));
     expect(await screen.findByText('partial')).toBeInTheDocument();
-    await act(async () => { controller!.enqueue(new TextEncoder().encode('data: {"type":"RUN_ERROR"}\n\n')); controller!.close(); });
+    await act(async () => { controller!.enqueue(new TextEncoder().encode('data: {"type":"RUN_ERROR","message":"The provider request failed."}\n\n')); controller!.close(); });
     expect(await screen.findByText('The teacher run failed. Try again with a new request.')).toBeInTheDocument();
     expect(screen.getByText('partial')).toBeInTheDocument();
   });
@@ -127,5 +127,25 @@ describe('TeacherThread', () => {
     expect(await screen.findByText('Suggested change is unavailable. Ask the teacher again.')).toBeInTheDocument();
     expect(createProposal).toHaveBeenCalledOnce();
     expect(screen.queryByRole('button', { name: 'Save suggested change' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the teacher draft editable while every teacher mutation is inert during recovery', () => {
+    const postGuide = vi.fn();
+    render(<TeacherThread client={{ postGuide, share: vi.fn(), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['selection']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} recovery />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'keep editing' } });
+    expect(screen.getByLabelText('Ask the teacher')).toHaveValue('keep editing');
+    expect(screen.getByRole('button', { name: 'Ask teacher' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Share before asking' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask teacher' }));
+    expect(postGuide).not.toHaveBeenCalled();
+  });
+
+  it('marks an unterminated assistant response with the stable interrupted-stream selector', async () => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('00000000-0000-4000-8000-000000000001').mockReturnValueOnce('00000000-0000-4000-8000-000000000002').mockReturnValueOnce('00000000-0000-4000-8000-000000000003');
+    const wire = 'data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_CONTENT","messageId":"assistant","delta":"partial"}\n\n';
+    render(<TeacherThread client={{ postGuide: vi.fn().mockResolvedValue(new Response(wire)), share: vi.fn(), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={[]} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'stream' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask teacher' }));
+    expect(await screen.findByTestId('interrupted-stream')).toHaveTextContent('partial');
   });
 });

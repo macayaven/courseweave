@@ -13,9 +13,11 @@ type TeacherClient = {
 
 type TranscriptItem = { id: string; text: string; state: 'streaming' | 'finished' | 'interrupted' | 'failed' };
 
-export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareChars, onProvider, onProposal, onRefresh, onDraftChange, recovery = false }: { client: TeacherClient; sourceId: string; allowedShareKinds: ShareKind[]; maxShareChars: number; onProvider(status: ProviderStatus): void; onProposal(proposal: Proposal): void; onRefresh(): Promise<void>; onDraftChange?(hasDraft: boolean): void; recovery?: boolean }) {
+export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareChars, onProvider, onProposal, onRefresh, composer: controlledComposer, onComposerChange, onDraftChange, recovery = false }: { client: TeacherClient; sourceId: string; allowedShareKinds: ShareKind[]; maxShareChars: number; onProvider(status: ProviderStatus): void; onProposal(proposal: Proposal): void; onRefresh(): Promise<void>; composer?: string; onComposerChange?(value: string): void; onDraftChange?(hasDraft: boolean): void; recovery?: boolean }) {
   const [threadId] = useState(() => crypto.randomUUID());
-  const [composer, setComposer] = useState('');
+  const [internalComposer, setInternalComposer] = useState('');
+  const composer = controlledComposer ?? internalComposer;
+  const setComposer = onComposerChange ?? setInternalComposer;
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -43,6 +45,7 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
   }
 
   async function persistCandidate(id: string) {
+    if (recovery) return;
     if (candidateFlights.current.has(id)) return;
     const controller = new AbortController();
     candidateFlights.current.set(id, controller);
@@ -66,7 +69,7 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
   }
 
   async function send(shared?: { kind: ShareKind; content: string; label?: string }) {
-    if (pending || composer.trim().length === 0) return;
+    if (recovery || pending || composer.trim().length === 0) return;
     const controller = new AbortController();
     active.current = controller;
     const runId = crypto.randomUUID();
@@ -114,5 +117,5 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
     }
   }
 
-  return <section aria-label="Teacher thread"><h2>Teacher</h2>{transcript.map((item) => <p key={item.id} data-state={item.state}>{item.text}</p>)}<label>Ask the teacher<textarea value={composer} onChange={(event) => setComposer(event.target.value)} /></label><Button type="button" disabled={pending || composer.trim().length === 0} onClick={() => void send()}>Ask teacher</Button>{allowedShareKinds.length > 0 ? <span ref={shareTrigger}><Button type="button" disabled={pending || composer.trim().length === 0} onClick={() => setShareOpen(true)}>Share before asking</Button></span> : null}{shareOpen ? <ShareDialog maxChars={maxShareChars} allowedKinds={allowedShareKinds} onCancel={() => setShareOpen(false)} onConfirm={send} restoreFocus={() => shareTrigger.current?.querySelector('button')?.focus()} /> : null}{candidates.map((candidate) => <section key={candidate.id}><p>Suggested change ready for review.</p><Button type="button" disabled={candidate.pending} onClick={() => void persistCandidate(candidate.id)}>Save suggested change</Button></section>)}{notice ? <p role="status">{notice}</p> : null}{notice && composer.trim().length > 0 ? <Button type="button" disabled={pending} onClick={() => void send()}>Retry</Button> : null}</section>;
+  return <section aria-label="Teacher thread"><h2>Teacher</h2>{transcript.map((item) => <p key={item.id} data-state={item.state} data-testid={item.state === 'interrupted' ? 'interrupted-stream' : undefined}>{item.text}</p>)}<label>Ask the teacher<textarea value={composer} onChange={(event) => setComposer(event.target.value)} /></label><Button type="button" disabled={recovery || pending || composer.trim().length === 0} onClick={() => void send()}>Ask teacher</Button>{allowedShareKinds.length > 0 ? <span ref={shareTrigger}><Button type="button" disabled={recovery || pending || composer.trim().length === 0} onClick={() => setShareOpen(true)}>Share before asking</Button></span> : null}{shareOpen ? <ShareDialog maxChars={maxShareChars} allowedKinds={allowedShareKinds} onCancel={() => setShareOpen(false)} onConfirm={send} restoreFocus={() => shareTrigger.current?.querySelector('button')?.focus()} /> : null}{candidates.map((candidate) => <section key={candidate.id}><p>Suggested change ready for review.</p><Button type="button" disabled={recovery || candidate.pending} onClick={() => void persistCandidate(candidate.id)}>Save suggested change</Button></section>)}{notice ? <p role="status">{notice}</p> : null}{notice && composer.trim().length > 0 ? <Button type="button" disabled={recovery || pending} onClick={() => void send()}>Retry</Button> : null}</section>;
 }

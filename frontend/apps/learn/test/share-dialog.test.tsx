@@ -31,4 +31,22 @@ describe('ShareDialog', () => {
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(cancel).toHaveBeenCalledOnce();
   });
+
+  it('contains Tab and Shift+Tab within the modal controls', () => {
+    render(<ShareDialog maxChars={20} allowedKinds={['selection']} onCancel={vi.fn()} onConfirm={vi.fn()} />);
+    const dialog = screen.getByRole('dialog');
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(screen.getByLabelText('Share kind')).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    expect(cancel).toHaveFocus();
+  });
+
+  it('restores focus through its cleanup path when the parent closes the dialog', () => {
+    const restoreFocus = vi.fn();
+    const view = render(<ShareDialog maxChars={20} allowedKinds={['selection']} onCancel={vi.fn()} onConfirm={vi.fn()} restoreFocus={restoreFocus} />);
+    view.unmount();
+    expect(restoreFocus).toHaveBeenCalledOnce();
+  });
 });
