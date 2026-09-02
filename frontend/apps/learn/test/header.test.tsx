@@ -105,6 +105,30 @@ describe('learner shell header', () => {
     await vi.waitFor(() => expect(fetch.mock.calls.filter(([url]) => String(url).includes('/context?'))).toHaveLength(2));
   });
 
+  it('clears a prediction draft when trusted context resolves a different phase', async () => {
+    const course = { title: 'Agent Harnessing', modules: [{ id: 's01', title: 'Foundations', phases: ['predict-a', 'predict-b'].map((id) => ({ id, title: id, kind: 'predict', completion: { type: 'prediction_recorded', record_id: `${id}-record` }, capabilities: { chat: false, hint_level: 'none', share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [] })) }] };
+    let contextReads = 0;
+    const fetch = vi.fn((url: string) => {
+      const body = url.endsWith('/course') ? course
+        : url.endsWith('/state') ? { revision: 2, predictions: {} }
+          : url.endsWith('/proposals') ? []
+            : { context: { source_id: 'notebook-a' }, resolved: { module_id: 's01', phase_id: contextReads++ === 0 ? 'predict-a' : 'predict-b', surface_id: null, reason: 'explicit_phase' } };
+      return Promise.resolve(new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetch);
+    render(<LearnApp />);
+    dispatchRuntime();
+    expect(await screen.findByRole('heading', { name: 'predict-a', level: 2 })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'only phase A' } });
+
+    const changed = new MessageEvent('message', { data: { type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, source: window.parent });
+    Object.defineProperty(changed, 'origin', { value: 'https://courseweave.test' });
+    act(() => window.dispatchEvent(changed));
+
+    expect(await screen.findByRole('heading', { name: 'predict-b', level: 2 })).toBeInTheDocument();
+    expect(screen.getByLabelText('Your prediction')).toHaveValue('');
+  });
+
   it('enters recovery after a 401 without retrying authenticated reads or mutations', async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ code: 'forbidden', message: 'Expired capability', details: {} }), {

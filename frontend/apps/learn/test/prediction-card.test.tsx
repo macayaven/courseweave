@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PredictionCard } from '../src/prediction-card';
@@ -45,5 +46,22 @@ describe('PredictionCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Saving prediction' }));
     expect(recordPrediction).toHaveBeenCalledOnce();
     resolve({ revision: 3 });
+  });
+
+  it('continues a successful prediction lifecycle under the real StrictMode entry behavior', async () => {
+    const onState = vi.fn();
+    const recordPrediction = vi.fn().mockResolvedValue({ revision: 3, predictions: {} });
+    render(<StrictMode><PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction }} onState={onState} onRefresh={vi.fn()} /></StrictMode>);
+    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'strict success' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
+    await vi.waitFor(() => expect(onState).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: 'Save prediction' })).not.toBeDisabled();
+  });
+
+  it('clears a draft when a new trusted phase identity replaces the current phase', () => {
+    const { rerender } = render(<PredictionCard key="s01/predict-a" moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction: vi.fn() }} onState={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'only phase A' } });
+    rerender(<PredictionCard key="s01/predict-b" moduleId="s01" phase={{ ...phase, id: 'predict-b', completion: { type: 'prediction_recorded', record_id: 'prediction-b' } }} state={{ revision: 2, predictions: {} }} client={{ recordPrediction: vi.fn() }} onState={vi.fn()} onRefresh={vi.fn()} />);
+    expect(screen.getByLabelText('Your prediction')).toHaveValue('');
   });
 });

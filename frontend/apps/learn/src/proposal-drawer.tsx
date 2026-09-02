@@ -16,7 +16,10 @@ export function ProposalDrawer({ proposals, client, onRefresh, onProposal }: { p
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const alive = useRef(true);
   const flights = useRef(new Map<string, AbortController>());
-  useEffect(() => () => { alive.current = false; flights.current.forEach((controller) => controller.abort()); }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; flights.current.forEach((controller) => controller.abort()); };
+  }, []);
   async function request(proposalId: string, action: (signal: AbortSignal) => Promise<Proposal>) {
     if (pending[proposalId]) return;
     const controller = new AbortController();

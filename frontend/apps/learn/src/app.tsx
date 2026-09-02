@@ -125,8 +125,8 @@ export function LearnApp() {
     setData((current) => current === null ? current : { ...current, state: next });
   };
   return <LearnHeader course={data.course} active={active} provider={provider} timeBudget={data.state.time_budget_minutes ?? null}>
-    {activePhase !== null && activeModule !== null ? <PhaseCard moduleId={activeModule.id} phase={activePhase} state={data.state} serviceOrigin={runtime.runtime.serviceOrigin} surfaceId={activeSurface?.id ?? null} videoSeconds={data.context?.context.video_seconds} onStateOperation={applyStateOperation} /> : null}
-    {activePhase?.kind === 'predict' && activeModule !== null ? <PredictionCard moduleId={activeModule.id} phase={activePhase} state={data.state} client={client} onState={(state) => setData((current) => current === null ? current : { ...current, state })} onRefresh={refreshDurableData} /> : null}
+    {activePhase !== null && activeModule !== null ? <PhaseCard key={`phase:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} serviceOrigin={runtime.runtime.serviceOrigin} surfaceId={activeSurface?.id ?? null} videoSeconds={data.context?.context.video_seconds} onStateOperation={applyStateOperation} onRefresh={refreshDurableData} /> : null}
+    {activePhase?.kind === 'predict' && activeModule !== null ? <PredictionCard key={`prediction:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} client={client} onState={(state) => setData((current) => current === null ? current : { ...current, state })} onRefresh={refreshDurableData} /> : null}
     <ProposalDrawer proposals={data.proposals} state={data.state} client={client} onRefresh={refreshDurableData} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.map((item) => item.id === proposal.id ? proposal : item) })} />
     <Dashboard course={data.course} serviceOrigin={runtime.runtime.serviceOrigin} />
   </LearnHeader>;

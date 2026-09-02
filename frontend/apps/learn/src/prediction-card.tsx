@@ -21,7 +21,10 @@ export function PredictionCard({ moduleId, phase, state, client, onState, onRefr
   const [pending, setPending] = useState(false);
   const alive = useRef(true);
   const flight = useRef<AbortController | null>(null);
-  useEffect(() => () => { alive.current = false; flight.current?.abort(); }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; flight.current?.abort(); };
+  }, []);
   const recordId = phase.completion.type === 'prediction_recorded' ? phase.completion.record_id : null;
   const recorded = recordId !== null && hasStateRecord(state, 'predictions', moduleId, phase.id, recordId);
   if (recordId === null) return null;

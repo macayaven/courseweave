@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ProposalDrawer } from '../src/proposal-drawer';
@@ -55,5 +56,14 @@ describe('ProposalDrawer', () => {
     render(<ProposalDrawer proposals={[pending]} state={{ revision: 7 }} client={api} onRefresh={vi.fn()} onProposal={onProposal} />);
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
     await vi.waitFor(() => expect(onProposal).toHaveBeenCalledWith({ ...pending, status: 'accepted' }));
+  });
+
+  it('continues a successful proposal lifecycle under the real StrictMode entry behavior', async () => {
+    const api = client();
+    const onProposal = vi.fn();
+    render(<StrictMode><ProposalDrawer proposals={[pending]} state={{ revision: 7 }} client={api} onRefresh={vi.fn()} onProposal={onProposal} /></StrictMode>);
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    await vi.waitFor(() => expect(onProposal).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: 'Accept' })).not.toBeDisabled();
   });
 });
