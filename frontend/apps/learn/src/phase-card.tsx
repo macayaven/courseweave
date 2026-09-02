@@ -1,5 +1,5 @@
 import { Button, EmptyState } from '@courseweave/ui';
-import type { CoursePhase, LearnerState } from '@courseweave/ui/courseweave-types';
+import { hasStateRecord, type CoursePhase, type LearnerState } from '@courseweave/ui/courseweave-types';
 import { useEffect, useRef, useState } from 'react';
 
 import type { StateOperation } from './api';
@@ -16,6 +16,7 @@ export interface PhaseCardProps {
   onStateOperation?(operation: StateOperation, signal?: AbortSignal): Promise<void>;
   onRefresh?(): Promise<void>;
   recovery?: boolean;
+  onRecovery?(): void;
 }
 
 function SurfaceAction({ label, serviceOrigin, moduleId, phase, surfaceId }: Pick<PhaseCardProps, 'serviceOrigin' | 'moduleId' | 'phase' | 'surfaceId'> & { label: string }) {
@@ -24,7 +25,7 @@ function SurfaceAction({ label, serviceOrigin, moduleId, phase, surfaceId }: Pic
   return <Button type="button" onClick={() => postOpenSurface(serviceOrigin, { moduleId, phaseId: phase.id, surfaceId: surface.id })}>{label}</Button>;
 }
 
-export function PhaseCard({ moduleId, phase, state, serviceOrigin, surfaceId, videoSeconds, onStateOperation, onRefresh, recovery = false }: PhaseCardProps) {
+export function PhaseCard({ moduleId, phase, state, serviceOrigin, surfaceId, videoSeconds, onStateOperation, onRefresh, recovery = false, onRecovery }: PhaseCardProps) {
   const [orientOpen, setOrientOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reflection, setReflection] = useState('');
@@ -44,8 +45,9 @@ export function PhaseCard({ moduleId, phase, state, serviceOrigin, surfaceId, vi
     reviewFlight.current?.abort();
     setReviewPending(false);
   }, [recovery]);
-  void state;
   if (phase === null) return <EmptyState title="No active course document"><p>Select a course surface to continue.</p></EmptyState>;
+  const completed = phase.completion.type !== 'manual' && hasStateRecord(state, 'completed_phases', moduleId, phase.id, phase.completion.record_id);
+  if (completed) return <section aria-label="Phase completion"><h2>{phase.title}</h2><p role="status">Phase complete</p></section>;
   async function submitReview(operation: Extract<StateOperation, { type: 'record_reflection' | 'record_evidence' }>) {
     if (recovery || reviewPending || onStateOperation === undefined) return;
     const controller = new AbortController();
@@ -63,10 +65,14 @@ export function PhaseCard({ moduleId, phase, state, serviceOrigin, surfaceId, vi
       const conflict = typeof error === 'object' && error !== null
         && ((error as { status?: number }).status === 409 || (error as { code?: string }).code === 'revision_mismatch');
       if (conflict && onRefresh !== undefined) {
-        await onRefresh();
-        if (!alive.current || controller.signal.aborted) return;
-        setReviewNotice('State changed; review the refreshed course state.');
+        try { await onRefresh(); setReviewNotice('State changed; review the refreshed course state.'); } catch (refreshError: unknown) {
+          const status = typeof refreshError === 'object' && refreshError !== null ? (refreshError as { status?: number }).status : undefined;
+          if (status === 401 || status === 403) onRecovery?.();
+          setReviewNotice('State refresh failed. Reconnect to continue.');
+        }
       } else {
+        const status = typeof error === 'object' && error !== null ? (error as { status?: number }).status : undefined;
+        if (status === 401 || status === 403) onRecovery?.();
         setReviewNotice(operation.type === 'record_reflection' ? 'Reflection could not be recorded. Review and try again.' : 'Evidence could not be recorded. Review and try again.');
       }
     } finally {

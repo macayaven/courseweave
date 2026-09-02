@@ -13,8 +13,8 @@
   "scripts": {
     "typecheck": "tsc -b .",
     "build:lib": "tsc -b .",
-    "build:labextension": "jupyter-builder build .",
-    "build": "tsc -b . && jupyter-builder build ."
+    "build:labextension": "uv run --frozen jupyter-builder build .",
+    "build": "tsc -b . && uv run --frozen jupyter-builder build ."
   },
   "dependencies": {
     "@jupyterlab/application": "~4.6.3",

@@ -12,6 +12,6 @@ export function HintLadder({ level }: { level: HintLevel }) {
   const label = LABELS[Math.min(visible, LABELS.length - 1)]!;
   return <section aria-label="Hint ladder">
     <Button type="button" disabled={allowed === 0 || visible >= allowed} onClick={() => setShown((value) => Math.min(value + 1, allowed))}>{label}</Button>
-    {visible > 0 ? <p aria-live="polite">Hint level {visible} of {allowed}</p> : null}
+    {visible > 0 ? <><p aria-live="polite">Hint level {visible} of {allowed}</p><p>Break the task into one verifiable step.</p></> : null}
   </section>;
 }

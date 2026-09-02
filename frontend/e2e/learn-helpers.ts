@@ -19,7 +19,7 @@ export const course = {
   ]
 } as const;
 
-export type MockApi = { active: boolean; surfaceId?: string | null; course?: unknown; authenticatedRequests: number; unhandledRequests?: number };
+export type MockApi = { active: boolean; surfaceId?: string | null; course?: unknown; proposals?: unknown; authenticatedRequests: number; unhandledRequests?: number };
 const serviceOrigin = 'http://127.0.0.1:4173';
 const expectedAuthorization = 'Bearer browser-test-capability';
 
@@ -37,7 +37,7 @@ export async function mountLearner(page: Page, api: MockApi): Promise<FrameLocat
     api.authenticatedRequests += 1;
     const body = route.request().method() === 'GET' && url.pathname === '/api/course' && url.search === '' ? api.course ?? course
       : route.request().method() === 'GET' && url.pathname === '/api/state' && url.search === '' ? { revision: 1, time_budget_minutes: 25 }
-        : route.request().method() === 'GET' && url.pathname === '/api/proposals' && url.search === '' ? []
+        : route.request().method() === 'GET' && url.pathname === '/api/proposals' && url.search === '' ? api.proposals ?? []
           : route.request().method() === 'GET' && url.pathname === '/api/context' && url.search === '?source_id=browser-source' ? { context: { source_id: 'browser-source' }, resolved: api.active ? { module_id: 'module-b', phase_id: 'read-b', surface_id: api.surfaceId ?? 'html-lesson', reason: 'test' } : { module_id: null, phase_id: null, surface_id: null, reason: 'none' } }
             : null;
     if (body === null) throw new Error('Unexpected API contract.');

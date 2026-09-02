@@ -107,6 +107,11 @@ class TestWheelContents:
         self, wheel_contents: dict[str, bytes]
     ) -> None:
         assert "courseweave/static/learn/index.html" in wheel_contents
+        index = wheel_contents["courseweave/static/learn/index.html"].decode()
+        referenced = re.findall(r"/learn/assets/([^\"']+\.(?:js|css))", index)
+        assert referenced
+        for asset in referenced:
+            assert f"courseweave/static/learn/assets/{asset}" in wheel_contents
 
     def test_wheel_contains_labextension_package_metadata(
         self, wheel_contents: dict[str, bytes]

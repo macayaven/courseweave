@@ -16,7 +16,7 @@ export interface PredictionCardProps {
   recovery?: boolean;
 }
 
-export function PredictionCard({ moduleId, phase, state, client, onState, onRefresh, recovery = false }: PredictionCardProps) {
+export function PredictionCard({ moduleId, phase, state, client, onState, onRefresh, recovery = false, onRecovery }: PredictionCardProps & { onRecovery?(): void }) {
   const [text, setText] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -50,10 +50,14 @@ export function PredictionCard({ moduleId, phase, state, client, onState, onRefr
       const conflict = typeof error === 'object' && error !== null
         && ((error as { status?: number }).status === 409 || (error as { code?: string }).code === 'revision_mismatch');
       if (conflict) {
-        await onRefresh();
-        if (!alive.current || controller.signal.aborted) return;
-        setNotice('State changed; review the refreshed course state.');
+        try { await onRefresh(); setNotice('State changed; review the refreshed course state.'); } catch (refreshError: unknown) {
+          const status = typeof refreshError === 'object' && refreshError !== null ? (refreshError as { status?: number }).status : undefined;
+          if (status === 401 || status === 403) onRecovery?.();
+          setNotice('State refresh failed. Reconnect to continue.');
+        }
       } else {
+        const status = typeof error === 'object' && error !== null ? (error as { status?: number }).status : undefined;
+        if (status === 401 || status === 403) onRecovery?.();
         setNotice('Prediction could not be saved. Review and try again.');
       }
     } finally {

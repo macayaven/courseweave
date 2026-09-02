@@ -10,6 +10,18 @@ const client = () => ({ acceptProposal: vi.fn().mockResolvedValue(pending), reje
 afterEach(() => cleanup());
 
 describe('ProposalDrawer', () => {
+  it('refreshes authoritative state after a successful decision and disables every durable action during a shared run', async () => {
+    const api = client();
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+    render(<ProposalDrawer proposals={[pending]} state={{ revision: 7 }} client={api} onRefresh={onRefresh} onProposal={vi.fn()} sharedRunPending />);
+    for (const name of ['Accept', 'Reject', 'Save edit']) expect(screen.getByRole('button', { name })).toBeDisabled();
+    expect(screen.getByLabelText('Edit summary')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    expect(api.acceptProposal).not.toHaveBeenCalled();
+    render(<ProposalDrawer proposals={[pending]} state={{ revision: 7 }} client={api} onRefresh={onRefresh} onProposal={vi.fn()} />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Accept' }).at(-1)!);
+    await vi.waitFor(() => expect(onRefresh).toHaveBeenCalledOnce());
+  });
   it('renders REST pending proposal text and concrete diff', () => {
     render(<ProposalDrawer proposals={[pending]} state={{ revision: 7 }} client={client()} onRefresh={vi.fn()} onProposal={vi.fn()} />);
     expect(screen.getByText('Improve the example')).toBeInTheDocument();

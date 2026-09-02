@@ -1,5 +1,5 @@
 import { Button, EmptyState, StatusBadge, useReducedMotion } from '@courseweave/ui';
-import { findModule, findPhase, findSurface, type CourseManifest, type LearnerState, type Proposal, type ProviderStatus } from '@courseweave/ui/courseweave-types';
+import { findModule, findPhase, findSurface, hasStateRecord, type CourseManifest, type LearnerState, type Proposal, type ProviderStatus } from '@courseweave/ui/courseweave-types';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { CourseweaveApiError, createCourseweaveClient, type StateOperation, type StoredContext } from './api';
@@ -77,9 +77,13 @@ export function LearnApp() {
   const [recovery, setRecovery] = useState(false);
   const [teacherComposer, setTeacherComposer] = useState('');
   const [proposalDrafts, setProposalDrafts] = useState<Record<string, string>>({});
+  const [sharedRunPending, setSharedRunPending] = useState(false);
+  const [teacherHasTranscript, setTeacherHasTranscript] = useState(false);
   const loadedSource = useRef<string | null>(null);
   const activeRead = useRef<AbortController | null>(null);
   const refreshRead = useRef<AbortController | null>(null);
+  const retainedRuntime = useRef<Parameters<typeof createCourseweaveClient>[0] | null>(null);
+  if (runtime.status === 'ready') retainedRuntime.current = runtime.runtime;
 
   const refreshDurableData = useCallback(async () => {
     if (runtime.status !== 'ready' || recovery) return;
@@ -103,6 +107,7 @@ export function LearnApp() {
     setRecovery(true);
     runtime.retry();
   }, [runtime]);
+  const enterRecovery = useCallback(() => setRecovery(true), []);
 
   useEffect(() => {
     if (runtime.status !== 'ready') {
@@ -144,7 +149,8 @@ export function LearnApp() {
     return () => { controller.abort(); if (activeRead.current === controller) activeRead.current = null; };
   }, [runtime.status, runtime.runtime, runtime.contextVersion]);
 
-  if (runtime.status !== 'ready') {
+  const retainSession = teacherHasTranscript || teacherComposer.trim().length > 0 || Object.values(proposalDrafts).some((draft) => draft.trim().length > 0);
+  if (runtime.status !== 'ready' && (data === null || retainedRuntime.current === null || !retainSession)) {
     const hasDraft = teacherComposer.trim().length > 0 || Object.values(proposalDrafts).some((draft) => draft.trim().length > 0);
     return <main className="cw-rail" data-testid="learn-rail"><EmptyState title="Connecting to CourseWeave"><p>Waiting for the trusted JupyterLab bridge.</p><Button type="button" onClick={runtime.retry}>Retry connection</Button>{data !== null && hasDraft ? <UnsentDrafts composer={teacherComposer} onComposer={setTeacherComposer} proposalDrafts={proposalDrafts} onProposalDraft={(id, value) => setProposalDrafts((drafts) => ({ ...drafts, [id]: value }))} /> : null}</EmptyState></main>;
   }
@@ -152,12 +158,13 @@ export function LearnApp() {
     return <main className="cw-rail" data-testid="learn-rail"><ReconnectPanel hasDraft={false} onReconnect={reconnect} /></main>;
   }
   if (data === null) return <main className="cw-rail" data-testid="learn-rail"><p aria-live="polite">Loading course guide…</p></main>;
+  const activeRuntime = runtime.status === 'ready' ? runtime.runtime : retainedRuntime.current!;
   const resolved = data.context?.resolved ?? null;
   const activeModule = resolved?.module_id === null || resolved === null ? null : findModule(data.course, resolved.module_id);
   const activePhase = activeModule === null || resolved?.phase_id === null || resolved === null ? null : findPhase(data.course, activeModule.id, resolved.phase_id);
   const activeSurface = activePhase === null || resolved?.surface_id === null || resolved === null ? null : findSurface(data.course, activeModule!.id, activePhase.id, resolved.surface_id);
   const active = activeModule !== null && activePhase !== null ? { moduleId: activeModule.id, phaseId: activePhase.id } : null;
-  const client = createCourseweaveClient(runtime.runtime);
+  const client = createCourseweaveClient(activeRuntime);
   const allowedShareKinds = activePhase === null ? [] : [
     ...(activePhase.capabilities.share_selection ? ['selection', 'text'] as const : []),
     ...(activePhase.capabilities.share_cell ? ['cell'] as const : []),
@@ -168,12 +175,19 @@ export function LearnApp() {
     const next = await client.patchState({ expected_revision: data.state.revision, operation }, signal);
     setData((current) => current === null ? current : { ...current, state: next });
   };
+  const predictionRequired = activePhase?.completion.type === 'prediction_recorded'
+    && !hasStateRecord(data.state, 'predictions', activeModule?.id ?? '', activePhase.id, activePhase.completion.record_id);
+  const teacherEnabled = !recovery && activePhase !== null && activePhase.capabilities.chat && activePhase.kind !== 'audit' && !predictionRequired;
+  const teacherLockReason = activePhase === null ? 'Teacher help is unavailable until a course phase is active.'
+    : activePhase.kind === 'audit' ? 'Teacher help is locked during audit.'
+      : !activePhase.capabilities.chat ? 'Teacher help is locked by this course phase.'
+        : predictionRequired ? 'Record your prediction before asking the teacher.' : undefined;
   return <LearnHeader course={data.course} active={active} provider={provider} timeBudget={data.state.time_budget_minutes ?? null}>
-    {activePhase !== null && activeModule !== null ? <PhaseCard key={`phase:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} serviceOrigin={runtime.runtime.serviceOrigin} surfaceId={activeSurface?.id ?? null} videoSeconds={data.context?.context.video_seconds} onStateOperation={applyStateOperation} onRefresh={refreshDurableData} recovery={recovery} /> : null}
-    {activePhase?.kind === 'predict' && activeModule !== null ? <PredictionCard key={`prediction:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} client={client} onState={(state) => setData((current) => current === null ? current : { ...current, state })} onRefresh={refreshDurableData} recovery={recovery} /> : null}
-    <ReaderNavigation course={data.course} runtime={runtime.runtime} moduleId={activeModule?.id ?? null} phaseId={activePhase?.id ?? null} activeSurface={activeSurface} contextVersion={data.contextVersion} />
-    <TeacherThread client={client} sourceId={runtime.runtime.sourceId} allowedShareKinds={allowedShareKinds} maxShareChars={data.course.policies?.max_shared_chars ?? 8192} onProvider={setProvider} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.some((item) => item.id === proposal.id) ? current.proposals.map((item) => item.id === proposal.id ? proposal : item) : [...current.proposals, proposal] })} onRefresh={refreshDurableData} composer={teacherComposer} onComposerChange={setTeacherComposer} recovery={recovery} />
-    <ProposalDrawer proposals={data.proposals} state={data.state} client={client} onRefresh={refreshDurableData} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.map((item) => item.id === proposal.id ? proposal : item) })} drafts={proposalDrafts} onDraftsChange={setProposalDrafts} recovery={recovery} />
+    {activePhase !== null && activeModule !== null ? <PhaseCard key={`phase:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} serviceOrigin={activeRuntime.serviceOrigin} surfaceId={activeSurface?.id ?? null} videoSeconds={data.context?.context.video_seconds} onStateOperation={applyStateOperation} onRefresh={refreshDurableData} recovery={recovery} onRecovery={enterRecovery} /> : null}
+    {activePhase?.kind === 'predict' && activeModule !== null ? <PredictionCard key={`prediction:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} client={client} onState={(state) => setData((current) => current === null ? current : { ...current, state })} onRefresh={refreshDurableData} recovery={recovery} onRecovery={enterRecovery} /> : null}
+    <ReaderNavigation course={data.course} runtime={activeRuntime} moduleId={activeModule?.id ?? null} phaseId={activePhase?.id ?? null} activeSurface={activeSurface} contextVersion={data.contextVersion} />
+    <TeacherThread client={client} sourceId={activeRuntime.sourceId} allowedShareKinds={allowedShareKinds} maxShareChars={data.course.policies?.max_shared_chars ?? 8192} onProvider={setProvider} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.some((item) => item.id === proposal.id) ? current.proposals.map((item) => item.id === proposal.id ? proposal : item) : [...current.proposals, proposal] })} onRefresh={refreshDurableData} composer={teacherComposer} onComposerChange={setTeacherComposer} recovery={recovery} enabled={teacherEnabled} lockReason={teacherLockReason} onRecovery={enterRecovery} onSharedRunPending={setSharedRunPending} sharedRunPending={sharedRunPending} onTranscriptChange={setTeacherHasTranscript} />
+    <ProposalDrawer proposals={data.proposals} state={data.state} client={client} onRefresh={refreshDurableData} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.map((item) => item.id === proposal.id ? proposal : item) })} drafts={proposalDrafts} onDraftsChange={setProposalDrafts} recovery={recovery} sharedRunPending={sharedRunPending} onRecovery={enterRecovery} />
     {recovery ? <ReconnectPanel hasDraft={teacherComposer.trim().length > 0 || Object.values(proposalDrafts).some((draft) => draft.trim().length > 0)} onReconnect={reconnect} /> : null}
   </LearnHeader>;
 }

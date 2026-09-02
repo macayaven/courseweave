@@ -6,6 +6,26 @@ import { TeacherThread } from '../src/teacher-thread';
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('TeacherThread', () => {
+  it('renders the authoritative teacher lock and does not start a guide run', () => {
+    const postGuide = vi.fn();
+    render(<TeacherThread client={{ postGuide, share: vi.fn(), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={[]} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} enabled={false} lockReason="Record your prediction before asking the teacher." />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'help' } });
+    expect(screen.getByRole('button', { name: 'Ask teacher' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Record your prediction before asking the teacher.');
+    expect(postGuide).not.toHaveBeenCalled();
+  });
+
+  it('keeps a newer composer draft when an older guide run finishes', async () => {
+    let resolveGuide: ((response: Response) => void) | undefined;
+    const postGuide = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { resolveGuide = resolve; }));
+    render(<TeacherThread client={{ postGuide, share: vi.fn(), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={[]} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'first request' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask teacher' }));
+    await vi.waitFor(() => expect(postGuide).toHaveBeenCalledOnce());
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'next unsent draft' } });
+    await act(async () => resolveGuide?.(new Response('data: {"type":"RUN_STARTED","threadId":"' + postGuide.mock.calls[0]![0].threadId + '","runId":"' + postGuide.mock.calls[0]![0].runId + '"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\ndata: {"type":"RUN_FINISHED","threadId":"' + postGuide.mock.calls[0]![0].threadId + '","runId":"' + postGuide.mock.calls[0]![0].runId + '"}\n\n')));
+    expect(screen.getByLabelText('Ask the teacher')).toHaveValue('next unsent draft');
+  });
   it('posts only a fresh minimal AG-UI request and renders incremental trusted text', async () => {
     const postGuide = vi.fn().mockResolvedValue(new Response('', { headers: { 'content-type': 'text/event-stream' } }));
     render(<TeacherThread client={{ postGuide, share: vi.fn(), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={[]} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
@@ -25,6 +45,16 @@ describe('TeacherThread', () => {
     expect(screen.getByLabelText('Ask the teacher')).toHaveValue('keep me');
     expect(onProvider).toHaveBeenCalledWith('not_configured');
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('promotes a denied teacher action to recovery with an explicit reconnect message', async () => {
+    const onRecovery = vi.fn();
+    const postGuide = vi.fn().mockRejectedValue({ status: 401 });
+    render(<TeacherThread client={{ postGuide, share: vi.fn(), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={[]} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} onRecovery={onRecovery} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'reconnect me' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask teacher' }));
+    expect(await screen.findByText('Teacher access expired. Reconnect to continue.')).toBeInTheDocument();
+    expect(onRecovery).toHaveBeenCalledOnce();
   });
 
   it('keeps one thread identity when trusted active-phase props change', async () => {

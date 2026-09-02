@@ -13,7 +13,7 @@ type TeacherClient = {
 
 type TranscriptItem = { id: string; text: string; state: 'streaming' | 'finished' | 'interrupted' | 'failed' };
 
-export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareChars, onProvider, onProposal, onRefresh, composer: controlledComposer, onComposerChange, onDraftChange, recovery = false }: { client: TeacherClient; sourceId: string; allowedShareKinds: ShareKind[]; maxShareChars: number; onProvider(status: ProviderStatus): void; onProposal(proposal: Proposal): void; onRefresh(): Promise<void>; composer?: string; onComposerChange?(value: string): void; onDraftChange?(hasDraft: boolean): void; recovery?: boolean }) {
+export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareChars, onProvider, onProposal, onRefresh, composer: controlledComposer, onComposerChange, onDraftChange, recovery = false, enabled = true, lockReason, onRecovery, onSharedRunPending, sharedRunPending = false, onTranscriptChange }: { client: TeacherClient; sourceId: string; allowedShareKinds: ShareKind[]; maxShareChars: number; onProvider(status: ProviderStatus): void; onProposal(proposal: Proposal): void; onRefresh(): Promise<void>; composer?: string; onComposerChange?(value: string): void; onDraftChange?(hasDraft: boolean): void; recovery?: boolean; enabled?: boolean; lockReason?: string; onRecovery?(): void; onSharedRunPending?(pending: boolean): void; sharedRunPending?: boolean; onTranscriptChange?(hasTranscript: boolean): void }) {
   const [threadId] = useState(() => crypto.randomUUID());
   const [internalComposer, setInternalComposer] = useState('');
   const composer = controlledComposer ?? internalComposer;
@@ -27,10 +27,13 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
   const candidateFlights = useRef(new Map<string, AbortController>());
   const shareTrigger = useRef<HTMLButtonElement>(null);
   const composerTextarea = useRef<HTMLTextAreaElement>(null);
+  const composerValue = useRef(composer);
+  composerValue.current = composer;
   const pendingShareFocus = useRef(false);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; pendingShareFocus.current = false; active.current?.abort(); candidateFlights.current.forEach((controller) => controller.abort()); }; }, []);
   useEffect(() => { onDraftChange?.(composer.trim().length > 0); }, [composer, onDraftChange]);
+  useEffect(() => { onTranscriptChange?.(transcript.length > 0); }, [transcript, onTranscriptChange]);
   useEffect(() => {
     if (!recovery) return;
     active.current?.abort();
@@ -50,7 +53,7 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
   useEffect(() => {
     if (pending || !pendingShareFocus.current) return;
     pendingShareFocus.current = false;
-    if (recovery) return;
+    if (recovery || sharedRunPending) return;
     if (!shareTrigger.current?.disabled) { shareTrigger.current?.focus(); return; }
     if (!composerTextarea.current?.disabled) composerTextarea.current?.focus();
   }, [pending, recovery]);
@@ -78,18 +81,21 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
     } catch (error: unknown) {
       if (!alive.current || controller.signal.aborted) return;
       const status = typeof error === 'object' && error !== null ? (error as { status?: number }).status : undefined;
+      if (status === 401 || status === 403) onRecovery?.();
       setCandidates((items) => items.filter((item) => item.id !== id));
       setNotice(status === 403 || status === 404 || status === 409 ? 'Suggested change is unavailable. Ask the teacher again.' : 'Suggested change could not be saved.');
     } finally { candidateFlights.current.delete(id); }
   }
 
   async function send(shared?: { kind: ShareKind; content: string; label?: string }) {
-    if (recovery || pending || composer.trim().length === 0) return;
+    if (recovery || !enabled || pending || composer.trim().length === 0) return;
+    const submittedComposer = composer;
     const controller = new AbortController();
     active.current = controller;
     const runId = crypto.randomUUID();
     const messageKey = crypto.randomUUID();
     setPending(true);
+    if (shared !== undefined) onSharedRunPending?.(true);
     setNotice(null);
     try {
       if (shared !== undefined) {
@@ -97,7 +103,7 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
         if (!alive.current || controller.signal.aborted) return;
         setShareOpen(false);
       }
-      const body = { threadId, runId, messages: [{ id: messageKey, role: 'user' as const, content: composer }], tools: [] as [], context: [] as [], forwardedProps: { source_id: sourceId } };
+      const body = { threadId, runId, messages: [{ id: messageKey, role: 'user' as const, content: submittedComposer }], tools: [] as [], context: [] as [], forwardedProps: { source_id: sourceId } };
       const response = await client.postGuide(body, controller.signal);
       const outcome = await consumeAguiStream(response.body!, { threadId, runId }, (event: AguiEvent) => {
         if (event.type === 'TEXT_MESSAGE_START') setTranscript((items) => [...items, { id: messageKey, text: '', state: 'streaming' }]);
@@ -109,7 +115,7 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
         finishPartial(messageKey, 'finished');
         if (outcome.candidates.length > 0) onProvider('ready');
         setCandidates((items) => [...items, ...outcome.candidates.map((id) => ({ id, pending: false }))]);
-        setComposer('');
+        if (composerValue.current === submittedComposer) setComposer('');
       } else if (outcome.status === 'error') {
         finishPartial(messageKey, 'failed');
         onProvider('provider_error');
@@ -124,13 +130,16 @@ export function TeacherThread({ client, sourceId, allowedShareKinds, maxShareCha
       finishPartial(messageKey, 'failed');
       if (shared !== undefined) setShareOpen(false);
       const code = typeof error === 'object' && error !== null ? (error as { code?: string }).code : undefined;
-      if (code === 'not_configured') { onProvider('not_configured'); setNotice('Teacher unavailable'); }
+      const status = typeof error === 'object' && error !== null ? (error as { status?: number }).status : undefined;
+      if (status === 401 || status === 403) { onRecovery?.(); setNotice('Teacher access expired. Reconnect to continue.'); }
+      else if (code === 'not_configured') { onProvider('not_configured'); setNotice('Teacher unavailable'); }
       else if (code === 'provider_error') { onProvider('provider_error'); setNotice('Teacher unavailable'); }
       else setNotice('Teacher connection interrupted. Your draft is unsent.');
     } finally {
       if (alive.current && active.current === controller) { active.current = null; setPending(false); }
+      if (shared !== undefined) onSharedRunPending?.(false);
     }
   }
 
-  return <section aria-label="Teacher thread"><h2>Teacher</h2>{transcript.map((item) => <p key={item.id} data-state={item.state} data-testid={item.state === 'interrupted' ? 'interrupted-stream' : undefined}>{item.text}</p>)}<label>Ask the teacher<textarea ref={composerTextarea} value={composer} onChange={(event) => setComposer(event.target.value)} /></label><Button type="button" disabled={recovery || pending || composer.trim().length === 0} onClick={() => void send()}>Ask teacher</Button>{allowedShareKinds.length > 0 ? <button ref={shareTrigger} type="button" className="cw-button" disabled={recovery || pending || composer.trim().length === 0} onClick={() => setShareOpen(true)}>Share before asking</button> : null}{shareOpen ? <ShareDialog maxChars={maxShareChars} allowedKinds={allowedShareKinds} onCancel={() => setShareOpen(false)} onConfirm={send} restoreFocus={restoreShareFocus} /> : null}{candidates.map((candidate) => <section key={candidate.id}><p>Suggested change ready for review.</p><Button type="button" disabled={recovery || candidate.pending} onClick={() => void persistCandidate(candidate.id)}>Save suggested change</Button></section>)}{notice ? <p role="status">{notice}</p> : null}{notice && composer.trim().length > 0 ? <Button type="button" disabled={recovery || pending} onClick={() => void send()}>Retry</Button> : null}</section>;
+  return <section aria-label="Teacher thread"><h2>Teacher</h2>{transcript.map((item) => <p key={item.id} data-state={item.state} data-testid={item.state === 'interrupted' ? 'interrupted-stream' : undefined}>{item.text}</p>)}<label>Ask the teacher<textarea ref={composerTextarea} value={composer} onChange={(event) => setComposer(event.target.value)} /></label>{!enabled && lockReason ? <p role="status">{lockReason}</p> : null}<Button type="button" disabled={recovery || !enabled || pending || composer.trim().length === 0} onClick={() => void send()}>Ask teacher</Button>{allowedShareKinds.length > 0 ? <button ref={shareTrigger} type="button" className="cw-button" disabled={recovery || !enabled || pending || composer.trim().length === 0} onClick={() => setShareOpen(true)}>Share before asking</button> : null}{shareOpen ? <ShareDialog maxChars={maxShareChars} allowedKinds={allowedShareKinds} onCancel={() => setShareOpen(false)} onConfirm={send} restoreFocus={restoreShareFocus} /> : null}{candidates.map((candidate) => <section key={candidate.id}><p>Suggested change ready for review.</p><Button type="button" disabled={recovery || sharedRunPending || candidate.pending} onClick={() => void persistCandidate(candidate.id)}>Save suggested change</Button></section>)}{notice ? <p role="status">{notice}</p> : null}{notice && composer.trim().length > 0 ? <Button type="button" disabled={recovery || !enabled || pending} onClick={() => void send()}>Retry</Button> : null}</section>;
 }
