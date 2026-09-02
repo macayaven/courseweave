@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useReducer } from 'react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { AuthorManifest } from '@courseweave/ui';
 import { LearnerPhasePreview } from '@courseweave/ui';
 import { createDraft, draftReducer, projectDraft, type AuthorDocumentState } from '../src/draft';
@@ -16,6 +16,7 @@ function Harness({ selection }: { selection: AuthorDocumentState['selection'] })
   const [state, dispatch] = useReducer(draftReducer, { draft: createDraft(manifest), selection, validation: 'valid', saved: manifest } satisfies AuthorDocumentState);
   return <><Inspector state={state} dispatch={dispatch} /><output>{JSON.stringify(projectDraft(state.draft))}</output></>;
 }
+function projected(): AuthorManifest { return JSON.parse(document.querySelector('output')?.textContent ?? '') as AuthorManifest; }
 
 describe('Inspector', () => {
   it('projects every learner phase kind as explicitly inert draft-only preview', () => {
@@ -30,10 +31,11 @@ describe('Inspector', () => {
   });
 
   it('renders every course, policy, module, phase, capability, and completion control using native labelled fields', () => {
-    const { rerender } = render(<Harness selection={{ type: 'course' }} />);
+    const view = render(<Harness selection={{ type: 'course' }} />);
     for (const label of ['Course ID', 'Course title', 'Course description', 'Entry module', 'Content sharing', 'Durable mutation', 'Terminal execution', 'Conversation memory', 'Max shared characters', 'Workspace write glob 1']) expect(screen.getByLabelText(label)).toBeInTheDocument();
-    rerender(<Harness selection={{ type: 'module', moduleKey: createDraft(manifest).modules[0]!.clientKey }} />);
-    // A new Harness has distinct client keys, so select the visible course instead for the immutable module/phase coverage below.
+    view.unmount();
+    render(<Harness selection={{ type: 'module', moduleKey: createDraft(manifest).modules[0]!.clientKey }} />);
+    for (const label of ['Module ID', 'Module title', 'Module description']) expect(screen.getByLabelText(label)).toBeInTheDocument();
   });
 
   it('renders module metadata, all enum options, capabilities, and all completion variants', () => {
@@ -62,6 +64,7 @@ describe('Inspector', () => {
     expect(screen.getByLabelText('External URL')).toBeInTheDocument();
     expect(screen.queryByLabelText('Path')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Cell ID 1')).not.toBeInTheDocument();
+    expect(projected().modules[0]!.phases[0]!.surfaces[0]).toEqual({ id: 'surface', type: 'external', role: 'primary', url: 'https://example.test/' });
     fireEvent.change(screen.getByLabelText('Surface type'), { target: { value: 'terminal' } });
     for (const label of ['Terminal label', 'Argument 1', 'Working directory']) expect(screen.getByLabelText(label)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Surface type'), { target: { value: 'video' } });
@@ -69,5 +72,28 @@ describe('Inspector', () => {
     fireEvent.change(screen.getByLabelText('Video location'), { target: { value: 'remote' } });
     expect(screen.getByLabelText('Video URL')).toBeInTheDocument();
     expect(screen.queryByLabelText('Path')).not.toBeInTheDocument();
+    expect(projected().modules[0]!.phases[0]!.surfaces[0]).toEqual({ id: 'surface', type: 'video', role: 'primary', url: 'https://example.test/video.mp4' });
+  });
+
+  it('adds and removes list values and removes empty optional video ranges from the projection', () => {
+    const courseView = render(<Harness selection={{ type: 'course' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add workspace write glob' }));
+    fireEvent.change(screen.getByLabelText('Workspace write glob 2'), { target: { value: 'notes/**' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove workspace write glob 1' }));
+    expect(projected().policies.workspace_write_globs).toEqual(['notes/**']);
+    courseView.unmount();
+
+    const view = render(<Harness selection={{ type: 'surface', moduleKey: 'draft-1', phaseKey: 'draft-2', surfaceKey: 'draft-3' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove cell tag 1' }));
+    expect(projected().modules[0]!.phases[0]!.surfaces[0]).toMatchObject({ match: { cell_ids: ['cell-1'] } });
+    fireEvent.change(screen.getByLabelText('Surface type'), { target: { value: 'video' } });
+    fireEvent.change(screen.getByLabelText('Start seconds'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('End seconds'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Start seconds'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('End seconds'), { target: { value: '' } });
+    expect(projected().modules[0]!.phases[0]!.surfaces[0]).toEqual({ id: 'surface', type: 'video', role: 'primary', path: 'video.mp4' });
+    view.unmount();
   });
 });
+
+afterEach(cleanup);

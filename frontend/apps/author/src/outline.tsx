@@ -42,7 +42,7 @@ function SelectButton({ label, itemKey, itemKind, selection, dispatch }: { label
 }
 function SurfaceRow({ module, phase, surface, state, dispatch }: { module: DraftModule; phase: DraftPhase; surface: DraftSurface; state: AuthorDocumentState; dispatch: Dispatch<DraftAction> }) {
   const select = { type: 'surface' as const, moduleKey: module.clientKey, phaseKey: phase.clientKey, surfaceKey: surface.clientKey };
-  return <li><SelectButton label={`Select surface ${surface.id || 'unnamed'}`} itemKey={surface.clientKey} itemKind="surface" selection={state.selection} dispatch={dispatch} />
+  return <li><SelectButton label={`Select surface ${surface.id || 'unnamed'}`} itemKey={surface.clientKey} itemKind="surface" selection={state.selection} dispatch={() => dispatch({ type: 'select', selection: select })} />
     {selected(state.selection, surface.clientKey) ? <span>
       <Button type="button" onClick={() => dispatch({ type: 'surface.create', moduleKey: module.clientKey, phaseKey: phase.clientKey })}>Add surface</Button>
       <Button type="button" onClick={() => dispatch({ type: 'surface.duplicate', moduleKey: module.clientKey, phaseKey: phase.clientKey, surfaceKey: surface.clientKey })}>Duplicate surface {surface.id || 'unnamed'}</Button>
@@ -55,6 +55,7 @@ function PhaseRow({ module, phase, state, dispatch }: { module: DraftModule; pha
   const select = { type: 'phase' as const, moduleKey: module.clientKey, phaseKey: phase.clientKey };
   return <li><SelectButton label={`Select phase ${phase.title || phase.id || 'unnamed'}`} itemKey={phase.clientKey} itemKind="phase" selection={state.selection} dispatch={() => dispatch({ type: 'select', selection: select })} />
     {selected(state.selection, phase.clientKey) ? <span>
+      <Button type="button" onClick={() => dispatch({ type: 'surface.create', moduleKey: module.clientKey, phaseKey: phase.clientKey })}>Add surface</Button>
       <Button type="button" onClick={() => dispatch({ type: 'phase.create', moduleKey: module.clientKey })}>Add phase</Button>
       <Button type="button" onClick={() => dispatch({ type: 'phase.duplicate', moduleKey: module.clientKey, phaseKey: phase.clientKey })}>Duplicate phase {phase.title || phase.id || 'unnamed'}</Button>
       <Button type="button" onClick={() => dispatch({ type: 'phase.delete', moduleKey: module.clientKey, phaseKey: phase.clientKey })}>Delete phase {phase.title || phase.id || 'unnamed'}</Button>
@@ -68,6 +69,7 @@ function ModuleRow({ module, state, dispatch }: { module: DraftModule; state: Au
   const select = { type: 'module' as const, moduleKey: module.clientKey };
   return <li><SelectButton label={`Select module ${module.title || module.id || 'unnamed'}`} itemKey={module.clientKey} itemKind="module" selection={state.selection} dispatch={() => dispatch({ type: 'select', selection: select })} />
     {selected(state.selection, module.clientKey) ? <span>
+      <Button type="button" onClick={() => dispatch({ type: 'phase.create', moduleKey: module.clientKey })}>Add phase</Button>
       <Button type="button" onClick={() => dispatch({ type: 'module.duplicate', moduleKey: module.clientKey })}>Duplicate module {module.title || module.id || 'unnamed'}</Button>
       <Button type="button" onClick={() => dispatch({ type: 'module.delete', moduleKey: module.clientKey })}>Delete module {module.title || module.id || 'unnamed'}</Button>
       <Button type="button" onClick={() => dispatch({ type: 'module.move', moduleKey: module.clientKey, direction: 'up' })}>Move module {module.title || module.id || 'unnamed'} up</Button>

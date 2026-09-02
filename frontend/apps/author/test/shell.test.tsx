@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 const mocks = vi.hoisted(() => ({
   getCourse: vi.fn(),
@@ -57,5 +58,16 @@ describe('Author shell', () => {
     expect(await screen.findByRole('button', { name: 'Select module Module' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add module' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  it('hydrates each canonical example as a clean local draft', async () => {
+    mocks.useAuthorRuntime.mockReturnValue({ status: 'ready', runtime: readyRuntime, retry: mocks.retry });
+    for (const path of ['../../../../examples/minimal-course/courseweave.json', '../../../../examples/cli-course/courseweave.json']) {
+      const manifest = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
+      mocks.getCourse.mockResolvedValue({ manifest, raw: JSON.stringify(manifest), etag: '"etag"' });
+      render(<AuthorApp />);
+      expect(await screen.findByText('Draft matches the loaded course.')).toBeInTheDocument();
+      cleanup();
+    }
   });
 });

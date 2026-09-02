@@ -14,8 +14,8 @@ const manifest: AuthorManifest = {
   ],
 };
 
-function Harness() {
-  const [state, dispatch] = useReducer(draftReducer, { draft: createDraft(manifest), selection: { type: 'course' }, validation: 'valid', saved: manifest } satisfies AuthorDocumentState);
+function Harness({ course = manifest }: { course?: AuthorManifest }) {
+  const [state, dispatch] = useReducer(draftReducer, { draft: createDraft(course), selection: { type: 'course' }, validation: 'valid', saved: course } satisfies AuthorDocumentState);
   return <><Outline state={state} dispatch={dispatch} /><output>{state.draft.modules.map((module) => module.id).join(',')}</output></>;
 }
 
@@ -49,6 +49,22 @@ describe('Outline', () => {
     expect(screen.getAllByRole('status')[0]).toHaveTextContent('Deleted module Second.');
     expect(screen.getByRole('button', { name: 'Select module First' })).toHaveFocus();
     expect(screen.getByText('first')).toBeInTheDocument();
+  });
+
+  it('keeps phase and surface creation reachable and restores focus to their parent after final deletion', () => {
+    const single: AuthorManifest = { ...manifest, modules: [manifest.modules[0]!] };
+    render(<Harness course={single} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Select module First' }));
+    expect(screen.getByRole('button', { name: 'Add phase' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select phase Read' }));
+    expect(screen.getByRole('button', { name: 'Add surface' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select surface page' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete surface page' }));
+    expect(screen.getByRole('button', { name: 'Select phase Read' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Add surface' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete phase Read' }));
+    expect(screen.getByRole('button', { name: 'Select module First' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Add phase' })).toBeInTheDocument();
   });
 });
 

@@ -4,7 +4,7 @@ export type ClientKey = string;
 export type DraftSurface = AuthorSurface & { clientKey: ClientKey };
 export interface DraftPhase extends Omit<AuthorPhase, 'surfaces'> { clientKey: ClientKey; surfaces: DraftSurface[]; }
 export interface DraftModule extends Omit<AuthorModule, 'phases'> { clientKey: ClientKey; phases: DraftPhase[]; }
-export interface DraftManifest extends Omit<AuthorManifest, 'modules'> { clientKey: ClientKey; modules: DraftModule[]; nextClientKey: number; }
+export interface DraftManifest extends Omit<AuthorManifest, 'modules'> { clientKey: ClientKey; modules: DraftModule[]; nextClientKey: number; entryModuleKey: ClientKey | null; }
 export type DraftSelection =
   | { type: 'course' }
   | { type: 'module'; moduleKey: ClientKey }
@@ -24,6 +24,7 @@ type SurfaceType = AuthorSurface['type'];
 export type DraftAction =
   | { type: 'select'; selection: DraftSelection }
   | { type: 'course.update'; patch: Partial<Pick<AuthorManifest, 'id' | 'title' | 'description' | 'entry_module_id'>> }
+  | { type: 'entry.select'; moduleKey: ClientKey | null }
   | { type: 'policy.update'; patch: Partial<AuthorPolicies> }
   | { type: 'module.create'; module?: AuthorModule }
   | { type: 'module.update'; moduleKey: ClientKey; patch: Partial<Pick<AuthorModule, 'id' | 'title' | 'description'>> }
@@ -63,27 +64,37 @@ function decorateModule(value: AuthorModule, counter: number): { module: DraftMo
 export function createDraft(manifest: AuthorManifest): DraftManifest {
   let next = 1;
   const modules = manifest.modules.map((module) => { const decorated = decorateModule(module, next); next = decorated.next; return decorated.module; });
-  return { ...manifest, clientKey: 'draft-course', modules, policies: { ...manifest.policies, workspace_write_globs: [...manifest.policies.workspace_write_globs] }, nextClientKey: next };
+  return { ...manifest, clientKey: 'draft-course', modules, policies: { ...manifest.policies, workspace_write_globs: [...manifest.policies.workspace_write_globs] }, nextClientKey: next, entryModuleKey: modules.find((module) => module.id === manifest.entry_module_id)?.clientKey ?? null };
 }
 function projectSurface(surface: DraftSurface): AuthorSurface {
   const { clientKey: _clientKey, ...rest } = surface;
-  if (rest.type === 'notebook') return { ...rest, match: rest.match === undefined ? undefined : { cell_ids: rest.match.cell_ids === undefined ? undefined : [...rest.match.cell_ids], cell_tags: rest.match.cell_tags === undefined ? undefined : [...rest.match.cell_tags] } };
+  if (rest.type === 'notebook') {
+    const cell_ids = rest.match?.cell_ids === undefined ? undefined : [...rest.match.cell_ids];
+    const cell_tags = rest.match?.cell_tags === undefined ? undefined : [...rest.match.cell_tags];
+    return cell_ids === undefined && cell_tags === undefined ? { id: rest.id, type: rest.type, role: rest.role, path: rest.path } : { ...rest, match: { ...(cell_ids === undefined ? {} : { cell_ids }), ...(cell_tags === undefined ? {} : { cell_tags }) } };
+  }
   if (rest.type === 'terminal') return { ...rest, argv: [...rest.argv] };
   return rest;
 }
 /** The only boundary that removes Author-only identity from a draft. */
 export function projectDraft(draft: DraftManifest): AuthorManifest {
-  const { clientKey: _clientKey, nextClientKey: _nextClientKey, modules, ...course } = draft;
+  const { clientKey: _clientKey, nextClientKey: _nextClientKey, entryModuleKey, modules, ...course } = draft;
   return {
     ...course,
     policies: { ...course.policies, workspace_write_globs: [...course.policies.workspace_write_globs] },
+    entry_module_id: modules.find((module) => module.clientKey === entryModuleKey)?.id ?? null,
     modules: modules.map(({ clientKey: _moduleKey, phases, ...module }) => ({
       ...module,
       phases: phases.map(({ clientKey: _phaseKey, surfaces, capabilities, completion, ...phase }) => ({ ...phase, capabilities: cloneCapabilities(capabilities), completion: cloneCompletion(completion), surfaces: surfaces.map(projectSurface) })),
     })),
   };
 }
-export function isDraftDirty(draft: DraftManifest, saved: AuthorManifest | null): boolean { return saved === null || JSON.stringify(projectDraft(draft)) !== JSON.stringify(saved); }
+function normalized(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalized);
+  if (typeof value !== 'object' || value === null) return value;
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([name, item]) => [name, normalized(item)]));
+}
+export function isDraftDirty(draft: DraftManifest, saved: AuthorManifest | null): boolean { return saved === null || JSON.stringify(normalized(projectDraft(draft))) !== JSON.stringify(normalized(saved)); }
 export function uniqueSlug(base: string, occupied: ReadonlySet<string>): string {
   const stem = base.length > 0 ? base : 'copy';
   if (!occupied.has(stem)) return stem;
@@ -103,10 +114,6 @@ export function createSurfaceStart(type: SurfaceType = 'markdown'): AuthorSurfac
 }
 export function createPhaseStart(id = 'phase'): AuthorPhase { return { id, title: 'New phase', kind: 'read', teacher_mode: 'reading_companion', surfaces: [createSurfaceStart()], completion: { type: 'manual' }, capabilities: cloneCapabilities(defaultCapabilities) }; }
 export function createModuleStart(id = 'module'): AuthorModule { return { id, title: 'New module', description: '', phases: [createPhaseStart()] }; }
-function allocate(draft: DraftManifest): { draft: DraftManifest; take(): ClientKey } {
-  let next = draft.nextClientKey;
-  return { draft: { ...draft, nextClientKey: next }, take: () => key(next++) };
-}
 function withDraft(state: AuthorDocumentState, draft: DraftManifest, changes: Partial<AuthorDocumentState> = {}): AuthorDocumentState { return { ...state, ...changes, draft, validation: 'idle' }; }
 function move<T>(items: readonly T[], index: number, direction: Direction): T[] {
   const target = direction === 'up' ? index - 1 : index + 1;
@@ -125,25 +132,28 @@ function duplicateSurface(surface: DraftSurface, id: string, clientKey: ClientKe
 
 export function draftReducer(state: AuthorDocumentState, action: DraftAction): AuthorDocumentState {
   if (action.type === 'select') return { ...state, selection: action.selection, focusKey: undefined };
-  if (action.type === 'course.update') return withDraft(state, { ...state.draft, ...action.patch });
+  if (action.type === 'course.update') {
+    const entryModuleKey = action.patch.entry_module_id === undefined ? state.draft.entryModuleKey : state.draft.modules.find((module) => module.id === action.patch.entry_module_id)?.clientKey ?? null;
+    return withDraft(state, { ...state.draft, ...action.patch, entryModuleKey });
+  }
+  if (action.type === 'entry.select') return withDraft(state, { ...state.draft, entryModuleKey: action.moduleKey });
   if (action.type === 'policy.update') return withDraft(state, { ...state.draft, policies: { ...state.draft.policies, ...action.patch, workspace_write_globs: action.patch.workspace_write_globs === undefined ? state.draft.policies.workspace_write_globs : [...action.patch.workspace_write_globs] } });
   if (action.type === 'module.create') {
     const source = action.module ?? createModuleStart(uniqueSlug('module', occupiedModuleIds(state.draft)));
     const decorated = decorateModule({ ...source, id: uniqueSlug(source.id, occupiedModuleIds(state.draft)) }, state.draft.nextClientKey);
-    const draft = { ...state.draft, modules: [...state.draft.modules, decorated.module], nextClientKey: decorated.next, entry_module_id: state.draft.entry_module_id ?? decorated.module.id };
+    const draft = { ...state.draft, modules: [...state.draft.modules, decorated.module], nextClientKey: decorated.next, entryModuleKey: state.draft.entryModuleKey ?? decorated.module.clientKey };
     return withDraft(state, draft, { selection: { type: 'module', moduleKey: decorated.module.clientKey }, focusKey: decorated.module.clientKey, notice: `Added module ${decorated.module.title}.` });
   }
   if (action.type === 'module.update') {
     const current = state.draft.modules.find((module) => module.clientKey === action.moduleKey); if (current === undefined) return state;
-    const nextId = action.patch.id ?? current.id;
     const draft = updateModule(state.draft, action.moduleKey, (module) => ({ ...module, ...action.patch }));
-    return withDraft(state, { ...draft, entry_module_id: draft.entry_module_id === current.id ? nextId : draft.entry_module_id });
+    return withDraft(state, draft);
   }
   if (action.type === 'module.delete') {
     const index = moduleIndex(state.draft, action.moduleKey); const deleted = state.draft.modules[index]; if (deleted === undefined) return state;
     const modules = state.draft.modules.filter((module) => module.clientKey !== action.moduleKey); const fallback = modules[Math.min(index, modules.length - 1)];
-    const entry = state.draft.entry_module_id === deleted.id ? (fallback?.id ?? null) : state.draft.entry_module_id;
-    return withDraft(state, { ...state.draft, modules, entry_module_id: entry }, { selection: fallback === undefined ? { type: 'course' } : { type: 'module', moduleKey: fallback.clientKey }, focusKey: fallback?.clientKey, notice: `Deleted module ${deleted.title}.` });
+    const entryModuleKey = state.draft.entryModuleKey === deleted.clientKey ? (fallback?.clientKey ?? null) : state.draft.entryModuleKey;
+    return withDraft(state, { ...state.draft, modules, entryModuleKey }, { selection: fallback === undefined ? { type: 'course' } : { type: 'module', moduleKey: fallback.clientKey }, focusKey: fallback?.clientKey, notice: `Deleted module ${deleted.title}.` });
   }
   if (action.type === 'module.move') {
     const index = moduleIndex(state.draft, action.moduleKey); const current = state.draft.modules[index]; if (current === undefined) return state;
@@ -151,11 +161,12 @@ export function draftReducer(state: AuthorDocumentState, action: DraftAction): A
   }
   if (action.type === 'module.duplicate') {
     const index = moduleIndex(state.draft, action.moduleKey); const source = state.draft.modules[index]; if (source === undefined) return state;
-    let next = state.draft.nextClientKey; const moduleId = uniqueSlug(source.id, occupiedModuleIds(state.draft));
+    let next = state.draft.nextClientKey; const moduleId = uniqueSlug(source.id, occupiedModuleIds(state.draft)); const phaseIds = occupiedPhaseIds(source);
     const phases = source.phases.map((phase) => {
-      const phaseId = uniqueSlug(phase.id, new Set([...occupiedPhaseIds(source), ...source.phases.map((candidate) => candidate.id)]));
+      const phaseId = uniqueSlug(phase.id, phaseIds); phaseIds.add(phaseId);
       const phaseKey = key(next++);
-      const surfaces = phase.surfaces.map((surface) => duplicateSurface(surface, uniqueSlug(surface.id, occupiedSurfaceIds(phase)), key(next++)));
+      const surfaceIds = occupiedSurfaceIds(phase);
+      const surfaces = phase.surfaces.map((surface) => { const id = uniqueSlug(surface.id, surfaceIds); surfaceIds.add(id); return duplicateSurface(surface, id, key(next++)); });
       return { ...phase, id: phaseId, clientKey: phaseKey, surfaces, completion: cloneCompletion(phase.completion), capabilities: cloneCapabilities(phase.capabilities) };
     });
     const copy: DraftModule = { ...source, id: moduleId, clientKey: key(next++), phases };
@@ -172,7 +183,7 @@ export function draftReducer(state: AuthorDocumentState, action: DraftAction): A
   if (action.type === 'phase.delete') {
     const index = phaseIndex(module, action.phaseKey); const deleted = module.phases[index]; if (deleted === undefined) return state;
     const phases = module.phases.filter((phase) => phase.clientKey !== action.phaseKey); const fallback = phases[Math.min(index, phases.length - 1)];
-    return withDraft(state, updateModule(state.draft, action.moduleKey, (candidate) => ({ ...candidate, phases })), { selection: fallback === undefined ? { type: 'module', moduleKey: module.clientKey } : { type: 'phase', moduleKey: module.clientKey, phaseKey: fallback.clientKey }, focusKey: fallback?.clientKey, notice: `Deleted phase ${deleted.title}.` });
+    return withDraft(state, updateModule(state.draft, action.moduleKey, (candidate) => ({ ...candidate, phases })), { selection: fallback === undefined ? { type: 'module', moduleKey: module.clientKey } : { type: 'phase', moduleKey: module.clientKey, phaseKey: fallback.clientKey }, focusKey: fallback?.clientKey ?? module.clientKey, notice: `Deleted phase ${deleted.title}.` });
   }
   if (action.type === 'phase.move') {
     const index = phaseIndex(module, action.phaseKey); const current = module.phases[index]; if (current === undefined) return state;
@@ -180,7 +191,7 @@ export function draftReducer(state: AuthorDocumentState, action: DraftAction): A
   }
   if (action.type === 'phase.duplicate') {
     const index = phaseIndex(module, action.phaseKey); const source = module.phases[index]; if (source === undefined) return state;
-    let next = state.draft.nextClientKey; const copy: DraftPhase = { ...source, id: uniqueSlug(source.id, occupiedPhaseIds(module)), clientKey: key(next++), surfaces: source.surfaces.map((surface) => duplicateSurface(surface, uniqueSlug(surface.id, occupiedSurfaceIds(source)), key(next++))), completion: cloneCompletion(source.completion), capabilities: cloneCapabilities(source.capabilities) };
+    let next = state.draft.nextClientKey; const surfaceIds = occupiedSurfaceIds(source); const copy: DraftPhase = { ...source, id: uniqueSlug(source.id, occupiedPhaseIds(module)), clientKey: key(next++), surfaces: source.surfaces.map((surface) => { const id = uniqueSlug(surface.id, surfaceIds); surfaceIds.add(id); return duplicateSurface(surface, id, key(next++)); }), completion: cloneCompletion(source.completion), capabilities: cloneCapabilities(source.capabilities) };
     const phases = [...module.phases]; phases.splice(index + 1, 0, copy);
     return withDraft(state, updateModule({ ...state.draft, nextClientKey: next }, action.moduleKey, (candidate) => ({ ...candidate, phases })), { selection: { type: 'phase', moduleKey: module.clientKey, phaseKey: copy.clientKey }, focusKey: copy.clientKey, notice: `Duplicated phase ${source.title}.` });
   }
@@ -189,12 +200,17 @@ export function draftReducer(state: AuthorDocumentState, action: DraftAction): A
     const source = createSurfaceStart(action.surfaceType); const surface = cloneSurface({ ...source, id: uniqueSlug(source.id, occupiedSurfaceIds(phase)) }, state.draft.nextClientKey);
     return withDraft(state, updatePhase({ ...state.draft, nextClientKey: state.draft.nextClientKey + 1 }, action.moduleKey, action.phaseKey, (candidate) => ({ ...candidate, surfaces: [...candidate.surfaces, surface] })), { selection: { type: 'surface', moduleKey: module.clientKey, phaseKey: phase.clientKey, surfaceKey: surface.clientKey }, focusKey: surface.clientKey, notice: `Added surface ${surface.id}.` });
   }
-  if (action.type === 'surface.update') return withDraft(state, updatePhase(state.draft, action.moduleKey, action.phaseKey, (candidate) => ({ ...candidate, surfaces: candidate.surfaces.map((surface) => surface.clientKey === action.surfaceKey ? { ...surface, ...action.patch } as DraftSurface : surface) })));
+  if (action.type === 'surface.update') return withDraft(state, updatePhase(state.draft, action.moduleKey, action.phaseKey, (candidate) => ({ ...candidate, surfaces: candidate.surfaces.map((surface) => {
+    if (surface.clientKey !== action.surfaceKey) return surface;
+    const next = { ...surface, ...action.patch } as Record<string, unknown>;
+    for (const [name, value] of Object.entries(next)) if (value === undefined) delete next[name];
+    return next as DraftSurface;
+  }) })));
   if (action.type === 'surface.replace') return withDraft(state, updatePhase(state.draft, action.moduleKey, action.phaseKey, (candidate) => ({ ...candidate, surfaces: candidate.surfaces.map((surface) => surface.clientKey === action.surfaceKey ? cloneSurface(action.surface, Number(surface.clientKey.slice(6))) : surface) })));
   if (action.type === 'surface.delete') {
     const index = surfaceIndex(phase, action.surfaceKey); const deleted = phase.surfaces[index]; if (deleted === undefined) return state;
     const surfaces = phase.surfaces.filter((surface) => surface.clientKey !== action.surfaceKey); const fallback = surfaces[Math.min(index, surfaces.length - 1)];
-    return withDraft(state, updatePhase(state.draft, action.moduleKey, action.phaseKey, (candidate) => ({ ...candidate, surfaces })), { selection: fallback === undefined ? { type: 'phase', moduleKey: module.clientKey, phaseKey: phase.clientKey } : { type: 'surface', moduleKey: module.clientKey, phaseKey: phase.clientKey, surfaceKey: fallback.clientKey }, focusKey: fallback?.clientKey, notice: `Deleted surface ${deleted.id}.` });
+    return withDraft(state, updatePhase(state.draft, action.moduleKey, action.phaseKey, (candidate) => ({ ...candidate, surfaces })), { selection: fallback === undefined ? { type: 'phase', moduleKey: module.clientKey, phaseKey: phase.clientKey } : { type: 'surface', moduleKey: module.clientKey, phaseKey: phase.clientKey, surfaceKey: fallback.clientKey }, focusKey: fallback?.clientKey ?? phase.clientKey, notice: `Deleted surface ${deleted.id}.` });
   }
   if (action.type === 'surface.move') {
     const index = surfaceIndex(phase, action.surfaceKey); const current = phase.surfaces[index]; if (current === undefined) return state;

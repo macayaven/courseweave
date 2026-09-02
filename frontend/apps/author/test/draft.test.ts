@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { AuthorManifest } from '@courseweave/ui';
 import {
   createDraft,
@@ -38,6 +39,13 @@ function state(manifest: AuthorManifest = richManifest): AuthorDocumentState {
 }
 
 describe('Author draft reducer', () => {
+  it('treats both canonical example manifests as clean immediately after draft hydration', () => {
+    for (const path of ['../../../../examples/minimal-course/courseweave.json', '../../../../examples/cli-course/courseweave.json']) {
+      const manifest = JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as AuthorManifest;
+      expect(isDraftDirty(createDraft(manifest), manifest)).toBe(false);
+    }
+  });
+
   it('creates, edits, moves, duplicates, and deletes modules without mutating its input', () => {
     const before = state();
     const snapshot = structuredClone(before);
@@ -131,6 +139,29 @@ describe('Author draft reducer', () => {
     const one = state({ ...richManifest, modules: [richManifest.modules[0]!] });
     const finalDelete = draftReducer(one, { type: 'module.delete', moduleKey: one.draft.modules[0]!.clientKey });
     expect(projectDraft(finalDelete.draft).entry_module_id).toBeNull();
+  });
+
+  it('keeps entry ownership attached to its client key while non-entry IDs are duplicate or blank', () => {
+    const initial = state({ ...richManifest, modules: [richManifest.modules[0]!, { ...richManifest.modules[0]!, id: 'module-b' }] });
+    const [entry, other] = initial.draft.modules;
+    const duplicate = draftReducer(initial, { type: 'module.update', moduleKey: other!.clientKey, patch: { id: entry!.id } });
+    const renamed = draftReducer(duplicate, { type: 'module.update', moduleKey: other!.clientKey, patch: { id: '' } });
+    expect(projectDraft(renamed.draft).entry_module_id).toBe('module-a');
+    const deleted = draftReducer(duplicate, { type: 'module.delete', moduleKey: other!.clientKey });
+    expect(projectDraft(deleted.draft).entry_module_id).toBe('module-a');
+  });
+
+  it('allocates unique copied nested IDs sequentially from duplicate and blank source IDs', () => {
+    const initial = state();
+    const module = initial.draft.modules[0]!;
+    const blankPhase = draftReducer(draftReducer(initial, { type: 'phase.update', moduleKey: module.clientKey, phaseKey: module.phases[0]!.clientKey, patch: { id: '' } }), { type: 'phase.update', moduleKey: module.clientKey, phaseKey: module.phases[1]!.clientKey, patch: { id: '' } });
+    const moduleCopy = draftReducer(blankPhase, { type: 'module.duplicate', moduleKey: module.clientKey });
+    expect(projectDraft(moduleCopy.draft).modules[1]!.phases.map((phase) => phase.id)).toEqual(['copy', 'copy-copy', 'review-copy', 'ship-copy']);
+
+    const sourcePhase = initial.draft.modules[0]!.phases[0]!;
+    const blankSurface = draftReducer(draftReducer(initial, { type: 'surface.update', moduleKey: module.clientKey, phaseKey: sourcePhase.clientKey, surfaceKey: sourcePhase.surfaces[0]!.clientKey, patch: { id: '' } }), { type: 'surface.update', moduleKey: module.clientKey, phaseKey: sourcePhase.clientKey, surfaceKey: sourcePhase.surfaces[1]!.clientKey, patch: { id: '' } });
+    const phaseCopy = draftReducer(blankSurface, { type: 'phase.duplicate', moduleKey: module.clientKey, phaseKey: sourcePhase.clientKey });
+    expect(projectDraft(phaseCopy.draft).modules[0]!.phases[1]!.surfaces.map((surface) => surface.id)).toEqual(['copy', 'copy-copy', 'remote-video-copy', 'terminal-copy', 'external-copy']);
   });
 
   it('keeps valid starts and intentionally incomplete local edits in memory without automatic repair or save', () => {
