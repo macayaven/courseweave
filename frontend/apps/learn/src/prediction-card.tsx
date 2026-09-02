@@ -51,8 +51,7 @@ export function PredictionCard({ moduleId, phase, state, client, onState, onRefr
         && ((error as { status?: number }).status === 409 || (error as { code?: string }).code === 'revision_mismatch');
       if (conflict) {
         try { await onRefresh(); setNotice('State changed; review the refreshed course state.'); } catch (refreshError: unknown) {
-          const status = typeof refreshError === 'object' && refreshError !== null ? (refreshError as { status?: number }).status : undefined;
-          if (status === 401 || status === 403) onRecovery?.();
+          onRecovery?.();
           setNotice('State refresh failed. Reconnect to continue.');
         }
       } else {

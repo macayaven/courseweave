@@ -36,6 +36,15 @@ describe('PredictionCard', () => {
     expect(recordPrediction).toHaveBeenCalledOnce();
   });
 
+  it('enters application recovery when a conflict refresh fails without an auth status', async () => {
+    const onRecovery = vi.fn();
+    render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction: vi.fn().mockRejectedValue({ code: 'revision_mismatch' }) }} onState={vi.fn()} onRefresh={vi.fn().mockRejectedValue(new Error('offline'))} onRecovery={onRecovery} />);
+    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'retain me' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
+    expect(await screen.findByText('State refresh failed. Reconnect to continue.')).toBeInTheDocument();
+    expect(onRecovery).toHaveBeenCalledOnce();
+  });
+
   it('disables duplicate submission while its request is in flight', () => {
     let resolve: (state: { revision: number }) => void = () => undefined;
     const recordPrediction = vi.fn().mockImplementation(() => new Promise((done) => { resolve = done; }));

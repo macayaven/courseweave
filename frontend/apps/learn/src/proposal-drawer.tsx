@@ -49,8 +49,7 @@ export function ProposalDrawer({ proposals, client, onRefresh, onProposal, draft
         || code === 'proposal_conflict' || code === 'target_changed' || code === 'revision_mismatch';
       if (conflict) {
         try { await onRefresh(); setNotice('Proposal changed; review refreshed proposals.'); } catch (refreshError: unknown) {
-          const status = typeof refreshError === 'object' && refreshError !== null ? (refreshError as { status?: number }).status : undefined;
-          if (status === 401 || status === 403) onRecovery?.();
+          onRecovery?.();
           setNotice('Proposal refresh failed. Reconnect to continue.');
         }
       } else {

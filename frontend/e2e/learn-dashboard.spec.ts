@@ -2,6 +2,19 @@ import { expect, test } from 'playwright/test';
 
 import { mountLearner, notifyContextChanged } from './learn-helpers';
 
+function contrastRatio(foreground: string, background: string): number {
+  const parse = (color: string) => color.match(/\d+/g)!.map(Number).map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = (color: string) => {
+    const [red, green, blue] = parse(color);
+    return 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+  };
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((left, right) => right - left);
+  return (lighter! + 0.05) / (darker! + 0.05);
+}
+
 test('production Learner dashboard keeps manifest order, exposes no-document and active states, and remains usable at 320px', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 900 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -20,6 +33,8 @@ test('production Learner dashboard keeps manifest order, exposes no-document and
   await learn.locator('body').press('Shift+Tab');
   await expect(openLesson).toBeFocused();
   expect(await openLesson.evaluate((button) => getComputedStyle(button).outlineStyle !== 'none')).toBe(true);
+  const [outlineColor, backgroundColor] = await openLesson.evaluate((button) => [getComputedStyle(button).outlineColor, getComputedStyle(button).backgroundColor]);
+  expect(contrastRatio(outlineColor!, backgroundColor!)).toBeGreaterThanOrEqual(3);
   await learn.locator('body').press('Tab');
   await expect(openVideo).toBeFocused();
   await expect(learn.locator('[data-testid="learn-rail"]')).toHaveClass(/cw-reduced-motion/);

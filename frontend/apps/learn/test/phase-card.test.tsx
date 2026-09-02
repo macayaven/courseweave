@@ -10,20 +10,28 @@ afterEach(() => cleanup());
 
 describe('PhaseCard', () => {
   it.each([
-    ['orient', 'Time and profile'],
+    ['orient', 'Open orientation'],
     ['read', 'Open reading'],
     ['watch', 'Open video at 42 seconds'],
     ['predict', 'Record your prediction below before requesting results.'],
     ['experiment', 'Show a gentle hint'],
-    ['lab', 'I ran my own checks'],
+    ['lab', 'Open lab'],
     ['review', 'Reflection and evidence'],
     ['audit', 'Teacher help is locked during audit'],
-    ['ship', 'I verified the named checks']
+    ['ship', 'Open shipment']
   ] as const)('renders the %s primary learner affordance', (kind, affordance) => {
     render(<PhaseCard moduleId="m01" phase={{ id: kind, title: `${kind} phase`, kind, capabilities, completion: { type: 'manual' }, surfaces: [{ id: 'surface-1', type: kind === 'watch' ? 'video' : 'markdown', role: 'primary', label: 'Reading' }] }} state={{ revision: 1 }} serviceOrigin="https://courseweave.test" surfaceId="surface-1" videoSeconds={42} />);
     if (kind === 'predict') expect(screen.getByText(affordance)).toBeInTheDocument();
-    else if (kind === 'lab' || kind === 'ship') expect(screen.getByRole('checkbox', { name: affordance })).toBeInTheDocument();
     else expect(screen.getByRole(kind === 'audit' ? 'status' : 'button', { name: affordance })).toBeInTheDocument();
+  });
+
+  it.each([
+    [{ type: 'prediction_recorded' as const, record_id: 'prediction' }, 'predict'],
+    [{ type: 'receipt_recorded' as const, record_id: 'receipt' }, 'review'],
+    [{ type: 'artifact_exists' as const, record_id: 'artifact', path: 'work.md' }, 'ship']
+  ])('renders Phase complete from the authoritative %s record', (completion, phaseId) => {
+    render(<PhaseCard moduleId="m01" phase={{ id: phaseId, title: 'Server phase', kind: phaseId as 'predict' | 'review' | 'ship', capabilities, completion, surfaces: [] }} state={{ revision: 1, completed_phases: { [`m01/${phaseId}/${completion.record_id}`]: { committed: true } } }} serviceOrigin="https://courseweave.test" surfaceId={null} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Phase complete');
   });
 
   it('disables the hint ladder when the server capability denies hints', () => {
@@ -70,6 +78,17 @@ describe('PhaseCard', () => {
     expect(onStateOperation).toHaveBeenCalledOnce();
   });
 
+  it('enters application recovery when a review conflict refresh fails without an auth status', async () => {
+    const onRecovery = vi.fn();
+    const review = { id: 'review', title: 'Review', kind: 'review' as const, capabilities, completion: { type: 'manual' as const }, surfaces: [] };
+    render(<PhaseCard moduleId="m01" phase={review} state={{ revision: 3 }} serviceOrigin="https://courseweave.test" surfaceId={null} onStateOperation={vi.fn().mockRejectedValue({ code: 'revision_mismatch' })} onRefresh={vi.fn().mockRejectedValue(new Error('offline'))} onRecovery={onRecovery} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Reflection and evidence' }));
+    fireEvent.change(screen.getByLabelText('Reflection'), { target: { value: 'retain reflection' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Record reflection' }));
+    expect(await screen.findByText('State refresh failed. Reconnect to continue.')).toBeInTheDocument();
+    expect(onRecovery).toHaveBeenCalledOnce();
+  });
+
   it('works for reflection and evidence after StrictMode setup cleanup setup', async () => {
     const onStateOperation = vi.fn().mockResolvedValue(undefined);
     const review = { id: 'review', title: 'Review', kind: 'review' as const, capabilities, completion: { type: 'manual' as const }, surfaces: [] };
@@ -84,7 +103,7 @@ describe('PhaseCard', () => {
     expect(onStateOperation).toHaveBeenCalledTimes(2);
   });
 
-  it('resets review, lab, and ship local state when the trusted phase key changes', () => {
+  it('resets review local state when the trusted phase key changes', () => {
     const review = { id: 'review-a', title: 'Review', kind: 'review' as const, capabilities, completion: { type: 'manual' as const }, surfaces: [] };
     const { rerender } = render(<PhaseCard key="m01/review-a" moduleId="m01" phase={review} state={{ revision: 3 }} serviceOrigin="https://courseweave.test" surfaceId={null} onStateOperation={vi.fn()} onRefresh={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Reflection and evidence' }));
@@ -93,10 +112,6 @@ describe('PhaseCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reflection and evidence' }));
     expect(screen.getByLabelText('Reflection')).toHaveValue('');
 
-    rerender(<PhaseCard key="m01/lab" moduleId="m01" phase={{ ...review, id: 'lab', kind: 'lab' }} state={{ revision: 3 }} serviceOrigin="https://courseweave.test" surfaceId={null} onRefresh={vi.fn()} />);
-    fireEvent.click(screen.getByRole('checkbox', { name: 'I ran my own checks' }));
-    rerender(<PhaseCard key="m01/ship" moduleId="m01" phase={{ ...review, id: 'ship', kind: 'ship' }} state={{ revision: 3 }} serviceOrigin="https://courseweave.test" surfaceId={null} onRefresh={vi.fn()} />);
-    expect(screen.getByRole('checkbox', { name: 'I verified the named checks' })).not.toBeChecked();
   });
 
   it('keeps review text editable but does not write during recovery', () => {

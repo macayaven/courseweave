@@ -56,6 +56,16 @@ describe('ProposalDrawer', () => {
     expect(api.editProposal).toHaveBeenCalledOnce();
   });
 
+  it('enters application recovery when a proposal conflict refresh fails without an auth status', async () => {
+    const api = client();
+    const onRecovery = vi.fn();
+    api.editProposal.mockRejectedValue({ code: 'proposal_conflict', status: 409 });
+    render(<ProposalDrawer proposals={[pending]} state={{ revision: 7 }} client={api} onRefresh={vi.fn().mockRejectedValue(new Error('offline'))} onProposal={vi.fn()} onRecovery={onRecovery} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save edit' }));
+    expect(await screen.findByText('Proposal refresh failed. Reconnect to continue.')).toBeInTheDocument();
+    expect(onRecovery).toHaveBeenCalledOnce();
+  });
+
   it('does not expose actions for non-pending REST proposals', () => {
     render(<ProposalDrawer proposals={[{ ...pending, status: 'accepted' }]} state={{ revision: 7 }} client={client()} onRefresh={vi.fn()} onProposal={vi.fn()} />);
     expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
