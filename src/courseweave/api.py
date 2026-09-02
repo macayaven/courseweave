@@ -12,14 +12,33 @@ common error envelope ``{"code", "message", "details"}``.
 from __future__ import annotations
 
 import hmac
+import json
 import secrets
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from courseweave import __version__
+from courseweave.context import (
+    ContextConflictError,
+    ContextRegistry,
+    StaleContextError,
+)
+from courseweave.manifest import (
+    ETagMismatchError,
+    ManifestNotFoundError,
+    ManifestValidationError,
+    empty_manifest_draft,
+    manifest_bytes,
+    parse_manifest_data,
+    read_manifest,
+    save_manifest,
+)
+from courseweave.models import CourseManifest, WorkspaceContext
 
 _STATIC_ROOT = Path(__file__).parent / "static"
 
@@ -38,6 +57,15 @@ def create_app(
     app = FastAPI(title="CourseWeave", version=__version__)
     app.state.course_root = Path(course_root) if course_root is not None else None
     app.state.capability_token = capability_token or secrets.token_urlsafe(32)
+    app.state.manifest_idempotency = {}
+    app.state.context_registry = None
+    app.state.context_manifest_etag = None
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error(
+        _request: Request, _exc: RequestValidationError
+    ) -> JSONResponse:
+        return _error(422, "validation_error", "The request is invalid.")
 
     @app.middleware("http")
     async def require_capability_token(request: Request, call_next):  # noqa: ANN001, ANN202
@@ -59,9 +87,181 @@ def create_app(
     async def health() -> dict[str, str]:
         return {"status": "ok", "service": "courseweave", "version": __version__}
 
+    @app.get("/api/course")
+    async def get_course() -> Response:
+        root = _configured_root(app)
+        if root is None:
+            return _error(
+                409, "not_configured", "No course root is configured."
+            )
+        try:
+            snapshot = read_manifest(root)
+        except ManifestNotFoundError:
+            draft = empty_manifest_draft(root)
+            return Response(
+                content=manifest_bytes(draft),
+                media_type="application/json",
+                headers={"ETag": '""'},
+            )
+        except ManifestValidationError as exc:
+            return _error(422, "validation_error", "The manifest is invalid.", exc)
+        return Response(
+            content=snapshot.raw_bytes,
+            media_type="application/json",
+            headers={"ETag": snapshot.etag},
+        )
+
+    @app.put("/api/course")
+    async def put_course(request: Request) -> Response:
+        root = _configured_root(app)
+        if root is None:
+            return _error(
+                409, "not_configured", "No course root is configured."
+            )
+        if_match = request.headers.get("if-match")
+        idempotency_key = request.headers.get("idempotency-key")
+        origin = request.headers.get("x-courseweave-origin")
+        if not if_match or not idempotency_key or origin != "student_requested":
+            return _error(
+                400,
+                "validation_error",
+                "Manifest writes require If-Match, Idempotency-Key, and student_requested origin.",
+            )
+        raw_request = await request.body()
+        if len(raw_request) > 1024 * 1024:
+            return _error(
+                413, "validation_error", "Request body exceeds the 1 MiB limit."
+            )
+        try:
+            data = json.loads(raw_request)
+            manifest = parse_manifest_data(data, root)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return _error(422, "validation_error", "Malformed JSON.", exc)
+        except ManifestValidationError as exc:
+            return _error(422, "validation_error", "The manifest is invalid.", exc)
+
+        canonical_request = manifest_bytes(manifest)
+        prior = app.state.manifest_idempotency.get(idempotency_key)
+        if prior is not None:
+            prior_request, prior_response, prior_etag = prior
+            if prior_request != canonical_request:
+                return _error(
+                    409,
+                    "idempotency_conflict",
+                    "The idempotency key was already used for different content.",
+                )
+            return Response(
+                content=prior_response,
+                media_type="application/json",
+                headers={"ETag": prior_etag},
+            )
+        try:
+            snapshot = save_manifest(root, manifest, if_match=if_match)
+        except ETagMismatchError as exc:
+            return _error(
+                409,
+                "etag_mismatch",
+                "The saved manifest changed; reload before saving.",
+                exc,
+            )
+        except ManifestValidationError as exc:
+            return _error(422, "validation_error", "The manifest is invalid.", exc)
+        app.state.manifest_idempotency[idempotency_key] = (
+            canonical_request,
+            snapshot.raw_bytes,
+            snapshot.etag,
+        )
+        app.state.context_registry = ContextRegistry(snapshot.manifest)
+        app.state.context_manifest_etag = snapshot.etag
+        return Response(
+            content=snapshot.raw_bytes,
+            media_type="application/json",
+            headers={"ETag": snapshot.etag},
+        )
+
+    @app.get("/api/context")
+    async def get_context(
+        source_id: str = Query(..., min_length=1, max_length=240),
+    ) -> Response:
+        registry_or_error = _context_registry(app)
+        if isinstance(registry_or_error, Response):
+            return registry_or_error
+        stored = registry_or_error.get(source_id)
+        if stored is None:
+            return _error(
+                404, "not_found", "No ephemeral context exists for that source."
+            )
+        return JSONResponse(stored.model_dump(mode="json"))
+
+    @app.post("/api/context")
+    async def post_context(request: Request) -> Response:
+        registry_or_error = _context_registry(app)
+        if isinstance(registry_or_error, Response):
+            return registry_or_error
+        raw_request = await request.body()
+        if len(raw_request) > 1024 * 1024:
+            return _error(
+                413, "validation_error", "Request body exceeds the 1 MiB limit."
+            )
+        try:
+            context = WorkspaceContext.model_validate_json(raw_request)
+            resolved = registry_or_error.submit(context)
+        except ValidationError as exc:
+            return _error(
+                422, "validation_error", "The context metadata is invalid.", exc
+            )
+        except StaleContextError as exc:
+            return _error(
+                409, "stale_context", "The context sequence is stale.", exc
+            )
+        except ContextConflictError as exc:
+            return _error(
+                409,
+                "context_conflict",
+                "The context sequence conflicts with accepted metadata.",
+                exc,
+            )
+        return JSONResponse(resolved.model_dump(mode="json"))
+
     app.mount(
         "/learn",
         StaticFiles(directory=_STATIC_ROOT / "learn", html=True),
         name="learn",
     )
     return app
+
+
+def _configured_root(app: FastAPI) -> Path | None:
+    root = app.state.course_root
+    return Path(root) if root is not None else None
+
+
+def _context_registry(app: FastAPI) -> ContextRegistry | Response:
+    root = _configured_root(app)
+    if root is None:
+        return _error(409, "not_configured", "No course root is configured.")
+    try:
+        snapshot = read_manifest(root)
+        manifest = snapshot.manifest
+        etag = snapshot.etag
+    except ManifestNotFoundError:
+        manifest = empty_manifest_draft(root)
+        etag = '""'
+    except ManifestValidationError as exc:
+        return _error(422, "validation_error", "The manifest is invalid.", exc)
+    if app.state.context_registry is None or app.state.context_manifest_etag != etag:
+        app.state.context_registry = ContextRegistry(manifest)
+        app.state.context_manifest_etag = etag
+    return app.state.context_registry
+
+
+def _error(
+    status_code: int,
+    code: str,
+    message: str,
+    exc: Exception | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"code": code, "message": message, "details": {}},
+    )

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "minimal-course",
+  "title": "Minimal Course",
+  "description": "The smallest runnable CourseWeave course.",
+  "entry_module_id": "start",
+  "policies": {
+    "content_sharing": "explicit_only",
+    "durable_mutation": "proposal_or_direct_student_action",
+    "terminal_execution": "student_only",
+    "conversation_memory": "session_only",
+    "max_shared_chars": 8192,
+    "workspace_write_globs": []
+  },
+  "modules": [
+    {
+      "id": "start",
+      "title": "Start",
+      "description": "",
+      "phases": [
+        {
+          "id": "read",
+          "title": "Read the lesson",
+          "kind": "read",
+          "teacher_mode": "reading_companion",
+          "surfaces": [
+            {
+              "id": "lesson",
+              "type": "markdown",
+              "role": "primary",
+              "path": "lesson.md"
+            }
+          ],
+          "completion": {
+            "type": "manual"
+          },
+          "capabilities": {
+            "chat": true,
+            "hint_level": "gentle",
+            "share_selection": true,
+            "share_cell": false,
+            "share_output": false,
+            "create_profile_proposal": false,
+            "create_course_proposal": false,
+            "create_workspace_proposal": false
+          }
+        }
+      ]
+    }
+  ]
+}

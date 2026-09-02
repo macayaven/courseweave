@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "id": "cli-course",
+  "title": "CLI Course",
+  "description": "A structurally distinct example with a display-only terminal surface.",
+  "entry_module_id": "cli",
+  "policies": {
+    "content_sharing": "explicit_only",
+    "durable_mutation": "proposal_or_direct_student_action",
+    "terminal_execution": "student_only",
+    "conversation_memory": "session_only",
+    "max_shared_chars": 8192,
+    "workspace_write_globs": []
+  },
+  "modules": [
+    {
+      "id": "cli",
+      "title": "CLI Workflow",
+      "description": "",
+      "phases": [
+        {
+          "id": "read",
+          "title": "Read the CLI lesson",
+          "kind": "read",
+          "teacher_mode": "reading_companion",
+          "surfaces": [
+            {
+              "id": "lesson",
+              "type": "markdown",
+              "role": "primary",
+              "path": "lesson.md"
+            }
+          ],
+          "completion": {
+            "type": "manual"
+          },
+          "capabilities": {
+            "chat": true,
+            "hint_level": "gentle",
+            "share_selection": true,
+            "share_cell": false,
+            "share_output": false,
+            "create_profile_proposal": false,
+            "create_course_proposal": false,
+            "create_workspace_proposal": false
+          }
+        },
+        {
+          "id": "run",
+          "title": "Run the example command",
+          "kind": "lab",
+          "teacher_mode": "debugging_coach",
+          "surfaces": [
+            {
+              "id": "show-help",
+              "type": "terminal",
+              "role": "exercise",
+              "label": "Show CourseWeave help",
+              "argv": [
+                "courseweave",
+                "--help"
+              ],
+              "cwd": "."
+            }
+          ],
+          "completion": {
+            "type": "artifact_exists",
+            "record_id": "cli-note",
+            "path": "notes/cli-result.md"
+          },
+          "capabilities": {
+            "chat": true,
+            "hint_level": "graduated",
+            "share_selection": false,
+            "share_cell": false,
+            "share_output": true,
+            "create_profile_proposal": false,
+            "create_course_proposal": false,
+            "create_workspace_proposal": true
+          }
+        }
+      ]
+    }
+  ]
+}
