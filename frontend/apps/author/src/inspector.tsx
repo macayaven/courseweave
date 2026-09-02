@@ -80,7 +80,10 @@ function SurfaceFields({ surface, update, replace }: { surface: DraftSurface; up
   if (surface.type === 'html' || surface.type === 'markdown' || surface.type === 'source') return <>{common}<label>Path<input value={surface.path} onChange={(event) => update({ path: text(event) })} /></label></>;
   if (surface.type === 'notebook') {
     const updateMatch = (field: 'cell_ids' | 'cell_tags', values: string[]) => {
-      const match = { ...(surface.match?.cell_ids === undefined ? {} : { cell_ids: surface.match.cell_ids }), ...(surface.match?.cell_tags === undefined ? {} : { cell_tags: surface.match.cell_tags }), ...(values.length === 0 ? {} : { [field]: values }) };
+      const other = field === 'cell_ids'
+        ? (surface.match?.cell_tags === undefined ? {} : { cell_tags: surface.match.cell_tags })
+        : (surface.match?.cell_ids === undefined ? {} : { cell_ids: surface.match.cell_ids });
+      const match = { ...other, ...(values.length === 0 ? {} : { [field]: values }) };
       update({ match: Object.keys(match).length === 0 ? undefined : match });
     };
     return <>{common}<label>Path<input value={surface.path} onChange={(event) => update({ path: text(event) })} /></label><ArrayFields label="Cell IDs" itemLabel="Cell ID" values={surface.match?.cell_ids ?? []} onChange={(cell_ids) => updateMatch('cell_ids', cell_ids)} /><ArrayFields label="Cell tags" itemLabel="Cell tag" values={surface.match?.cell_tags ?? []} onChange={(cell_tags) => updateMatch('cell_tags', cell_tags)} /></>;

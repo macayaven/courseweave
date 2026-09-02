@@ -85,14 +85,22 @@ describe('Inspector', () => {
 
     const view = render(<Harness selection={{ type: 'surface', moduleKey: 'draft-1', phaseKey: 'draft-2', surfaceKey: 'draft-3' }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Remove cell tag 1' }));
-    expect(projected().modules[0]!.phases[0]!.surfaces[0]).toMatchObject({ match: { cell_ids: ['cell-1'] } });
+    expect(projected().modules[0]!.phases[0]!.surfaces[0]).toEqual({ id: 'surface', type: 'notebook', role: 'primary', path: 'lesson.ipynb', match: { cell_ids: ['cell-1'] } });
+    view.unmount();
+
+    const idsView = render(<Harness selection={{ type: 'surface', moduleKey: 'draft-1', phaseKey: 'draft-2', surfaceKey: 'draft-3' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove cell id 1' }));
+    expect(projected().modules[0]!.phases[0]!.surfaces[0]).toEqual({ id: 'surface', type: 'notebook', role: 'primary', path: 'lesson.ipynb', match: { cell_tags: ['intro'] } });
+    idsView.unmount();
+
+    const videoView = render(<Harness selection={{ type: 'surface', moduleKey: 'draft-1', phaseKey: 'draft-2', surfaceKey: 'draft-3' }} />);
     fireEvent.change(screen.getByLabelText('Surface type'), { target: { value: 'video' } });
     fireEvent.change(screen.getByLabelText('Start seconds'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('End seconds'), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText('Start seconds'), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('End seconds'), { target: { value: '' } });
     expect(projected().modules[0]!.phases[0]!.surfaces[0]).toEqual({ id: 'surface', type: 'video', role: 'primary', path: 'video.mp4' });
-    view.unmount();
+    videoView.unmount();
   });
 });
 
