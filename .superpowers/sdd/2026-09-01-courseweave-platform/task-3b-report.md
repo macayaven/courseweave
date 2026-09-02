@@ -164,3 +164,54 @@ $ git diff --check && uv run pytest -q
 - The executed tool test uses the real `CourseStore`; it checks pending status,
   teacher origin, and unchanged learner profile, so no automatic target mutation
   can satisfy the test.
+
+## Fix round 2/5: substantive-only predict-first gate
+
+### Findings addressed
+
+The earlier natural-language prediction allowlist has been removed. While the
+exact required prediction record is absent, every substantive request now
+returns the fixed record-your-prediction response before `model_factory` or
+Pydantic AI construction. Only normalized social-only messages remain
+non-substantive; prediction recording remains the learner/card state path.
+
+### RED evidence
+
+The test table was first changed to turn process questions and learner-owned
+prediction statements into denials, and to add the controller's appended-intent
+examples plus ordinary substantive prompts:
+
+```text
+$ uv run pytest tests/test_professor.py -q
+6 failed, 35 passed in 1.70s
+```
+
+The failures were the prior process-question and prediction-statement
+allowlist paths: `Where do I record my prediction?`, `How do I submit a
+prediction?`, `I predict ...`, `My prediction is ...`, `My hypothesis is ...`,
+and the appended-intent record-plus-explain prompt all reached the local model.
+
+### GREEN and full-suite evidence
+
+```text
+$ uv run pytest tests/test_professor.py -q
+.........................................                                [100%]
+41 passed in 1.05s
+```
+
+```text
+$ git diff --check && uv run pytest -q
+........................................................................ [ 38%]
+........................................................................ [ 76%]
+.............................................                            [100%]
+189 passed in 14.32s
+```
+
+### Fix self-review
+
+- No prediction-specific regex or intent classifier remains in production code.
+- The gate calls the shared substantive-message predicate directly, ensuring
+  arbitrary appended intent cannot create a policy exception.
+- Existing exact-record opening and model-tool tests remain in the focused
+  suite, so this stricter before-record rule cannot close the post-record path
+  or alter tool exposure.

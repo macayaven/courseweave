@@ -219,11 +219,15 @@ def test_prediction_gate_opens_after_the_exact_prediction_record_exists() -> Non
     [
         ("Hello", True),
         ("Thanks!", True),
-        ("Where do I record my prediction?", True),
-        ("How do I submit a prediction?", True),
-        ("I predict the loop will stop.", True),
-        ("My prediction is that the graph has a cycle.", True),
-        ("My hypothesis is the values are equal.", True),
+        ("Where do I record my prediction?", False),
+        ("How do I submit a prediction?", False),
+        ("I predict the loop will stop.", False),
+        ("My prediction is that the graph has a cycle.", False),
+        ("My hypothesis is the values are equal.", False),
+        ("How do I record a prediction? Also explain the loop invariant.", False),
+        ("I predict X; now explain the expected behavior.", False),
+        ("Explain the loop invariant.", False),
+        ("Help me understand this exercise.", False),
         ("Show me the expected output.", False),
         ("Did the test pass?", False),
         ("Reveal the correct response.", False),
@@ -234,10 +238,10 @@ def test_prediction_gate_opens_after_the_exact_prediction_record_exists() -> Non
         ("How do I submit the expected output?", False),
     ],
 )
-def test_prediction_gate_blocks_every_substantive_request_outside_its_narrow_allowlist(
+def test_prediction_gate_blocks_every_substantive_request_before_the_exact_record(
     prompt: str, allowed: bool
 ) -> None:
-    # Defect caught: result-seeking paraphrases or near-miss prediction prompts bypass predict-first.
+    # Defect caught: any substantive prompt bypasses predict-first before its exact state record exists.
     from courseweave.professor import PREDICTION_REQUIRED_MESSAGE, ProfessorService
 
     model = CountingTestModel(custom_output_text="model answer")
