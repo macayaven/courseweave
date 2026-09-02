@@ -2,7 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { SurfaceReader } from '../src/surface-reader';
-import { acceptReaderOutcome, createReaderIntent, reconcileReaderOutcome, selectReaderRoute } from '../src/reader-routes';
+import { acceptReaderOutcome, createReaderIntent, reconcileReaderIntent, reconcileReaderOutcome, selectReaderRoute } from '../src/reader-routes';
 
 const htmlSurface = {
   id: 'lesson-html',
@@ -72,7 +72,7 @@ describe('SurfaceReader', () => {
     const destination = { moduleId: 'module-a', phaseId: 'read-b', surface: videoSurface };
     const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-b', surfaceId: 'lesson-video', htmlSource: null };
 
-    const accepted = acceptReaderOutcome(course, createReaderIntent('notebook-a', destination), outcome, 4);
+    const accepted = acceptReaderOutcome(course, createReaderIntent('notebook-a', destination, 4), outcome, destination, 4);
     expect(accepted).toMatchObject({ outcome, status: 'provisional', contextVersion: 4 });
     expect(selectReaderRoute(course, 'notebook-a', accepted!.outcome)).toEqual({ surface: videoSurface, htmlSource: null });
     expect(reconcileReaderOutcome(accepted!, 'notebook-a', destination, 5)).toMatchObject({ status: 'confirmed' });
@@ -85,7 +85,7 @@ describe('SurfaceReader', () => {
     ] }] };
     const destination = { moduleId: 'module-a', phaseId: 'read-b', surface: videoSurface };
     const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-b', surfaceId: 'lesson-video', htmlSource: null };
-    const accepted = acceptReaderOutcome(course, createReaderIntent('notebook-a', destination), outcome, 4);
+    const accepted = acceptReaderOutcome(course, createReaderIntent('notebook-a', destination, 4), outcome, destination, 4);
 
     expect(reconcileReaderOutcome(accepted!, 'notebook-a', { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface }, 5)).toBeNull();
   });
@@ -99,9 +99,36 @@ describe('SurfaceReader', () => {
     const intent = createReaderIntent('notebook-a', { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface });
     const wrongPhase = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-b', surfaceId: 'lesson-html', htmlSource: 'https://courseweave.test/content/lesson-html' };
 
-    expect(acceptReaderOutcome(course, null, wrongPhase, 4)).toBeNull();
-    expect(acceptReaderOutcome(course, intent, wrongPhase, 4)).toBeNull();
-    expect(acceptReaderOutcome(course, intent, { ...wrongPhase, sourceId: 'other-source', phaseId: 'read-a' }, 4)).toBeNull();
+    expect(acceptReaderOutcome(course, null, wrongPhase, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface }, 4)).toBeNull();
+    expect(acceptReaderOutcome(course, intent, wrongPhase, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface }, 4)).toBeNull();
+    expect(acceptReaderOutcome(course, intent, { ...wrongPhase, sourceId: 'other-source', phaseId: 'read-a' }, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface }, 4)).toBeNull();
+    const newerIntent = createReaderIntent('notebook-a', { moduleId: 'module-a', phaseId: 'read-b', surface: duplicateSurface }, 4);
+    expect(acceptReaderOutcome(course, newerIntent, { ...wrongPhase, phaseId: 'read-a' }, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface }, 4)).toBeNull();
+  });
+
+  it('expires a delayed destination outcome after a newer divergent context', () => {
+    const course = { title: 'Course', modules: [{ id: 'module-a', title: 'Module', phases: [
+      { id: 'read-a', title: 'A', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [htmlSurface] },
+      { id: 'read-b', title: 'B', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [videoSurface] }
+    ] }] };
+    const destination = { moduleId: 'module-a', phaseId: 'read-b', surface: videoSurface };
+    const activeA = { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface };
+    const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-b', surfaceId: 'lesson-video', htmlSource: null };
+    const pending = createReaderIntent('notebook-a', destination, 4, 'runtime-a');
+
+    expect(reconcileReaderIntent(pending, 'notebook-a', activeA, 5, 'runtime-a')).toBeNull();
+    expect(acceptReaderOutcome(course, pending, outcome, activeA, 5, 'runtime-a')).toBeNull();
+  });
+
+  it('accepts a delayed destination outcome after a newer matching context', () => {
+    const course = { title: 'Course', modules: [{ id: 'module-a', title: 'Module', phases: [{ id: 'read-b', title: 'B', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [videoSurface] }] }] };
+    const destination = { moduleId: 'module-a', phaseId: 'read-b', surface: videoSurface };
+    const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-b', surfaceId: 'lesson-video', htmlSource: null };
+    const pending = createReaderIntent('notebook-a', destination, 4, 'runtime-a');
+
+    const confirmed = reconcileReaderIntent(pending, 'notebook-a', destination, 5, 'runtime-a');
+    expect(confirmed).toMatchObject({ status: 'context-confirmed' });
+    expect(acceptReaderOutcome(course, confirmed, outcome, destination, 5, 'runtime-a')).toMatchObject({ status: 'confirmed' });
   });
 
   it('renders a selected local HTML surface in a minimal sandbox titled from manifest metadata', () => {

@@ -59,3 +59,43 @@ test('production Learner rejects credential-bearing HTML before iframe assignmen
   await expect(learn.locator('iframe[title="Second lesson"]')).toHaveCount(0);
   expect(api.unhandledRequests ?? 0).toBe(0);
 });
+
+test('production Learner rejects a delayed destination outcome after newer context stays on A', async ({ page }) => {
+  const api = { active: true, surfaceId: 'html-lesson', authenticatedRequests: 0 };
+  const learn = await mountLearner(page, api);
+  await learn.getByRole('button', { name: 'Open Second lesson' }).click();
+  const htmlReader = learn.locator('iframe[title="Second lesson"]');
+  await expect(htmlReader).toBeVisible();
+
+  await page.evaluate(() => { document.documentElement.dataset.deferReaderOutcome = 'true'; });
+  await learn.getByRole('button', { name: 'Open Second video' }).click();
+  const requestCount = api.authenticatedRequests;
+  await notifyContextChanged(page);
+  await expect.poll(() => api.authenticatedRequests).toBeGreaterThan(requestCount);
+  await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('#learn-frame');
+    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'video-lesson', htmlSource: null }, location.origin);
+  });
+
+  await expect(htmlReader).toBeVisible();
+  await expect(learn.locator('video[title="Second video"]')).toHaveCount(0);
+  expect(api.unhandledRequests ?? 0).toBe(0);
+});
+
+test('production Learner accepts a delayed destination outcome after newer context confirms B', async ({ page }) => {
+  const api = { active: true, surfaceId: 'html-lesson', authenticatedRequests: 0 };
+  const learn = await mountLearner(page, api);
+  await page.evaluate(() => { document.documentElement.dataset.deferReaderOutcome = 'true'; });
+  await learn.getByRole('button', { name: 'Open Second video' }).click();
+  api.surfaceId = 'video-lesson';
+  const requestCount = api.authenticatedRequests;
+  await notifyContextChanged(page);
+  await expect.poll(() => api.authenticatedRequests).toBeGreaterThan(requestCount);
+  await page.evaluate(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('#learn-frame');
+    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'video-lesson', htmlSource: null }, location.origin);
+  });
+
+  await expect(learn.locator('video[title="Second video"]')).toBeVisible();
+  expect(api.unhandledRequests ?? 0).toBe(0);
+});

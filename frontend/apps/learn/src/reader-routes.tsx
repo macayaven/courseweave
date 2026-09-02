@@ -14,7 +14,7 @@ export type ReaderNavigationOutcome = {
 
 export type ReaderRoute = { surface: CourseSurface; htmlSource: string | null };
 export type ReaderCoordinate = { moduleId: string; phaseId: string; surface: CourseSurface };
-export type ReaderIntent = ReaderCoordinate & { sourceId: string };
+export type ReaderIntent = ReaderCoordinate & { sourceId: string; clickContextVersion: number; runtimeIdentity: string | null; status: 'pending' | 'context-confirmed' };
 export type StoredReaderOutcome = { outcome: ReaderNavigationOutcome; coordinate: ReaderCoordinate; status: 'provisional' | 'confirmed'; contextVersion: number; runtimeIdentity: string | null };
 export type ReaderRouteController = { route: ReaderRoute | null; requestNavigation(coordinate: ReaderCoordinate): void };
 
@@ -30,14 +30,21 @@ function sameCoordinate(left: ReaderCoordinate, right: ReaderCoordinate): boolea
   return left.moduleId === right.moduleId && left.phaseId === right.phaseId && left.surface.id === right.surface.id && left.surface.type === right.surface.type;
 }
 
-export function createReaderIntent(sourceId: string, coordinate: ReaderCoordinate): ReaderIntent {
-  return { sourceId, ...coordinate };
+export function createReaderIntent(sourceId: string, coordinate: ReaderCoordinate, clickContextVersion: number = 0, runtimeIdentity: string | null = null): ReaderIntent {
+  return { sourceId, ...coordinate, clickContextVersion, runtimeIdentity, status: 'pending' };
 }
 
-export function acceptReaderOutcome(course: CourseManifest, pending: ReaderIntent | null, outcome: ReaderNavigationOutcome, contextVersion: number, runtimeIdentity: string | null = null): StoredReaderOutcome | null {
-  const route = pending === null ? null : selectReaderRoute(course, pending.sourceId, outcome);
-  if (pending === null || route === null || outcome.moduleId !== pending.moduleId || outcome.phaseId !== pending.phaseId || outcome.surfaceId !== pending.surface.id || route.surface.type !== pending.surface.type) return null;
-  return { outcome, coordinate: { moduleId: pending.moduleId, phaseId: pending.phaseId, surface: route.surface }, status: 'provisional', contextVersion, runtimeIdentity };
+export function reconcileReaderIntent(pending: ReaderIntent, sourceId: string, active: ReaderCoordinate | null, contextVersion: number, runtimeIdentity: string | null = null): ReaderIntent | null {
+  if (pending.sourceId !== sourceId || pending.runtimeIdentity !== runtimeIdentity) return null;
+  if (contextVersion > pending.clickContextVersion) return active !== null && sameCoordinate(pending, active) ? { ...pending, status: 'context-confirmed' } : null;
+  return pending;
+}
+
+export function acceptReaderOutcome(course: CourseManifest, pending: ReaderIntent | null, outcome: ReaderNavigationOutcome, active: ReaderCoordinate | null, contextVersion: number, runtimeIdentity: string | null = null): StoredReaderOutcome | null {
+  const current = pending === null ? null : reconcileReaderIntent(pending, pending.sourceId, active, contextVersion, runtimeIdentity);
+  const route = current === null ? null : selectReaderRoute(course, current.sourceId, outcome);
+  if (current === null || route === null || outcome.moduleId !== current.moduleId || outcome.phaseId !== current.phaseId || outcome.surfaceId !== current.surface.id || route.surface.type !== current.surface.type) return null;
+  return { outcome, coordinate: { moduleId: current.moduleId, phaseId: current.phaseId, surface: route.surface }, status: current.status === 'context-confirmed' ? 'confirmed' : 'provisional', contextVersion, runtimeIdentity };
 }
 
 export function reconcileReaderOutcome(stored: StoredReaderOutcome, sourceId: string, active: ReaderCoordinate | null, contextVersion: number, runtimeIdentity: string | null = null): StoredReaderOutcome | null {
@@ -68,10 +75,18 @@ export function useReaderRoute(course: CourseManifest, runtime: RuntimeConfigura
   const pending = useRef<ReaderIntent | null>(null);
   const activeIdentity = active === null ? null : `${active.moduleId}/${active.phaseId}/${active.surface.id}/${active.surface.type}`;
   const runtimeIdentity = `${runtime.sourceId}/${runtime.serviceOrigin}/${runtime.capabilityToken}`;
+  const activeRef = useRef(active);
+  const contextVersionRef = useRef(contextVersion);
+  const runtimeRef = useRef(runtime);
+  const runtimeIdentityRef = useRef(runtimeIdentity);
+  activeRef.current = active;
+  contextVersionRef.current = contextVersion;
+  runtimeRef.current = runtime;
+  runtimeIdentityRef.current = runtimeIdentity;
 
   const requestNavigation = useCallback((coordinate: ReaderCoordinate) => {
-    pending.current = createReaderIntent(runtime.sourceId, coordinate);
-  }, [runtime.sourceId]);
+    pending.current = createReaderIntent(runtimeRef.current.sourceId, coordinate, contextVersionRef.current, runtimeIdentityRef.current);
+  }, []);
 
   useEffect(() => {
     pending.current = null;
@@ -80,9 +95,12 @@ export function useReaderRoute(course: CourseManifest, runtime: RuntimeConfigura
 
   useEffect(() => {
     const listener = (event: MessageEvent<unknown>) => {
-      if (event.source !== window.parent || event.origin !== runtime.serviceOrigin) return;
+      const currentRuntime = runtimeRef.current;
+      if (event.source !== window.parent || event.origin !== currentRuntime.serviceOrigin) return;
       const next = parseReaderNavigation(event.data);
-      const accepted = next === null ? null : acceptReaderOutcome(course, pending.current, next, contextVersion, runtimeIdentity);
+      const reconciled = pending.current === null ? null : reconcileReaderIntent(pending.current, currentRuntime.sourceId, activeRef.current, contextVersionRef.current, runtimeIdentityRef.current);
+      pending.current = reconciled;
+      const accepted = next === null ? null : acceptReaderOutcome(course, reconciled, next, activeRef.current, contextVersionRef.current, runtimeIdentityRef.current);
       if (accepted !== null) {
         pending.current = null;
         setStored(accepted);
@@ -90,9 +108,10 @@ export function useReaderRoute(course: CourseManifest, runtime: RuntimeConfigura
     };
     window.addEventListener('message', listener);
     return () => window.removeEventListener('message', listener);
-  }, [course, runtime, contextVersion, runtimeIdentity]);
+  }, [course]);
 
   useEffect(() => {
+    pending.current = pending.current === null ? null : reconcileReaderIntent(pending.current, runtime.sourceId, active, contextVersion, runtimeIdentity);
     setStored((current) => current === null ? null : reconcileReaderOutcome(current, runtime.sourceId, active, contextVersion, runtimeIdentity));
   }, [runtimeIdentity, activeIdentity, contextVersion]);
 
