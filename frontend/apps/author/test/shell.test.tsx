@@ -45,4 +45,17 @@ describe('Author shell', () => {
     for (const region of ['Outline', 'Inspector', 'Preview', 'Curriculum teacher']) expect(screen.getByRole('region', { name: region })).toBeInTheDocument();
     expect(screen.getAllByText(/provider unavailable/i)).not.toHaveLength(0);
   });
+
+  it('hydrates the local draft editor from the read-only course response without rendering a save action', async () => {
+    mocks.useAuthorRuntime.mockReturnValue({ status: 'ready', runtime: readyRuntime, retry: mocks.retry });
+    mocks.getCourse.mockResolvedValue({ manifest: {
+      schema_version: 1, id: 'course', title: 'Course', description: '', entry_module_id: 'module',
+      policies: { content_sharing: 'explicit_only', durable_mutation: 'proposal_or_direct_student_action', terminal_execution: 'student_only', conversation_memory: 'session_only', max_shared_chars: 100, workspace_write_globs: [] },
+      modules: [{ id: 'module', title: 'Module', description: '', phases: [{ id: 'read', title: 'Read', kind: 'read', teacher_mode: 'reading_companion', completion: { type: 'manual' }, capabilities: { chat: true, hint_level: 'none', share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [{ id: 'page', type: 'markdown', role: 'primary', path: 'lesson.md' }] }] }],
+    }, raw: '{}', etag: '"etag"' });
+    render(<AuthorApp />);
+    expect(await screen.findByRole('button', { name: 'Select module Module' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add module' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
 });
