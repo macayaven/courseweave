@@ -372,6 +372,27 @@ class TestPathAndRunnableValidation:
         manifest = parse_manifest_data(VALID_ALL_VARIANTS, tmp_path)
         assert manifest.modules[0].phases[-1].completion.path == "work/result.json"
 
+    def test_runnable_validation_accumulates_sorted_path_issues(self, tmp_path: Path) -> None:
+        data = deepcopy(VALID_ALL_VARIANTS)
+        phase = data["modules"][0]["phases"][0]
+        phase["surfaces"] = [
+            {"id": "missing", "type": "markdown", "role": "primary", "path": "missing.md"},
+            {"id": "cwd", "type": "terminal", "role": "exercise", "label": "Run", "argv": ["echo"], "cwd": "missing-cwd"},
+            {"id": "lfs", "type": "video", "role": "reference", "path": "video.mp4"},
+        ]
+        data["modules"][0]["phases"] = [phase]
+        (tmp_path / "video.mp4").write_bytes(b"version https://git-lfs.github.com/spec/v1\n")
+        parsed = parse_manifest_data(data, tmp_path)
+
+        with pytest.raises(ManifestValidationError) as raised:
+            validate_runnable(parsed, tmp_path)
+
+        assert raised.value.issues == [
+            {"path": "/modules/0/phases/0/surfaces/0/path", "code": "missing_artifact", "message": "A required local surface is missing."},
+            {"path": "/modules/0/phases/0/surfaces/1/cwd", "code": "invalid_terminal_cwd", "message": "A terminal working directory is required."},
+            {"path": "/modules/0/phases/0/surfaces/2/path", "code": "lfs_pointer", "message": "A local video cannot be a Git LFS pointer."},
+        ]
+
     def test_runnable_validation_requires_ordinary_local_surface_files(
         self, tmp_path: Path
     ) -> None:

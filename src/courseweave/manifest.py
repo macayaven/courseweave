@@ -235,6 +235,8 @@ def validate_paths(manifest: CourseManifest, course_root: Path) -> None:
     """Resolve every local path and reject escapes, including symlink escapes."""
 
     root = Path(course_root).resolve()
+    issues: list[dict[str, str]] = []
+    messages: list[str] = []
     for module_index, module in enumerate(manifest.modules):
         for phase_index, phase in enumerate(module.phases):
             phase_path = f"/modules/{module_index}/phases/{phase_index}"
@@ -244,24 +246,31 @@ def validate_paths(manifest: CourseManifest, course_root: Path) -> None:
                     surface,
                     (HtmlSurface, MarkdownSurface, SourceSurface, NotebookSurface),
                 ):
-                    _resolve_inside(root, surface.path, f"surface '{surface.id}'", f"{surface_path}/path")
+                    _collect_path_issue(
+                        issues, root, surface.path, f"surface '{surface.id}'", f"{surface_path}/path", messages
+                    )
                 elif isinstance(surface, VideoSurface) and surface.path is not None:
-                    _resolve_inside(root, surface.path, f"surface '{surface.id}'", f"{surface_path}/path")
+                    _collect_path_issue(
+                        issues, root, surface.path, f"surface '{surface.id}'", f"{surface_path}/path", messages
+                    )
                 elif isinstance(surface, TerminalSurface):
-                    _resolve_inside(root, surface.cwd, f"surface '{surface.id}' cwd", f"{surface_path}/cwd")
+                    _collect_path_issue(
+                        issues, root, surface.cwd, f"surface '{surface.id}' cwd", f"{surface_path}/cwd", messages
+                    )
             if isinstance(phase.completion, ArtifactCompletion):
-                _resolve_inside(
-                    root,
-                    phase.completion.path,
-                    f"completion '{phase.completion.record_id}'",
-                    f"{phase_path}/completion/path",
+                _collect_path_issue(
+                    issues, root, phase.completion.path,
+                    f"completion '{phase.completion.record_id}'", f"{phase_path}/completion/path", messages,
                 )
+    _raise_collected_issues(issues, messages)
 
 
 def validate_runnable(manifest: CourseManifest, course_root: Path) -> None:
     """Require ordinary local surfaces while allowing future completion artifacts."""
 
     root = Path(course_root).resolve()
+    issues: list[dict[str, str]] = []
+    messages: list[str] = []
     for module_index, module in enumerate(manifest.modules):
         for phase_index, phase in enumerate(module.phases):
             phase_path = f"/modules/{module_index}/phases/{phase_index}"
@@ -271,42 +280,43 @@ def validate_runnable(manifest: CourseManifest, course_root: Path) -> None:
                     surface,
                     (HtmlSurface, MarkdownSurface, SourceSurface, NotebookSurface),
                 ):
-                    path = _resolve_inside(root, surface.path, f"surface '{surface.id}'", f"{surface_path}/path")
+                    path = _resolved_or_collect(
+                        issues, root, surface.path, f"surface '{surface.id}'", f"{surface_path}/path", messages
+                    )
+                    if path is None:
+                        continue
                     if not path.exists():
-                        raise ManifestValidationError(
-                            f"Runnable surface path is not an ordinary file: {surface.path}",
-                            issues=[_issue(f"{surface_path}/path", "missing_artifact", "A required local surface is missing.")],
-                        )
-                    if not path.is_file():
-                        raise ManifestValidationError(
-                            f"Runnable surface path is not an ordinary file: {surface.path}",
-                            issues=[_issue(f"{surface_path}/path", "wrong_artifact_type", "A local surface must be an ordinary file.")],
-                        )
+                        issues.append(_issue(f"{surface_path}/path", "missing_artifact", "A required local surface is missing."))
+                        messages.append(f"Runnable surface path is not an ordinary file: {surface.path}")
+                    elif not path.is_file():
+                        issues.append(_issue(f"{surface_path}/path", "wrong_artifact_type", "A local surface must be an ordinary file."))
+                        messages.append(f"Runnable surface path is not an ordinary file: {surface.path}")
                 elif isinstance(surface, VideoSurface) and surface.path is not None:
-                    path = _resolve_inside(root, surface.path, f"surface '{surface.id}'", f"{surface_path}/path")
+                    path = _resolved_or_collect(
+                        issues, root, surface.path, f"surface '{surface.id}'", f"{surface_path}/path", messages
+                    )
+                    if path is None:
+                        continue
                     if not path.exists():
-                        raise ManifestValidationError(
-                            f"Runnable surface path is not an ordinary file: {surface.path}",
-                            issues=[_issue(f"{surface_path}/path", "missing_artifact", "A required local surface is missing.")],
-                        )
-                    if not path.is_file():
-                        raise ManifestValidationError(
-                            f"Runnable surface path is not an ordinary file: {surface.path}",
-                            issues=[_issue(f"{surface_path}/path", "wrong_artifact_type", "A local surface must be an ordinary file.")],
-                        )
-                    with path.open("rb") as stream:
-                        if stream.read(len(_LFS_HEADER)) == _LFS_HEADER:
-                            raise ManifestValidationError(
-                                f"Local video is a Git LFS pointer, not playable media: {surface.path}",
-                                issues=[_issue(f"{surface_path}/path", "lfs_pointer", "A local video cannot be a Git LFS pointer.")],
-                            )
+                        issues.append(_issue(f"{surface_path}/path", "missing_artifact", "A required local surface is missing."))
+                        messages.append(f"Runnable surface path is not an ordinary file: {surface.path}")
+                    elif not path.is_file():
+                        issues.append(_issue(f"{surface_path}/path", "wrong_artifact_type", "A local surface must be an ordinary file."))
+                        messages.append(f"Runnable surface path is not an ordinary file: {surface.path}")
+                    else:
+                        with path.open("rb") as stream:
+                            lfs_pointer = stream.read(len(_LFS_HEADER)) == _LFS_HEADER
+                        if lfs_pointer:
+                            issues.append(_issue(f"{surface_path}/path", "lfs_pointer", "A local video cannot be a Git LFS pointer."))
+                            messages.append(f"Local video is a Git LFS pointer, not playable media: {surface.path}")
                 elif isinstance(surface, TerminalSurface):
-                    path = _resolve_inside(root, surface.cwd, f"surface '{surface.id}' cwd", f"{surface_path}/cwd")
-                    if not path.is_dir():
-                        raise ManifestValidationError(
-                            f"Terminal cwd is not a directory: {surface.cwd}",
-                            issues=[_issue(f"{surface_path}/cwd", "invalid_terminal_cwd", "A terminal working directory is required.")],
-                        )
+                    path = _resolved_or_collect(
+                        issues, root, surface.cwd, f"surface '{surface.id}' cwd", f"{surface_path}/cwd", messages
+                    )
+                    if path is not None and not path.is_dir():
+                        issues.append(_issue(f"{surface_path}/cwd", "invalid_terminal_cwd", "A terminal working directory is required."))
+                        messages.append(f"Terminal cwd is not a directory: {surface.cwd}")
+    _raise_collected_issues(issues, messages)
 
 
 def _resolve_inside(root: Path, relative: str, label: str, path: str = "") -> Path:
@@ -319,6 +329,36 @@ def _resolve_inside(root: Path, relative: str, label: str, path: str = "") -> Pa
             issues=[_issue(path, "path_escape", "A local path must remain inside the course root.")],
         ) from exc
     return candidate
+
+
+def _collect_path_issue(
+    issues: list[dict[str, str]], root: Path, relative: str, label: str, path: str,
+    messages: list[str],
+) -> None:
+    try:
+        _resolve_inside(root, relative, label, path)
+    except ManifestValidationError as exc:
+        issues.extend(exc.issues)
+        messages.append(str(exc))
+
+
+def _resolved_or_collect(
+    issues: list[dict[str, str]], root: Path, relative: str, label: str, path: str,
+    messages: list[str],
+) -> Path | None:
+    try:
+        return _resolve_inside(root, relative, label, path)
+    except ManifestValidationError as exc:
+        issues.extend(exc.issues)
+        messages.append(str(exc))
+        return None
+
+
+def _raise_collected_issues(issues: list[dict[str, str]], messages: list[str]) -> None:
+    if not issues:
+        return
+    ordered = sorted(issues, key=lambda issue: (issue["path"], issue["code"], issue["message"]))
+    raise ManifestValidationError(messages[0] if messages else "A local path is invalid.", issues=ordered)
 
 
 def _without_optional_nones(value: Any) -> Any:
@@ -350,10 +390,66 @@ def _schema_issues_from_errors(errors: list[JSONSchemaValidationError]) -> list[
     """Return deterministic schema diagnostics without reflecting input values."""
 
     issues = [
-        _issue(_json_pointer(tuple(error.absolute_path)), "schema_validation", "The field is invalid.")
+        _issue(path, "schema_validation", "The field is invalid.")
         for error in errors
+        for path in _schema_error_paths(error)
     ]
-    return sorted(issues, key=lambda issue: (issue["path"], issue["code"], issue["message"]))
+    unique = {(issue["path"], issue["code"], issue["message"]): issue for issue in issues}
+    return sorted(unique.values(), key=lambda issue: (issue["path"], issue["code"], issue["message"]))
+
+
+def _schema_error_paths(error: JSONSchemaValidationError) -> list[str]:
+    """Map JSON Schema diagnostics to useful RFC 6901 control addresses."""
+
+    base = _json_pointer(tuple(error.absolute_path))
+    if error.validator == "required" and isinstance(error.instance, dict):
+        required = error.validator_value
+        if isinstance(required, list):
+            missing = [name for name in required if isinstance(name, str) and name not in error.instance]
+            if missing:
+                return [f"{base}/{name.replace('~', '~0').replace('/', '~1')}" for name in missing]
+    if error.validator != "oneOf":
+        return [base]
+    branch = _active_union_branch(error)
+    if branch is None:
+        return [base]
+    prefix = tuple(error.absolute_schema_path)
+    paths: list[str] = []
+    for child in _leaf_errors(error):
+        schema_path = tuple(child.absolute_schema_path)
+        if len(schema_path) > len(prefix) and schema_path[len(prefix)] == branch:
+            paths.extend(_schema_error_paths(child))
+    return paths or [base]
+
+
+def _leaf_errors(error: JSONSchemaValidationError) -> list[JSONSchemaValidationError]:
+    if not error.context:
+        return [error]
+    leaves: list[JSONSchemaValidationError] = []
+    for child in error.context:
+        leaves.extend(_leaf_errors(child))
+    return leaves
+
+
+def _active_union_branch(error: JSONSchemaValidationError) -> int | None:
+    """Choose the discriminated schema branch from the already parsed object."""
+
+    if not isinstance(error.instance, dict):
+        return None
+    kind = error.instance.get("type")
+    if kind in {"html", "markdown", "source", "manual"}:
+        return 0
+    if kind in {"notebook", "prediction_recorded", "receipt_recorded"}:
+        return 1
+    if kind == "artifact_exists":
+        return 2
+    if kind == "video":
+        return 2 if "path" in error.instance else 3
+    if kind == "terminal":
+        return 4
+    if kind == "external":
+        return 5
+    return None
 
 
 def _pydantic_issue_path(data: object, error: dict[str, Any]) -> str:

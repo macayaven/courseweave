@@ -467,6 +467,42 @@ class TestWorkspaceProposals:
 
 
 class TestManifestProposal:
+    def test_missing_manifest_replace_can_edit_reject_then_accept_once(self, tmp_path: Path) -> None:
+        store = CourseStore(tmp_path)
+        initial = _manifest_data()
+        initial["title"] = "Initial Course"
+        request = {
+            "id": "missing-manifest",
+            "type": "manifest_replace",
+            "origin": "teacher_suggested",
+            "summary": "Create an initial course",
+            "target": "courseweave.json",
+            "payload": {"manifest": initial},
+            "target_hash": None,
+        }
+        proposal = store.create_proposal(request, "missing-create")
+        assert proposal.target_hash is None
+        rejected = store.reject_proposal(proposal.id, proposal.revision, "missing-reject")
+        assert rejected.status == "rejected"
+        assert not (tmp_path / "courseweave.json").exists()
+
+        proposal = store.create_proposal({**request, "id": "missing-manifest-edited"}, "missing-create-edited")
+        edited_manifest = _manifest_data()
+        edited_manifest["title"] = "Edited Initial Course"
+        edited = store.edit_proposal(
+            proposal.id,
+            proposal.revision,
+            {"payload": {"manifest": edited_manifest}, "target_hash": None},
+            "missing-edit",
+        )
+        accepted = store.accept_proposal(edited.id, edited.revision, "missing-accept")
+        replay = store.accept_proposal(edited.id, edited.revision, "missing-accept")
+        assert accepted == replay
+        assert load_manifest(tmp_path).title == "Edited Initial Course"
+        assert [item for item in store.get_state().audit if item.status == "accepted"] == [
+            store.get_state().audit[-1]
+        ]
+
     def test_manifest_replace_uses_exact_target_hash(self, course_root: Path) -> None:
         store = CourseStore(course_root)
         current = (course_root / "courseweave.json").read_bytes()

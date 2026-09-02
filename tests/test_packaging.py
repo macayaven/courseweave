@@ -38,6 +38,7 @@ from courseweave.api import create_app
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LAB_PACKAGE_JSON = REPO_ROOT / "frontend" / "packages" / "lab" / "package.json"
 LAB_ENTRY_TS = REPO_ROOT / "frontend" / "packages" / "lab" / "src" / "index.ts"
+FRONTEND_LOCK = REPO_ROOT / "frontend" / "pnpm-lock.yaml"
 
 REMOTE_ENTRY_RE = re.compile(
     r"^courseweave/labextension/static/remoteEntry\.[0-9a-f]+\.js$"
@@ -137,6 +138,13 @@ class TestAuthorStaticRoute:
         assert "CourseWeave Author" in author.text
         assert api.status_code == 404
         assert "CourseWeave Author" not in api.text
+
+    def test_author_lock_preserves_the_lab_react_18_peer_context(self) -> None:
+        lock = FRONTEND_LOCK.read_text(encoding="utf-8")
+        lab = lock.split("  packages/lab:\n", 1)[1].split("\n  packages/ui:", 1)[0]
+        assert "version: 4.6.3(react@18.3.1)" in lab
+        assert "react@19.2.8" not in lab
+        assert "react-dom@18.3.1(react@18.3.1)" in lock
 
     def test_wheel_contains_labextension_package_metadata(
         self, wheel_contents: dict[str, bytes]
