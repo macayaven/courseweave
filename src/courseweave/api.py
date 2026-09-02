@@ -34,6 +34,7 @@ from ag_ui.core import (
     TextMessageStartEvent,
 )
 from ag_ui.encoder import EventEncoder
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 
 from courseweave import __version__
 from courseweave.context import (
@@ -52,7 +53,7 @@ from courseweave.manifest import (
     read_manifest,
 )
 from courseweave.models import ResolutionState, WorkspaceContext
-from courseweave.professor import ProfessorOutcome, ProfessorService, Role
+from courseweave.professor import ProposalStager, ProfessorOutcome, ProfessorService, Role
 from courseweave.providers import ModelResult, ProviderConfig, create_model
 from courseweave.store import (
     CourseStore,
@@ -85,8 +86,8 @@ def create_app(
     app.state.context_registry = None
     app.state.context_manifest_etag = None
     app.state.course_store = None
-    app.state.shared_runs: dict[str, list[dict[str, str | None]]] = {}
-    app.state.guide_history: dict[str, list[str]] = {}
+    app.state.shared_runs: dict[str, dict[str, str | None]] = {}
+    app.state.guide_history: dict[str, list[ModelMessage]] = {}
     app.state.interrupted_runs: set[str] = set()
     app.state.provider_config_factory = lambda: ProviderConfig.from_environ(os.environ)
     app.state.professor_model_factory = create_model
@@ -268,9 +269,13 @@ def create_app(
             return _error(422, "validation_error", "The Share request is invalid.")
         if len(content) > registry_or_error.manifest.policies.max_shared_chars:
             return _error(422, "validation_error", "Shared content exceeds the course limit.")
-        app.state.shared_runs.setdefault(run_id, []).append(
-            {"kind": kind, "label": label, "content": content}
-        )
+        if run_id in app.state.shared_runs:
+            return _error(409, "validation_error", "A Share excerpt already exists for this run.")
+        app.state.shared_runs[run_id] = {
+            "kind": kind,
+            "label": label,
+            "content": content,
+        }
         response: dict[str, str | int | None] = {
             "run_id": run_id,
             "kind": kind,
@@ -443,11 +448,16 @@ async def _request_json(request: Request) -> dict[str, Any] | Response:
 async def _guide_response(app: FastAPI, request: Request, role: Role) -> Response:
     """Build trusted dependencies and return either a pre-stream error or AG-UI SSE."""
     raw_request = await request.body()
+    recoverable_run_id = _recover_run_id(raw_request)
     if len(raw_request) > 1024 * 1024:
+        if recoverable_run_id is not None:
+            _clear_shared_run(app, recoverable_run_id)
         return _error(413, "validation_error", "Request body exceeds the 1 MiB limit.")
     try:
         run_input = AGUIAdapter.build_run_input(raw_request)
     except ValidationError:
+        if recoverable_run_id is not None:
+            _clear_shared_run(app, recoverable_run_id)
         return _error(422, "validation_error", "The AG-UI request is invalid.")
 
     request_text = _newest_user_text(run_input.messages)
@@ -488,7 +498,10 @@ async def _guide_response(app: FastAPI, request: Request, role: Role) -> Respons
         model_factory=model_factory,
     )
     gate = professor.gate(request_text)
-    app.state.guide_history.setdefault(run_input.thread_id, []).append(request_text)
+    shared = app.state.shared_runs.get(run_input.run_id)
+    if shared is not None and not _share_is_allowed(professor, shared):
+        _clear_shared_run(app, run_input.run_id)
+        return _error(403, "forbidden", "Sharing is unavailable for the active phase.")
     if gate is None:
         try:
             professor.provider_config = app.state.provider_config_factory()
@@ -507,7 +520,6 @@ async def _guide_response(app: FastAPI, request: Request, role: Role) -> Respons
         app.state.interrupted_runs.add(run_input.run_id)
         return Response(status_code=204)
 
-    shared = app.state.shared_runs.get(run_input.run_id, [])
     model_request = _request_with_shared_content(request_text, shared)
     return StreamingResponse(
         _guide_events(
@@ -517,6 +529,8 @@ async def _guide_response(app: FastAPI, request: Request, role: Role) -> Respons
             run_input.run_id,
             model_request,
             prepared,
+            request_text,
+            app.state.guide_history.get(run_input.thread_id, ()),
             shared,
         ),
         media_type=EventEncoder().get_content_type(),
@@ -550,16 +564,40 @@ def _source_id(forwarded_props: Any) -> str | None:
     return source_id if isinstance(source_id, str) and source_id else None
 
 
+def _recover_run_id(raw_request: bytes) -> str | None:
+    """Recover only a plausible correlation identifier for pre-validation cleanup."""
+    try:
+        payload = json.loads(raw_request)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    run_id = payload.get("runId")
+    return run_id if isinstance(run_id, str) and run_id else None
+
+
+def _share_is_allowed(
+    professor: ProfessorService, shared: dict[str, str | None]
+) -> bool:
+    """Apply server-resolved phase capabilities immediately before provider use."""
+    capabilities = professor.policy.capabilities
+    if capabilities is None:
+        return False
+    return {
+        "selection": capabilities.share_selection,
+        "cell": capabilities.share_cell,
+        "output": capabilities.share_output,
+        "text": capabilities.share_selection,
+    }[str(shared["kind"])]
+
+
 def _request_with_shared_content(
-    request_text: str, shared: list[dict[str, str | None]]
+    request_text: str, shared: dict[str, str | None] | None
 ) -> str:
     """Attach private excerpts to one provider request without retaining them in history."""
     if not shared:
         return request_text
-    excerpts = "\n\n".join(
-        f"[Explicitly shared {item['kind']}]\n{item['content']}" for item in shared
-    )
-    return f"{request_text}\n\n{excerpts}"
+    return f"{request_text}\n\n[Explicitly shared {shared['kind']}]\n{shared['content']}"
 
 
 async def _guide_events(
@@ -569,32 +607,75 @@ async def _guide_events(
     run_id: str,
     request_text: str,
     prepared: ProfessorOutcome | ModelResult,
-    shared: list[dict[str, str | None]],
+    user_text: str,
+    message_history: tuple[ModelMessage, ...] | list[ModelMessage],
+    shared: dict[str, str | None] | None,
 ):
     """Emit official AG-UI events and clear all one-run data on every exit path."""
     encoder = EventEncoder()
     message_id = f"{run_id}-assistant"
+    stager = ProposalStager() if shared is None else None
+    completed = False
     try:
         yield encoder.encode(RunStartedEvent(threadId=thread_id, runId=run_id))
-        outcome = (
-            prepared
-            if isinstance(prepared, ProfessorOutcome)
-            else await professor.respond_prepared(request_text, prepared)
-        )
-        if outcome.status == "provider_error":
-            yield encoder.encode(RunErrorEvent(message="The provider request failed."))
-            return
-        content = _redact_shared_content(outcome.content or "", shared)
-        yield encoder.encode(TextMessageStartEvent(messageId=message_id))
-        yield encoder.encode(TextMessageContentEvent(messageId=message_id, delta=content))
+        if isinstance(prepared, ProfessorOutcome):
+            content = _redact_shared_content(prepared.content or "", shared)
+            yield encoder.encode(TextMessageStartEvent(messageId=message_id))
+            yield encoder.encode(TextMessageContentEvent(messageId=message_id, delta=content))
+        else:
+            chunks: list[str] = []
+            started_message = False
+            async with professor.stream_prepared(
+                request_text,
+                prepared,
+                message_history=message_history,
+                proposal_stager=stager,
+                allow_proposals=shared is None,
+            ) as result:
+                async for delta in result.stream_text(delta=True, debounce_by=None):
+                    if not started_message:
+                        yield encoder.encode(TextMessageStartEvent(messageId=message_id))
+                        started_message = True
+                        if shared is not None:
+                            yield encoder.encode(
+                                TextMessageContentEvent(
+                                    messageId=message_id,
+                                    delta="[Processing shared content.]",
+                                )
+                            )
+                    chunks.append(delta)
+                    if shared is None:
+                        yield encoder.encode(
+                            TextMessageContentEvent(messageId=message_id, delta=delta)
+                        )
+            if not started_message:
+                yield encoder.encode(TextMessageStartEvent(messageId=message_id))
+                yield encoder.encode(TextMessageContentEvent(messageId=message_id, delta=""))
+            content = _redact_shared_content("".join(chunks), shared)
+            if shared is not None and chunks:
+                yield encoder.encode(
+                    TextMessageContentEvent(messageId=message_id, delta=content)
+                )
+            if stager is not None:
+                stager.commit(professor.store)  # type: ignore[arg-type]
         yield encoder.encode(TextMessageEndEvent(messageId=message_id))
+        if shared is None:
+            app.state.guide_history.setdefault(thread_id, []).extend(
+                [
+                    ModelRequest(parts=[UserPromptPart(content=user_text)]),
+                    ModelResponse(parts=[TextPart(content=content)]),
+                ]
+            )
         yield encoder.encode(RunFinishedEvent(threadId=thread_id, runId=run_id))
-    except (asyncio.CancelledError, GeneratorExit):
+        completed = True
+    except asyncio.CancelledError:
         app.state.interrupted_runs.add(run_id)
-        raise
+        return
     except Exception:
         yield encoder.encode(RunErrorEvent(message="The provider request failed."))
     finally:
+        if not completed and stager is not None:
+            stager.discard()
         _clear_shared_run(app, run_id)
 
 
@@ -603,13 +684,11 @@ def _clear_shared_run(app: FastAPI, run_id: str) -> None:
 
 
 def _redact_shared_content(
-    content: str, shared: list[dict[str, str | None]]
+    content: str, shared: dict[str, str | None] | None
 ) -> str:
     """Do not reflect a private excerpt through an AG-UI content event."""
-    for item in shared:
-        excerpt = item["content"]
-        if excerpt:
-            content = content.replace(excerpt, "[Shared content omitted.]")
+    if shared is not None and (excerpt := shared["content"]):
+        content = content.replace(excerpt, "[Shared content omitted.]")
     return content
 
 

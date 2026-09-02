@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, AsyncIterator, Literal, Sequence
 
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage
 
 from courseweave.models import Capabilities, CourseManifest, Phase, ResolvedContext
 from courseweave.providers import ModelResult, ProviderConfig, create_model
@@ -76,6 +78,42 @@ class ProfessorOutcome:
     content: str | None
     policy: ProfessorPolicy
     missing: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class StagedProposal:
+    """A proposal visible to the model but not durable until a run succeeds."""
+
+    id: str
+    revision: int = 1
+    status: Literal["pending"] = "pending"
+
+
+class ProposalStager:
+    """Own proposal creation for one provider run and commit only after success."""
+
+    def __init__(self) -> None:
+        self._requests: list[ProposalRequest] = []
+
+    def stage(self, request: ProposalRequest) -> StagedProposal:
+        # A single suggestion keeps the post-run store commit atomic without
+        # opening a durable transaction while the provider is still running.
+        if self._requests:
+            raise ProfessorPolicyError("Only one proposal may be suggested in a guide run.")
+        proposal_id = str(uuid.uuid4())
+        self._requests.append(request.model_copy(update={"id": proposal_id}))
+        return StagedProposal(id=proposal_id)
+
+    def commit(self, store: CourseStore) -> list[Proposal]:
+        committed = [
+            store.create_proposal(request, f"teacher-suggestion-{request.id}")
+            for request in self._requests
+        ]
+        self._requests.clear()
+        return committed
+
+    def discard(self) -> None:
+        self._requests.clear()
 
 
 def build_professor_policy(
@@ -220,6 +258,29 @@ class ProfessorService:
             return ProfessorOutcome("provider_error", PROVIDER_ERROR_MESSAGE, self.policy)
         return ProfessorOutcome("ok", str(result.output), self.policy)
 
+    @asynccontextmanager
+    async def stream_prepared(
+        self,
+        request: str,
+        model_result: ModelResult,
+        *,
+        message_history: Sequence[ModelMessage] = (),
+        proposal_stager: ProposalStager | None = None,
+        allow_proposals: bool = True,
+    ) -> AsyncIterator[Any]:
+        """Open an actual Pydantic AI token stream after trusted preflight.
+
+        ``proposal_stager`` deliberately remains in-memory until the transport
+        observes complete provider output and performs its post-run commit.
+        """
+        agent = self._agent_for(
+            model_result,
+            proposal_stager=proposal_stager,
+            allow_proposals=allow_proposals,
+        )
+        async with agent.run_stream(request, message_history=message_history) as result:
+            yield result
+
     def respond_sync(self, request: str) -> ProfessorOutcome:
         """Synchronous convenience seam for non-AG-UI service callers."""
         return asyncio.run(self.respond(request))
@@ -251,7 +312,13 @@ class ProfessorService:
             request, idempotency_key or f"teacher-suggestion-{uuid.uuid4()}"
         )
 
-    def _agent_for(self, model_result: ModelResult) -> Agent[None, str]:
+    def _agent_for(
+        self,
+        model_result: ModelResult,
+        *,
+        proposal_stager: ProposalStager | None = None,
+        allow_proposals: bool = True,
+    ) -> Agent[None, str]:
         """Construct the Pydantic AI agent only after configuration and gates pass."""
         assert model_result.adapter is not None
         agent: Agent[None, str] = Agent(
@@ -259,15 +326,17 @@ class ProfessorService:
             instructions=self.policy.instructions,
             name="courseweave-professor",
         )
-        for proposal_type in sorted(self.policy.proposal_types):
+        for proposal_type in (sorted(self.policy.proposal_types) if allow_proposals else ()):
             agent.tool_plain(
-                self._suggestion_tool(proposal_type),
+                self._suggestion_tool(proposal_type, proposal_stager),
                 name=f"suggest_{proposal_type}",
                 description="Create one inert pending teacher suggestion for learner review.",
             )
         return agent
 
-    def _suggestion_tool(self, proposal_type: ProposalType):
+    def _suggestion_tool(
+        self, proposal_type: ProposalType, proposal_stager: ProposalStager | None
+    ):
         def suggest(
             summary: str,
             target: Any,
@@ -275,13 +344,27 @@ class ProfessorService:
             target_hash: str | None = None,
         ) -> dict[str, Any]:
             """Create an inert pending proposal; it never applies or edits a target."""
-            proposal = self.create_suggestion(
-                proposal_type,
-                summary,
-                target,
-                payload,
-                target_hash=target_hash,
-            )
+            if proposal_stager is not None:
+                if proposal_type not in self.policy.proposal_types:
+                    raise ProfessorPolicyError("That proposal type is unavailable for this role and phase.")
+                proposal = proposal_stager.stage(
+                    ProposalRequest(
+                        type=proposal_type,
+                        origin="teacher_suggested",
+                        summary=summary,
+                        target=target,
+                        payload=payload,
+                        target_hash=target_hash,
+                    )
+                )
+            else:
+                proposal = self.create_suggestion(
+                    proposal_type,
+                    summary,
+                    target,
+                    payload,
+                    target_hash=target_hash,
+                )
             return {
                 "proposal_id": proposal.id,
                 "revision": proposal.revision,
