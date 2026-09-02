@@ -1,0 +1,48 @@
+[project]
+name = "courseweave"
+dynamic = ["version"]
+description = "Local-first course platform with a phase-aware JupyterLab learner guide"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.52.4",
+    "typer==0.27.2",
+    "pydantic==2.13.5",
+    "pydantic-ai-slim[ag-ui,openai,anthropic]==2.37.0",
+]
+
+[project.scripts]
+courseweave = "courseweave.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "httpx==0.28.1",
+    "jupyterlab==4.6.3",
+]
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/courseweave/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/courseweave"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"src/courseweave/labextension" = "share/jupyter/labextensions/courseweave"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/frontend/package.json",
+    "/frontend/pnpm-workspace.yaml",
+    "/frontend/pnpm-lock.yaml",
+    "/frontend/packages/lab",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

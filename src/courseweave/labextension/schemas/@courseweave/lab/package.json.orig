@@ -1,0 +1,32 @@
+{
+  "name": "@courseweave/lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CourseWeave JupyterLab prebuilt bridge: one sandboxed guide iframe, no React.",
+  "keywords": [
+    "jupyter",
+    "jupyterlab",
+    "jupyterlab-extension"
+  ],
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "typecheck": "tsc -b .",
+    "build:lib": "tsc -b .",
+    "build:labextension": "jupyter-builder build .",
+    "build": "tsc -b . && jupyter-builder build ."
+  },
+  "dependencies": {
+    "@jupyterlab/application": "~4.6.3",
+    "@lumino/widgets": "~2.8.0"
+  },
+  "devDependencies": {
+    "@jupyter/builder": "~1.2.2",
+    "@jupyterlab/core-meta": "~4.6.3"
+  },
+  "jupyterlab": {
+    "extension": true,
+    "schemaDir": "schema",
+    "outputDir": "../../../src/courseweave/labextension"
+  }
+}

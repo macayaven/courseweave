@@ -1,0 +1,13 @@
+{
+  "name": "courseweave-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CourseWeave frontend workspace: JupyterLab bridge now; Learn and Author apps later.",
+  "scripts": {
+    "typecheck": "pnpm --filter @courseweave/lab run typecheck",
+    "build": "pnpm --filter @courseweave/lab run build"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

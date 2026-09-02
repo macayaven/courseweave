@@ -1,0 +1,14 @@
+{
+  "title": "CourseWeave",
+  "description": "Settings for the CourseWeave JupyterLab bridge.",
+  "type": "object",
+  "properties": {
+    "serviceOrigin": {
+      "title": "CourseWeave service origin",
+      "description": "Origin of the local loopback CourseWeave service that serves the guide rail.",
+      "type": "string",
+      "default": "http://127.0.0.1:8765"
+    }
+  },
+  "additionalProperties": false
+}
