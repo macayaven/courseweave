@@ -7,7 +7,8 @@ import {
 
 const runtime = {
   serviceOrigin: 'http://127.0.0.1:8765',
-  capabilityToken: 'test-capability-token'
+  capabilityToken: 'test-capability-token',
+  sourceId: 'notebook / one'
 };
 
 afterEach(() => vi.unstubAllGlobals());
@@ -33,6 +34,22 @@ describe('createCourseweaveClient', () => {
       expect(request.credentials).toBe('include');
       expect(request.cache).toBe('no-store');
     }
+  });
+
+  it('reads only the encoded active source context through the authenticated client', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      context: { source_id: 'notebook / one' },
+      resolved: { module_id: 'm01', phase_id: 'read', surface_id: 'lesson', reason: 'active_path' }
+    }), { headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetch);
+
+    await createCourseweaveClient(runtime).getContext();
+
+    expect(fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:8765/api/context?source_id=notebook%20%2F%20one',
+      expect.objectContaining({ credentials: 'include', cache: 'no-store' })
+    );
+    expect(String(fetch.mock.calls[0]?.[0])).not.toContain('test-capability-token');
   });
 
   it('returns a typed secret-safe error envelope', async () => {

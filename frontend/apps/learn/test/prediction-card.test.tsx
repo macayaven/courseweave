@@ -20,7 +20,7 @@ describe('PredictionCard', () => {
     render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction }} onState={vi.fn()} onRefresh={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'my prediction' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
-    expect(recordPrediction).toHaveBeenCalledWith({ expected_revision: 2, operation: { type: 'record_prediction', module_id: 's01', phase_id: 'predict', record_id: 'prediction-1', text: 'my prediction' } });
+    expect(recordPrediction).toHaveBeenCalledWith({ expected_revision: 2, operation: { type: 'record_prediction', module_id: 's01', phase_id: 'predict', record_id: 'prediction-1', text: 'my prediction' } }, expect.any(AbortSignal));
   });
 
   it('preserves typed text and explicitly refreshes after a revision mismatch', async () => {
@@ -33,5 +33,17 @@ describe('PredictionCard', () => {
     expect(screen.getByLabelText('Your prediction')).toHaveValue('retain me');
     expect(onRefresh).toHaveBeenCalledOnce();
     expect(recordPrediction).toHaveBeenCalledOnce();
+  });
+
+  it('disables duplicate submission while its request is in flight', () => {
+    let resolve: (state: { revision: number }) => void = () => undefined;
+    const recordPrediction = vi.fn().mockImplementation(() => new Promise((done) => { resolve = done; }));
+    render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction }} onState={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'one attempt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
+    expect(screen.getByRole('button', { name: 'Saving prediction' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Saving prediction' }));
+    expect(recordPrediction).toHaveBeenCalledOnce();
+    resolve({ revision: 3 });
   });
 });
