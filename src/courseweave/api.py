@@ -621,7 +621,6 @@ async def _guide_response(
         learner_state,
         role,
         ProviderConfig(provider=None),
-        store=store,
         model_factory=model_factory,
     )
     gate = professor.gate(request_text)

@@ -19,9 +19,11 @@ import pytest
 import httpx
 import httpx2
 from typer.testing import CliRunner
+from pydantic_ai import ModelHTTPError
+from pydantic_ai.models.test import TestModel
 
 from courseweave.cli import app
-from courseweave.providers import ProviderConfig, create_model
+from courseweave.providers import ProviderAdapter, ProviderConfig, create_model
 
 
 class _CloseTracker:
@@ -32,6 +34,34 @@ class _CloseTracker:
 
     async def aclose(self) -> None:
         self.close_calls += 1
+
+
+class _FailingTestModel(TestModel):
+    """Local model that raises after the adapter has taken ownership of its client."""
+
+    async def request(self, *args: object, **kwargs: object):  # type: ignore[override]
+        raise ModelHTTPError(401, "local-model")
+
+
+class _UnexpectedTestModel(TestModel):
+    """Local model that raises an unmapped provider exception."""
+
+    async def request(self, *args: object, **kwargs: object):  # type: ignore[override]
+        raise RuntimeError("local provider failure")
+
+
+class _BlockingTestModel(TestModel):
+    """Local model that lets the test cancel a public adapter call in flight."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def request(self, *args: object, **kwargs: object):  # type: ignore[override]
+        self.started.set()
+        await self.release.wait()
+        return await super().request(*args, **kwargs)
 
 
 class _StubHandler(BaseHTTPRequestHandler):
@@ -252,6 +282,60 @@ def test_timeout_client_is_closed_when_model_construction_fails(monkeypatch: pyt
 
     asyncio.run(construct())
 
+    assert tracker.close_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("model", "expected_status", "failure_kind"),
+    [
+        (TestModel(custom_output_text="local success"), "ok", None),
+        (_FailingTestModel(), "provider_error", "authentication"),
+        (_UnexpectedTestModel(), "provider_error", "request"),
+    ],
+)
+def test_public_complete_closes_its_owned_client_after_success_mapped_and_unexpected_error(
+    model: TestModel, expected_status: str, failure_kind: str | None
+) -> None:
+    # Defect caught: ProviderAdapter.complete returns before closing a timeout-owned client.
+    tracker = _CloseTracker()
+    adapter = ProviderAdapter(model)  # type: ignore[arg-type]
+    adapter.http_client = tracker  # type: ignore[assignment]
+
+    result = asyncio.run(adapter.complete("local request"))
+
+    assert result.status == expected_status
+    assert result.failure is None or result.failure.kind == failure_kind
+    assert tracker.close_calls == 1
+
+
+def test_public_complete_closes_its_owned_client_when_cancelled() -> None:
+    # Defect caught: cancellation of ProviderAdapter.complete leaks its timeout-owned client.
+    model = _BlockingTestModel()
+    tracker = _CloseTracker()
+    adapter = ProviderAdapter(model)  # type: ignore[arg-type]
+    adapter.http_client = tracker  # type: ignore[assignment]
+
+    async def cancel_in_flight() -> None:
+        task = asyncio.create_task(adapter.complete("local request"))
+        await model.started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel_in_flight())
+
+    assert tracker.close_calls == 1
+
+
+def test_public_complete_sync_inherits_owned_client_cleanup() -> None:
+    # Defect caught: the synchronous ProviderAdapter convenience path bypasses async cleanup.
+    tracker = _CloseTracker()
+    adapter = ProviderAdapter(TestModel(custom_output_text="local success"))  # type: ignore[arg-type]
+    adapter.http_client = tracker  # type: ignore[assignment]
+
+    result = adapter.complete_sync("local request")
+
+    assert result.status == "ok"
     assert tracker.close_calls == 1
 
 

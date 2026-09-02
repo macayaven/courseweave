@@ -7,6 +7,7 @@ the external-model boundary; policy and proposal assertions use real objects.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -370,48 +371,35 @@ def test_learner_proposal_types_follow_phase_capabilities_exactly(
     assert policy.proposal_types == expected
 
 
-def test_learner_agent_exposes_exact_phase_tools_and_a_model_call_creates_pending_proposal(
-    tmp_path: Path,
+@pytest.mark.parametrize("synchronous", [False, True])
+def test_generic_professor_calls_expose_no_proposal_tools_or_store_mutation(
+    tmp_path: Path, synchronous: bool
 ) -> None:
-    # Defect caught: model-visible proposal tools differ from policy or bypass pending store creation.
+    # Defect caught: a generic professor call bypasses REST by exposing durable proposal tools.
     from courseweave.professor import ProfessorService
 
     store = CourseStore(tmp_path)
-    model = ProposalTestModel(
-        {
-            "suggest_profile_patch": {
-                "summary": "Remember the learner prefers examples.",
-                "target": "learner_profile",
-                "payload": {"changes": {"preference": "examples"}},
-            }
-        }
-    )
+    model = CountingTestModel(call_tools=[], custom_output_text="review")
     professor = ProfessorService(
         manifest_for(profile=True, course=True, workspace=True), resolved(), store.get_state(), "learner",
         ProviderConfig(provider="openai", model="local", api_key="not-a-secret"),
-        store=store,
         model_factory=configured_factory(model),
     )
 
-    outcome = professor.respond_sync("Suggest a profile preference.")
+    outcome = (
+        professor.respond_sync("Suggest a profile preference.")
+        if synchronous
+        else asyncio.run(professor.respond("Suggest a profile preference."))
+    )
 
     assert outcome.status == "ok"
-    assert {
-        tool.name for tool in model.last_model_request_parameters.function_tools
-    } == {
-        "suggest_profile_patch",
-        "suggest_manifest_replace",
-        "suggest_workspace_file_replace",
-    }
-    proposals = store.list_proposals()
-    assert len(proposals) == 1
-    assert proposals[0].status == "pending"
-    assert proposals[0].origin == "teacher_suggested"
-    assert store.get_state().profile == {}
+    assert model.last_model_request_parameters.function_tools == []
+    assert store.list_proposals() == []
+    assert store.get_state().revision == 0
 
 
-def test_author_agent_exposes_only_the_manifest_suggestion_tool() -> None:
-    # Defect caught: Author agent wiring exposes learner proposal tools at the model boundary.
+def test_generic_author_call_exposes_no_manifest_proposal_tool() -> None:
+    # Defect caught: a generic Author call exposes a durable proposal path outside REST.
     from courseweave.professor import ProfessorService
 
     model = CountingTestModel(call_tools=[], custom_output_text="review")
@@ -424,27 +412,19 @@ def test_author_agent_exposes_only_the_manifest_suggestion_tool() -> None:
     outcome = professor.respond_sync("Review the course outline.")
 
     assert outcome.status == "ok"
-    assert {
-        tool.name for tool in model.last_model_request_parameters.function_tools
-    } == {"suggest_manifest_replace"}
+    assert model.last_model_request_parameters.function_tools == []
 
 
-def test_allowed_suggestion_creates_only_a_pending_teacher_proposal(tmp_path: Path) -> None:
-    # Defect caught: the model-side suggestion bypasses the store or creates anything except pending consent work.
+def test_professor_service_exposes_no_direct_teacher_suggestion_mutation_seam(tmp_path: Path) -> None:
+    # Defect caught: a public service method can persist a teacher proposal without REST revalidation.
     from courseweave.professor import ProfessorService
 
     store = CourseStore(tmp_path)
     professor = ProfessorService(
         manifest_for(profile=True), resolved(), store.get_state(), "learner",
-        ProviderConfig(provider=None), store=store,
+        ProviderConfig(provider=None),
     )
 
-    proposal = professor.create_suggestion(
-        "profile_patch", "Remember the learner prefers examples.", "learner_profile",
-        {"changes": {"preference": "examples"}}, idempotency_key="teacher-profile-1",
-    )
-
-    assert proposal.status == "pending"
-    assert proposal.origin == "teacher_suggested"
-    assert proposal.type == "profile_patch"
-    assert store.get_state().profile == {}
+    assert not hasattr(professor, "create_suggestion")
+    assert store.list_proposals() == []
+    assert store.get_state().revision == 0

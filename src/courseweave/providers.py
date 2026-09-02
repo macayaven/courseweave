@@ -123,8 +123,8 @@ class ProviderAdapter:
 
     async def complete(self, prompt: str, *, stream: bool = False) -> ProviderCallResult:
         """Return provider text or a typed, credential-safe failure."""
-        agent = Agent(self.model)
         try:
+            agent = Agent(self.model)
             if stream:
                 async with agent.run_stream(prompt) as result:
                     chunks = [chunk async for chunk in result.stream_text(delta=True)]
@@ -133,6 +133,8 @@ class ProviderAdapter:
             return ProviderCallResult(status="ok", content=result.output)
         except Exception as exc:  # Provider SDKs use different concrete error classes.
             return ProviderCallResult(status="provider_error", failure=_failure_for(exc))
+        finally:
+            await self.aclose()
 
     def complete_sync(self, prompt: str, *, stream: bool = False) -> ProviderCallResult:
         """Synchronous convenience seam for CLI and integration callers."""

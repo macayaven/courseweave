@@ -19,7 +19,7 @@ from pydantic_ai.messages import ModelMessage
 
 from courseweave.models import Capabilities, CourseManifest, Phase, ResolvedContext
 from courseweave.providers import ModelResult, ProviderConfig, create_model
-from courseweave.store import CourseStore, LearnerState, Proposal, ProposalRequest
+from courseweave.store import LearnerState, ProposalRequest
 
 Role = Literal["learner", "author"]
 OutcomeStatus = Literal["ok", "blocked", "not_configured", "provider_error"]
@@ -204,14 +204,12 @@ class ProfessorService:
         role: Role,
         provider_config: ProviderConfig,
         *,
-        store: CourseStore | None = None,
         model_factory: ModelFactory = create_model,
     ) -> None:
         self.manifest = manifest
         self.resolved = resolved
         self.learner_state = learner_state
         self.provider_config = provider_config
-        self.store = store
         self.model_factory = model_factory
         self.policy = build_professor_policy(manifest, resolved, learner_state, role)
 
@@ -286,33 +284,6 @@ class ProfessorService:
         """Synchronous convenience seam for non-AG-UI service callers."""
         return asyncio.run(self.respond(request))
 
-    def create_suggestion(
-        self,
-        proposal_type: ProposalType,
-        summary: str,
-        target: Any,
-        payload: dict[str, Any],
-        *,
-        target_hash: str | None = None,
-        idempotency_key: str | None = None,
-    ) -> Proposal:
-        """Create exactly one pending teacher suggestion through the durable store."""
-        if proposal_type not in self.policy.proposal_types:
-            raise ProfessorPolicyError("That proposal type is unavailable for this role and phase.")
-        if self.store is None:
-            raise ProfessorPolicyError("A course store is required to create a proposal.")
-        request = ProposalRequest(
-            type=proposal_type,
-            origin="teacher_suggested",
-            summary=summary,
-            target=target,
-            payload=payload,
-            target_hash=target_hash,
-        )
-        return self.store.create_proposal(
-            request, idempotency_key or f"teacher-suggestion-{uuid.uuid4()}"
-        )
-
     def _agent_for(
         self,
         model_result: ModelResult,
@@ -327,7 +298,12 @@ class ProfessorService:
             instructions=self.policy.instructions,
             name="courseweave-professor",
         )
-        for proposal_type in (sorted(self.policy.proposal_types) if allow_proposals else ()):
+        proposal_types = (
+            sorted(self.policy.proposal_types)
+            if allow_proposals and proposal_stager is not None
+            else ()
+        )
+        for proposal_type in proposal_types:
             agent.tool_plain(
                 self._suggestion_tool(proposal_type, proposal_stager),
                 name=f"suggest_{proposal_type}",
@@ -336,7 +312,7 @@ class ProfessorService:
         return agent
 
     def _suggestion_tool(
-        self, proposal_type: ProposalType, proposal_stager: ProposalStager | None
+        self, proposal_type: ProposalType, proposal_stager: ProposalStager
     ):
         def suggest(
             summary: str,
@@ -345,27 +321,18 @@ class ProfessorService:
             target_hash: str | None = None,
         ) -> dict[str, Any]:
             """Create an inert pending proposal; it never applies or edits a target."""
-            if proposal_stager is not None:
-                if proposal_type not in self.policy.proposal_types:
-                    raise ProfessorPolicyError("That proposal type is unavailable for this role and phase.")
-                proposal = proposal_stager.stage(
-                    ProposalRequest(
-                        type=proposal_type,
-                        origin="teacher_suggested",
-                        summary=summary,
-                        target=target,
-                        payload=payload,
-                        target_hash=target_hash,
-                    )
-                )
-            else:
-                proposal = self.create_suggestion(
-                    proposal_type,
-                    summary,
-                    target,
-                    payload,
+            if proposal_type not in self.policy.proposal_types:
+                raise ProfessorPolicyError("That proposal type is unavailable for this role and phase.")
+            proposal = proposal_stager.stage(
+                ProposalRequest(
+                    type=proposal_type,
+                    origin="teacher_suggested",
+                    summary=summary,
+                    target=target,
+                    payload=payload,
                     target_hash=target_hash,
                 )
+            )
             return {
                 "proposal_id": proposal.id,
                 "revision": proposal.revision,
