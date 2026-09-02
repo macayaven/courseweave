@@ -13,11 +13,13 @@ export type ReaderNavigationOutcome = {
 };
 
 export type ReaderRoute = { surface: CourseSurface; htmlSource: string | null };
+export type ReaderCoordinate = { moduleId: string; phaseId: string; surface: CourseSurface };
 
-export function selectReaderRoute(course: CourseManifest, sourceId: string, outcome: ReaderNavigationOutcome): ReaderRoute | null {
+export function selectReaderRoute(course: CourseManifest, sourceId: string, outcome: ReaderNavigationOutcome, active?: ReaderCoordinate): ReaderRoute | null {
   if (outcome.sourceId !== sourceId) return null;
   const surface = findSurface(course, outcome.moduleId, outcome.phaseId, outcome.surfaceId);
   if (surface === null || !['html', 'video'].includes(surface.type)) return null;
+  if (active !== undefined && (active.moduleId !== outcome.moduleId || active.phaseId !== outcome.phaseId || active.surface.id !== surface.id || active.surface.type !== surface.type)) return null;
   return { surface, htmlSource: surface.type === 'html' ? outcome.htmlSource : null };
 }
 
@@ -36,9 +38,9 @@ function readerSurface(surface: CourseSurface | null): ReaderRoute | null {
   return surface !== null && (surface.type === 'html' || surface.type === 'video') ? { surface, htmlSource: null } : null;
 }
 
-export function useReaderRoute(course: CourseManifest, runtime: RuntimeConfiguration, activeSurface: CourseSurface | null): ReaderRoute | null {
+export function useReaderRoute(course: CourseManifest, runtime: RuntimeConfiguration, active: ReaderCoordinate | null): ReaderRoute | null {
   const [outcome, setOutcome] = useState<ReaderNavigationOutcome | null>(null);
-  const activeIdentity = activeSurface === null ? null : `${activeSurface.id}/${activeSurface.type}`;
+  const activeIdentity = active === null ? null : `${active.moduleId}/${active.phaseId}/${active.surface.id}/${active.surface.type}`;
 
   useEffect(() => {
     setOutcome(null);
@@ -48,11 +50,11 @@ export function useReaderRoute(course: CourseManifest, runtime: RuntimeConfigura
     const listener = (event: MessageEvent<unknown>) => {
       if (event.source !== window.parent || event.origin !== runtime.serviceOrigin) return;
       const next = parseReaderNavigation(event.data);
-      if (next !== null && selectReaderRoute(course, runtime.sourceId, next) !== null) setOutcome(next);
+      if (next !== null && selectReaderRoute(course, runtime.sourceId, next, active ?? undefined) !== null) setOutcome(next);
     };
     window.addEventListener('message', listener);
     return () => window.removeEventListener('message', listener);
-  }, [course, runtime]);
+  }, [course, runtime, activeIdentity]);
 
-  return outcome === null ? readerSurface(activeSurface) : selectReaderRoute(course, runtime.sourceId, outcome);
+  return outcome === null ? readerSurface(active?.surface ?? null) : selectReaderRoute(course, runtime.sourceId, outcome, active ?? undefined);
 }

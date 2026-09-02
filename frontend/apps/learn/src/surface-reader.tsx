@@ -8,7 +8,7 @@ function trustedHtmlSource(value: string | null | undefined, serviceOrigin: stri
   if (typeof value !== 'string') return null;
   try {
     const source = new URL(value);
-    return source.origin === new URL(serviceOrigin).origin && source.search.length === 0 && source.hash.length === 0 ? source.href : null;
+    return (source.protocol === 'http:' || source.protocol === 'https:') && source.origin === new URL(serviceOrigin).origin && source.username.length === 0 && source.password.length === 0 && source.search.length === 0 && source.hash.length === 0 ? source.href : null;
   } catch {
     return null;
   }
@@ -27,11 +27,11 @@ function trustedVideoSource(value: string | undefined): string | null {
 export function SurfaceReader({ surface, htmlSource, serviceOrigin }: { surface: CourseSurface | null; htmlSource?: string | null; serviceOrigin: string }) {
   if (surface?.type === 'html') {
     const source = trustedHtmlSource(htmlSource, serviceOrigin);
-    return source === null ? unavailable() : <iframe title={surface.label ?? surface.id} src={source} sandbox="allow-scripts" referrerPolicy="no-referrer" />;
+    return source === null ? unavailable() : <iframe className="cw-surface-reader__media" title={surface.label ?? surface.id} src={source} sandbox="allow-scripts" referrerPolicy="no-referrer" />;
   }
   if (surface?.type === 'video') {
     const source = trustedVideoSource(surface.url);
-    return source === null ? unavailable() : <video title={surface.label ?? surface.id} src={source} controls />;
+    return source === null ? unavailable() : <video className="cw-surface-reader__media" title={surface.label ?? surface.id} src={source} controls />;
   }
   return unavailable();
 }

@@ -41,9 +41,27 @@ describe('SurfaceReader', () => {
     };
     const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-a', surfaceId: 'lesson-html', htmlSource: 'https://courseweave.test/content/lesson-html' };
 
-    expect(selectReaderRoute(course, 'notebook-a', outcome)).toEqual({ surface: htmlSurface, htmlSource: 'https://courseweave.test/content/lesson-html' });
+    expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface })).toEqual({ surface: htmlSurface, htmlSource: 'https://courseweave.test/content/lesson-html' });
     expect(selectReaderRoute(course, 'other-source', outcome)).toBeNull();
     expect(selectReaderRoute(course, 'notebook-a', { ...outcome, surfaceId: 'missing' })).toBeNull();
+    expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'other-module', phaseId: 'other-phase', surface: htmlSurface })).toBeNull();
+  });
+
+  it('does not retain a parent outcome when another phase reuses its surface id and type', () => {
+    const duplicateSurface = { ...htmlSurface, path: 'lessons/other.html', label: 'Other lesson' };
+    const course = {
+      title: 'Course',
+      modules: [{
+        id: 'module-a', title: 'Module', phases: [
+          { id: 'read-a', title: 'First', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [htmlSurface] },
+          { id: 'read-b', title: 'Second', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [duplicateSurface] }
+        ]
+      }]
+    };
+    const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-a', surfaceId: 'lesson-html', htmlSource: 'https://courseweave.test/content/lesson-html' };
+
+    expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-b', surface: duplicateSurface })).toBeNull();
+    expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface })).toEqual({ surface: htmlSurface, htmlSource: outcome.htmlSource });
   });
 
   it('renders a selected local HTML surface in a minimal sandbox titled from manifest metadata', () => {
@@ -70,6 +88,12 @@ describe('SurfaceReader', () => {
     expect(document.querySelector('iframe')).toBeNull();
 
     rerender(<SurfaceReader surface={htmlSurface} htmlSource="https://courseweave.test/content/lesson-html?untrusted" serviceOrigin="https://courseweave.test" />);
+    expect(document.querySelector('iframe')).toBeNull();
+
+    rerender(<SurfaceReader surface={htmlSurface} htmlSource="https://capability@courseweave.test/content/lesson-html" serviceOrigin="https://courseweave.test" />);
+    expect(document.querySelector('iframe')).toBeNull();
+
+    rerender(<SurfaceReader surface={htmlSurface} htmlSource="ftp://courseweave.test/content/lesson-html" serviceOrigin="ftp://courseweave.test" />);
     expect(document.querySelector('iframe')).toBeNull();
 
     rerender(<SurfaceReader surface={{ ...htmlSurface, type: 'markdown' }} htmlSource="https://courseweave.test/content/lesson-html" serviceOrigin="https://courseweave.test" />);
