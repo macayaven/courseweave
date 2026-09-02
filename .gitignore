@@ -9,5 +9,6 @@ __pycache__/
 .courseweave/
 .env
 .env.local
+.worktrees/
 frontend/packages/lab/lib/
 *.tsbuildinfo
