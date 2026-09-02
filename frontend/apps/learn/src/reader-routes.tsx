@@ -1,5 +1,5 @@
 import { findSurface, type CourseManifest, type CourseSurface } from '@courseweave/ui/courseweave-types';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { RuntimeConfiguration } from './api';
 
@@ -14,6 +14,9 @@ export type ReaderNavigationOutcome = {
 
 export type ReaderRoute = { surface: CourseSurface; htmlSource: string | null };
 export type ReaderCoordinate = { moduleId: string; phaseId: string; surface: CourseSurface };
+export type ReaderIntent = ReaderCoordinate & { sourceId: string };
+export type StoredReaderOutcome = { outcome: ReaderNavigationOutcome; coordinate: ReaderCoordinate; status: 'provisional' | 'confirmed'; contextVersion: number; runtimeIdentity: string | null };
+export type ReaderRouteController = { route: ReaderRoute | null; requestNavigation(coordinate: ReaderCoordinate): void };
 
 export function selectReaderRoute(course: CourseManifest, sourceId: string, outcome: ReaderNavigationOutcome, active?: ReaderCoordinate): ReaderRoute | null {
   if (outcome.sourceId !== sourceId) return null;
@@ -21,6 +24,28 @@ export function selectReaderRoute(course: CourseManifest, sourceId: string, outc
   if (surface === null || !['html', 'video'].includes(surface.type)) return null;
   if (active !== undefined && (active.moduleId !== outcome.moduleId || active.phaseId !== outcome.phaseId || active.surface.id !== surface.id || active.surface.type !== surface.type)) return null;
   return { surface, htmlSource: surface.type === 'html' ? outcome.htmlSource : null };
+}
+
+function sameCoordinate(left: ReaderCoordinate, right: ReaderCoordinate): boolean {
+  return left.moduleId === right.moduleId && left.phaseId === right.phaseId && left.surface.id === right.surface.id && left.surface.type === right.surface.type;
+}
+
+export function createReaderIntent(sourceId: string, coordinate: ReaderCoordinate): ReaderIntent {
+  return { sourceId, ...coordinate };
+}
+
+export function acceptReaderOutcome(course: CourseManifest, pending: ReaderIntent | null, outcome: ReaderNavigationOutcome, contextVersion: number, runtimeIdentity: string | null = null): StoredReaderOutcome | null {
+  const route = pending === null ? null : selectReaderRoute(course, pending.sourceId, outcome);
+  if (pending === null || route === null || outcome.moduleId !== pending.moduleId || outcome.phaseId !== pending.phaseId || outcome.surfaceId !== pending.surface.id || route.surface.type !== pending.surface.type) return null;
+  return { outcome, coordinate: { moduleId: pending.moduleId, phaseId: pending.phaseId, surface: route.surface }, status: 'provisional', contextVersion, runtimeIdentity };
+}
+
+export function reconcileReaderOutcome(stored: StoredReaderOutcome, sourceId: string, active: ReaderCoordinate | null, contextVersion: number, runtimeIdentity: string | null = null): StoredReaderOutcome | null {
+  if (stored.outcome.sourceId !== sourceId || stored.runtimeIdentity !== runtimeIdentity) return null;
+  if (stored.status === 'provisional' && contextVersion > stored.contextVersion) {
+    return active !== null && sameCoordinate(stored.coordinate, active) ? { ...stored, status: 'confirmed' } : null;
+  }
+  return stored.status === 'confirmed' && (active === null || !sameCoordinate(stored.coordinate, active)) ? null : stored;
 }
 
 function parseReaderNavigation(value: unknown): ReaderNavigationOutcome | null {
@@ -38,23 +63,39 @@ function readerSurface(surface: CourseSurface | null): ReaderRoute | null {
   return surface !== null && (surface.type === 'html' || surface.type === 'video') ? { surface, htmlSource: null } : null;
 }
 
-export function useReaderRoute(course: CourseManifest, runtime: RuntimeConfiguration, active: ReaderCoordinate | null): ReaderRoute | null {
-  const [outcome, setOutcome] = useState<ReaderNavigationOutcome | null>(null);
+export function useReaderRoute(course: CourseManifest, runtime: RuntimeConfiguration, active: ReaderCoordinate | null, contextVersion: number): ReaderRouteController {
+  const [stored, setStored] = useState<StoredReaderOutcome | null>(null);
+  const pending = useRef<ReaderIntent | null>(null);
   const activeIdentity = active === null ? null : `${active.moduleId}/${active.phaseId}/${active.surface.id}/${active.surface.type}`;
+  const runtimeIdentity = `${runtime.sourceId}/${runtime.serviceOrigin}/${runtime.capabilityToken}`;
+
+  const requestNavigation = useCallback((coordinate: ReaderCoordinate) => {
+    pending.current = createReaderIntent(runtime.sourceId, coordinate);
+  }, [runtime.sourceId]);
 
   useEffect(() => {
-    setOutcome(null);
-  }, [runtime.sourceId, activeIdentity]);
+    pending.current = null;
+    setStored(null);
+  }, [runtimeIdentity]);
 
   useEffect(() => {
     const listener = (event: MessageEvent<unknown>) => {
       if (event.source !== window.parent || event.origin !== runtime.serviceOrigin) return;
       const next = parseReaderNavigation(event.data);
-      if (next !== null && selectReaderRoute(course, runtime.sourceId, next, active ?? undefined) !== null) setOutcome(next);
+      const accepted = next === null ? null : acceptReaderOutcome(course, pending.current, next, contextVersion, runtimeIdentity);
+      if (accepted !== null) {
+        pending.current = null;
+        setStored(accepted);
+      }
     };
     window.addEventListener('message', listener);
     return () => window.removeEventListener('message', listener);
-  }, [course, runtime, activeIdentity]);
+  }, [course, runtime, contextVersion, runtimeIdentity]);
 
-  return outcome === null ? readerSurface(active?.surface ?? null) : selectReaderRoute(course, runtime.sourceId, outcome, active ?? undefined);
+  useEffect(() => {
+    setStored((current) => current === null ? null : reconcileReaderOutcome(current, runtime.sourceId, active, contextVersion, runtimeIdentity));
+  }, [runtimeIdentity, activeIdentity, contextVersion]);
+
+  const current = stored === null ? null : reconcileReaderOutcome(stored, runtime.sourceId, active, contextVersion, runtimeIdentity);
+  return { route: current === null ? readerSurface(active?.surface ?? null) : selectReaderRoute(course, runtime.sourceId, current.outcome), requestNavigation };
 }

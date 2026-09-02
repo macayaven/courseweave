@@ -16,8 +16,6 @@ test('production Learner renders only the parent-selected sandboxed HTML route a
   const [htmlBox, htmlRailBox] = await Promise.all([htmlReader.boundingBox(), learn.locator('[data-testid="learn-rail"]').boundingBox()]);
   expect(htmlBox?.width).toBeLessThanOrEqual(htmlRailBox?.width ?? 0);
 
-  api.surfaceId = 'video-lesson';
-  await notifyContextChanged(page);
   await learn.getByRole('button', { name: 'Open Second video' }).click();
   const video = learn.locator('video[title="Second video"]');
   await expect(video).toHaveAttribute('src', 'https://video.example.test/second.mp4');
@@ -25,6 +23,10 @@ test('production Learner renders only the parent-selected sandboxed HTML route a
   expect(await learn.locator('[data-testid="learn-rail"]').evaluate((rail) => rail.scrollWidth <= rail.clientWidth)).toBe(true);
   const [videoBox, videoRailBox] = await Promise.all([video.boundingBox(), learn.locator('[data-testid="learn-rail"]').boundingBox()]);
   expect(videoBox?.width).toBeLessThanOrEqual(videoRailBox?.width ?? 0);
+
+  api.surfaceId = 'video-lesson';
+  await notifyContextChanged(page);
+  await expect(video).toBeVisible();
   expect(api.unhandledRequests ?? 0).toBe(0);
 });
 

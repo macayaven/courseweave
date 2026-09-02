@@ -2,7 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { SurfaceReader } from '../src/surface-reader';
-import { selectReaderRoute } from '../src/reader-routes';
+import { acceptReaderOutcome, createReaderIntent, reconcileReaderOutcome, selectReaderRoute } from '../src/reader-routes';
 
 const htmlSurface = {
   id: 'lesson-html',
@@ -62,6 +62,46 @@ describe('SurfaceReader', () => {
 
     expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-b', surface: duplicateSurface })).toBeNull();
     expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface })).toEqual({ surface: htmlSurface, htmlSource: outcome.htmlSource });
+  });
+
+  it('renders a pending destination outcome before context catches up and retains it after confirmation', () => {
+    const course = { title: 'Course', modules: [{ id: 'module-a', title: 'Module', phases: [
+      { id: 'read-a', title: 'A', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [htmlSurface] },
+      { id: 'read-b', title: 'B', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [videoSurface] }
+    ] }] };
+    const destination = { moduleId: 'module-a', phaseId: 'read-b', surface: videoSurface };
+    const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-b', surfaceId: 'lesson-video', htmlSource: null };
+
+    const accepted = acceptReaderOutcome(course, createReaderIntent('notebook-a', destination), outcome, 4);
+    expect(accepted).toMatchObject({ outcome, status: 'provisional', contextVersion: 4 });
+    expect(selectReaderRoute(course, 'notebook-a', accepted!.outcome)).toEqual({ surface: videoSurface, htmlSource: null });
+    expect(reconcileReaderOutcome(accepted!, 'notebook-a', destination, 5)).toMatchObject({ status: 'confirmed' });
+  });
+
+  it('invalidates a provisional destination when the next context resolves elsewhere', () => {
+    const course = { title: 'Course', modules: [{ id: 'module-a', title: 'Module', phases: [
+      { id: 'read-a', title: 'A', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [htmlSurface] },
+      { id: 'read-b', title: 'B', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [videoSurface] }
+    ] }] };
+    const destination = { moduleId: 'module-a', phaseId: 'read-b', surface: videoSurface };
+    const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-b', surfaceId: 'lesson-video', htmlSource: null };
+    const accepted = acceptReaderOutcome(course, createReaderIntent('notebook-a', destination), outcome, 4);
+
+    expect(reconcileReaderOutcome(accepted!, 'notebook-a', { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface }, 5)).toBeNull();
+  });
+
+  it('rejects unsolicited, mismatched, and duplicate-id wrong-phase outcomes', () => {
+    const duplicateSurface = { ...htmlSurface, path: 'lessons/other.html' };
+    const course = { title: 'Course', modules: [{ id: 'module-a', title: 'Module', phases: [
+      { id: 'read-a', title: 'A', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [htmlSurface] },
+      { id: 'read-b', title: 'B', kind: 'read' as const, completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [duplicateSurface] }
+    ] }] };
+    const intent = createReaderIntent('notebook-a', { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface });
+    const wrongPhase = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-b', surfaceId: 'lesson-html', htmlSource: 'https://courseweave.test/content/lesson-html' };
+
+    expect(acceptReaderOutcome(course, null, wrongPhase, 4)).toBeNull();
+    expect(acceptReaderOutcome(course, intent, wrongPhase, 4)).toBeNull();
+    expect(acceptReaderOutcome(course, intent, { ...wrongPhase, sourceId: 'other-source', phaseId: 'read-a' }, 4)).toBeNull();
   });
 
   it('renders a selected local HTML surface in a minimal sandbox titled from manifest metadata', () => {
