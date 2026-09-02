@@ -1,8 +1,9 @@
 import { Button, EmptyState, StatusBadge, useReducedMotion } from '@courseweave/ui';
 import type { CourseManifest, ProviderStatus } from '@courseweave/ui/courseweave-types';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { createCourseweaveClient } from './api';
+import { Dashboard } from './dashboard';
 import { useRuntimeBootstrap } from './runtime';
 
 export interface LearnHeaderProps {
@@ -10,6 +11,7 @@ export interface LearnHeaderProps {
   active: { moduleId: string; phaseId: string } | null;
   provider: ProviderStatus;
   timeBudget: number | null;
+  children?: ReactNode;
 }
 
 function activeLabels(course: CourseManifest, active: LearnHeaderProps['active']) {
@@ -28,7 +30,7 @@ function useNarrowRail(): boolean {
   return narrow;
 }
 
-export function LearnHeader({ course, active, provider, timeBudget }: LearnHeaderProps) {
+export function LearnHeader({ course, active, provider, timeBudget, children }: LearnHeaderProps) {
   const reducedMotion = useReducedMotion();
   const narrowRail = useNarrowRail();
   const { module, phase } = activeLabels(course, active);
@@ -48,6 +50,7 @@ export function LearnHeader({ course, active, provider, timeBudget }: LearnHeade
       {course.modules.length === 0 ? <EmptyState title="This course has no modules yet"><p>Ask your course author to add a module.</p></EmptyState> : null}
       {noDocument ? <EmptyState title="No active course document"><p>Select a course surface to continue.</p></EmptyState> : null}
       {provider === 'not_configured' ? <EmptyState title="Teacher unavailable"><p>The course remains available while a provider is configured.</p></EmptyState> : null}
+      {children}
     </main>
   );
 }
@@ -81,5 +84,5 @@ export function LearnApp() {
     return <main className="cw-rail" data-testid="learn-rail"><EmptyState title="Reconnect to CourseWeave"><p>The authenticated connection is unavailable. No course changes were retried.</p><Button onClick={() => { setRecovery(false); runtime.retry(); }}>Reconnect</Button></EmptyState></main>;
   }
   if (data === null) return <main className="cw-rail" data-testid="learn-rail"><p aria-live="polite">Loading course guide…</p></main>;
-  return <LearnHeader course={data.course} active={null} provider={provider} timeBudget={data.timeBudget} />;
+  return <LearnHeader course={data.course} active={null} provider={provider} timeBudget={data.timeBudget}><Dashboard course={data.course} serviceOrigin={runtime.runtime.serviceOrigin} /></LearnHeader>;
 }

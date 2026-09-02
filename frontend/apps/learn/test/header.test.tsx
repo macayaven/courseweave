@@ -6,7 +6,7 @@ import { LearnApp, LearnHeader, type LearnHeaderProps } from '../src/app';
 import { IconButton } from '@courseweave/ui';
 
 const props: LearnHeaderProps = {
-  course: { title: 'Agent Harnessing', modules: [{ id: 's01', title: 'Foundations', phases: [{ id: 'orient', title: 'Orient' }] }] },
+  course: { title: 'Agent Harnessing', modules: [{ id: 's01', title: 'Foundations', phases: [{ id: 'orient', title: 'Orient', kind: 'orient', completion: { type: 'manual' }, capabilities: { chat: false, hint_level: 'none', share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [] }] }] },
   active: { moduleId: 's01', phaseId: 'orient' },
   provider: 'ready',
   timeBudget: 45
@@ -104,6 +104,18 @@ describe('learner shell header', () => {
 
     expect(await screen.findByText('Teacher status unknown')).toBeInTheDocument();
     expect(screen.queryByText('Teacher ready')).not.toBeInTheDocument();
+  });
+
+  it('wires the manifest-ordered learner dashboard after trusted reads', async () => {
+    const fetch = vi.fn((url: string) => {
+      const body = url.endsWith('/course') ? { title: 'Agent Harnessing', modules: [{ id: 's01', title: 'Foundations', phases: [{ id: 'read', title: 'Read', kind: 'read', completion: { type: 'manual' }, capabilities: { chat: false, hint_level: 'none', share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [] }] }] } : url.endsWith('/state') ? { revision: 1 } : [];
+      return Promise.resolve(new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetch);
+    render(<LearnApp />);
+    dispatchRuntime();
+
+    expect(await screen.findByRole('region', { name: 'Course dashboard' })).toBeInTheDocument();
   });
 
   it('renders IconButton with its required accessible name', () => {

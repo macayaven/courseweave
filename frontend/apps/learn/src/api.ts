@@ -18,6 +18,12 @@ export type StateOperation =
   | { type: 'complete_phase'; module_id: string; phase_id: string; record_id: string; note?: string }
   | { type: 'set_time_budget'; minutes: number };
 
+export interface ProposalEditRequest {
+  summary?: string;
+  payload?: Record<string, unknown>;
+  target_hash?: string;
+}
+
 export class CourseweaveApiError extends Error {
   readonly code: string;
   readonly status: number;
@@ -92,6 +98,28 @@ export function createCourseweaveClient(runtime: RuntimeConfiguration) {
       method: 'PATCH',
       headers: { 'Idempotency-Key': uuid() },
       body: JSON.stringify({ ...body, origin: 'student_requested' })
+    }, signal)
+    ,
+    recordPrediction: (
+      body: { expected_revision: number; operation: Extract<StateOperation, { type: 'record_prediction' }> },
+      signal?: AbortSignal
+    ) => request<LearnerState>('/api/state', {
+      method: 'PATCH',
+      headers: { 'Idempotency-Key': uuid() },
+      body: JSON.stringify({ ...body, origin: 'student_requested' })
+    }, signal),
+    refreshLearnerData: (signal?: AbortSignal) => Promise.all([
+      request<LearnerState>('/api/state', {}, signal),
+      request<Proposal[]>('/api/proposals', {}, signal)
+    ]),
+    acceptProposal: (proposalId: string, body: { expected_revision: number }, signal?: AbortSignal) => request<Proposal>(`/api/proposals/${encodeURIComponent(proposalId)}/accept`, {
+      method: 'POST', headers: { 'Idempotency-Key': uuid() }, body: JSON.stringify(body)
+    }, signal),
+    rejectProposal: (proposalId: string, body: { expected_revision: number }, signal?: AbortSignal) => request<Proposal>(`/api/proposals/${encodeURIComponent(proposalId)}/reject`, {
+      method: 'POST', headers: { 'Idempotency-Key': uuid() }, body: JSON.stringify(body)
+    }, signal),
+    editProposal: (proposalId: string, body: { expected_revision: number; request: ProposalEditRequest }, signal?: AbortSignal) => request<Proposal>(`/api/proposals/${encodeURIComponent(proposalId)}/edit`, {
+      method: 'POST', headers: { 'Idempotency-Key': uuid() }, body: JSON.stringify(body)
     }, signal)
   };
 }
