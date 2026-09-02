@@ -1,0 +1,35 @@
+:root {
+  --cw-bg: #fffdf8;
+  --cw-surface: #ffffff;
+  --cw-text: #1e293b;
+  --cw-muted: #526176;
+  --cw-border: #d5dce5;
+  --cw-accent: #125dcc;
+  --cw-focus: #f59e0b;
+  --cw-danger: #a32929;
+  --cw-radius: 0.5rem;
+  --cw-space: 0.75rem;
+}
+
+.cw-button, .cw-icon-button {
+  appearance: none;
+  border: 1px solid var(--cw-border);
+  border-radius: var(--cw-radius);
+  background: var(--cw-surface);
+  color: var(--cw-text);
+  cursor: pointer;
+  font: inherit;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.cw-button:focus-visible, .cw-icon-button:focus-visible, a:focus-visible, button:focus-visible {
+  outline: 3px solid var(--cw-focus);
+  outline-offset: 2px;
+}
+
+.cw-status { border-radius: 999px; display: inline-flex; padding: 0.25rem 0.5rem; }
+.cw-status--ready { background: #dff5e5; color: #14532d; }
+.cw-status--unavailable { background: #fce3e3; color: var(--cw-danger); }
+.cw-empty-state { border: 1px solid var(--cw-border); border-radius: var(--cw-radius); padding: 1rem; }
+.cw-visually-hidden { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0 0 0 0); white-space: nowrap; }

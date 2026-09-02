@@ -2,12 +2,25 @@
   "name": "courseweave-frontend",
   "version": "0.1.0",
   "private": true,
-  "description": "CourseWeave frontend workspace: JupyterLab bridge now; Learn and Author apps later.",
+  "type": "module",
+  "description": "CourseWeave frontend workspace.",
   "scripts": {
-    "typecheck": "pnpm --filter @courseweave/lab run typecheck",
-    "build": "pnpm --filter @courseweave/lab run build"
+    "typecheck": "pnpm -r --filter @courseweave/lab --filter @courseweave/ui --filter @courseweave/learn run typecheck",
+    "test": "pnpm --filter @courseweave/learn test",
+    "build": "pnpm --filter @courseweave/lab run build && pnpm --filter @courseweave/learn run build",
+    "test:e2e": "pnpm exec playwright test --config playwright.config.ts"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.1",
+    "jsdom": "30.0.1",
+    "playwright": "1.58.2",
+    "typescript": "5.9.3",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
   }
 }
