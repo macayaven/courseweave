@@ -15,6 +15,7 @@ import hmac
 import json
 import secrets
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -36,9 +37,18 @@ from courseweave.manifest import (
     manifest_bytes,
     parse_manifest_data,
     read_manifest,
-    save_manifest,
 )
-from courseweave.models import CourseManifest, WorkspaceContext
+from courseweave.models import WorkspaceContext
+from courseweave.store import (
+    CourseStore,
+    IdempotencyConflictError,
+    ProposalConflictError,
+    ProposalNotFoundError,
+    RevisionMismatchError,
+    StoreError,
+    StoreNotConfiguredError,
+    TargetChangedError,
+)
 
 _STATIC_ROOT = Path(__file__).parent / "static"
 
@@ -57,9 +67,9 @@ def create_app(
     app = FastAPI(title="CourseWeave", version=__version__)
     app.state.course_root = Path(course_root) if course_root is not None else None
     app.state.capability_token = capability_token or secrets.token_urlsafe(32)
-    app.state.manifest_idempotency = {}
     app.state.context_registry = None
     app.state.context_manifest_etag = None
+    app.state.course_store = None
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error(
@@ -68,7 +78,7 @@ def create_app(
         return _error(422, "validation_error", "The request is invalid.")
 
     @app.middleware("http")
-    async def require_capability_token(request: Request, call_next):  # noqa: ANN001, ANN202
+    async def require_capability_token(request: Request, call_next):
         if request.url.path.startswith("/api/"):
             provided = request.headers.get("authorization", "")
             expected = f"Bearer {app.state.capability_token}"
@@ -140,23 +150,10 @@ def create_app(
         except ManifestValidationError as exc:
             return _error(422, "validation_error", "The manifest is invalid.", exc)
 
-        canonical_request = manifest_bytes(manifest)
-        prior = app.state.manifest_idempotency.get(idempotency_key)
-        if prior is not None:
-            prior_request, prior_response, prior_etag = prior
-            if prior_request != canonical_request:
-                return _error(
-                    409,
-                    "idempotency_conflict",
-                    "The idempotency key was already used for different content.",
-                )
-            return Response(
-                content=prior_response,
-                media_type="application/json",
-                headers={"ETag": prior_etag},
-            )
         try:
-            snapshot = save_manifest(root, manifest, if_match=if_match)
+            snapshot = _course_store(app).save_course_manifest(
+                manifest, if_match, idempotency_key
+            )
         except ETagMismatchError as exc:
             return _error(
                 409,
@@ -164,13 +161,14 @@ def create_app(
                 "The saved manifest changed; reload before saving.",
                 exc,
             )
+        except IdempotencyConflictError:
+            return _error(
+                409,
+                "idempotency_conflict",
+                "The idempotency key was already used for different content.",
+            )
         except ManifestValidationError as exc:
             return _error(422, "validation_error", "The manifest is invalid.", exc)
-        app.state.manifest_idempotency[idempotency_key] = (
-            canonical_request,
-            snapshot.raw_bytes,
-            snapshot.etag,
-        )
         app.state.context_registry = ContextRegistry(snapshot.manifest)
         app.state.context_manifest_etag = snapshot.etag
         return Response(
@@ -223,6 +221,105 @@ def create_app(
             )
         return JSONResponse(resolved.model_dump(mode="json"))
 
+    @app.get("/api/state")
+    async def get_state() -> Response:
+        try:
+            state = _course_store(app).get_state()
+        except StoreError as exc:
+            return _store_error(exc)
+        return JSONResponse(state.model_dump(mode="json"))
+
+    @app.patch("/api/state")
+    async def patch_state(request: Request) -> Response:
+        idempotency_key = request.headers.get("idempotency-key")
+        if not idempotency_key:
+            return _error(
+                400, "validation_error", "Idempotency-Key is required."
+            )
+        body_or_error = await _request_json(request)
+        if isinstance(body_or_error, Response):
+            return body_or_error
+        body = body_or_error
+        if body.get("origin") != "student_requested":
+            return _error(
+                403,
+                "forbidden",
+                "Direct learner-state changes require student_requested origin.",
+            )
+        try:
+            state = _course_store(app).apply_state(
+                body.get("operation"),
+                int(body.get("expected_revision")),
+                idempotency_key,
+            )
+        except (TypeError, ValueError):
+            return _error(422, "validation_error", "The state request is invalid.")
+        except StoreError as exc:
+            return _store_error(exc)
+        return JSONResponse(state.model_dump(mode="json"))
+
+    @app.get("/api/proposals")
+    async def list_proposals() -> Response:
+        try:
+            proposals = _course_store(app).list_proposals()
+        except StoreError as exc:
+            return _store_error(exc)
+        return JSONResponse([item.model_dump(mode="json") for item in proposals])
+
+    @app.post("/api/proposals", status_code=201)
+    async def create_proposal(request: Request) -> Response:
+        idempotency_key = request.headers.get("idempotency-key")
+        if not idempotency_key:
+            return _error(
+                400, "validation_error", "Idempotency-Key is required."
+            )
+        body_or_error = await _request_json(request)
+        if isinstance(body_or_error, Response):
+            return body_or_error
+        try:
+            proposal = _course_store(app).create_proposal(
+                body_or_error, idempotency_key
+            )
+        except StoreError as exc:
+            return _store_error(exc)
+        return JSONResponse(
+            proposal.model_dump(mode="json"), status_code=201
+        )
+
+    @app.post("/api/proposals/{proposal_id}/edit")
+    async def edit_proposal(proposal_id: str, request: Request) -> Response:
+        idempotency_key = request.headers.get("idempotency-key")
+        if not idempotency_key:
+            return _error(
+                400, "validation_error", "Idempotency-Key is required."
+            )
+        body_or_error = await _request_json(request)
+        if isinstance(body_or_error, Response):
+            return body_or_error
+        body = body_or_error
+        try:
+            proposal = _course_store(app).edit_proposal(
+                proposal_id,
+                int(body.get("expected_revision")),
+                body.get("request", body),
+                idempotency_key,
+            )
+        except (TypeError, ValueError):
+            return _error(
+                422, "validation_error", "The proposal edit is invalid."
+            )
+        except StoreError as exc:
+            return _store_error(exc)
+        return JSONResponse(proposal.model_dump(mode="json"))
+
+    @app.post("/api/proposals/{proposal_id}/accept")
+    async def accept_proposal(proposal_id: str, request: Request) -> Response:
+        return await _proposal_decision(app, proposal_id, request, "accept")
+
+    @app.post("/api/proposals/{proposal_id}/reject")
+    async def reject_proposal(proposal_id: str, request: Request) -> Response:
+        return await _proposal_decision(app, proposal_id, request, "reject")
+
     app.mount(
         "/learn",
         StaticFiles(directory=_STATIC_ROOT / "learn", html=True),
@@ -253,6 +350,80 @@ def _context_registry(app: FastAPI) -> ContextRegistry | Response:
         app.state.context_registry = ContextRegistry(manifest)
         app.state.context_manifest_etag = etag
     return app.state.context_registry
+
+
+def _course_store(app: FastAPI) -> CourseStore:
+    root = _configured_root(app)
+    if root is None:
+        raise StoreNotConfiguredError("No course root is configured")
+    if app.state.course_store is None:
+        app.state.course_store = CourseStore(root)
+    return app.state.course_store
+
+
+async def _request_json(request: Request) -> dict[str, Any] | Response:
+    raw = await request.body()
+    if len(raw) > 1024 * 1024:
+        return _error(413, "validation_error", "Request body exceeds the 1 MiB limit.")
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _error(422, "validation_error", "Malformed JSON.")
+    if not isinstance(value, dict):
+        return _error(422, "validation_error", "The request must be a JSON object.")
+    return value
+
+
+async def _proposal_decision(
+    app: FastAPI, proposal_id: str, request: Request, action: str
+) -> Response:
+    idempotency_key = request.headers.get("idempotency-key")
+    if not idempotency_key:
+        return _error(400, "validation_error", "Idempotency-Key is required.")
+    body_or_error = await _request_json(request)
+    if isinstance(body_or_error, Response):
+        return body_or_error
+    try:
+        revision = int(body_or_error.get("expected_revision"))
+        store = _course_store(app)
+        proposal = (
+            store.accept_proposal(proposal_id, revision, idempotency_key)
+            if action == "accept"
+            else store.reject_proposal(proposal_id, revision, idempotency_key)
+        )
+    except (TypeError, ValueError):
+        return _error(422, "validation_error", "The proposal decision is invalid.")
+    except StoreError as exc:
+        return _store_error(exc)
+    return JSONResponse(proposal.model_dump(mode="json"))
+
+
+def _store_error(exc: StoreError) -> JSONResponse:
+    if isinstance(exc, StoreNotConfiguredError):
+        return _error(409, "not_configured", "No course root is configured.")
+    if isinstance(exc, RevisionMismatchError):
+        return _error(
+            409,
+            "revision_mismatch",
+            "The learner state changed; reload before saving.",
+        )
+    if isinstance(exc, IdempotencyConflictError):
+        return _error(
+            409,
+            "idempotency_conflict",
+            "The idempotency key was already used for a different operation.",
+        )
+    if isinstance(exc, ProposalNotFoundError):
+        return _error(404, "not_found", "The proposal was not found.")
+    if isinstance(exc, ProposalConflictError):
+        return _error(
+            409, "proposal_conflict", "The proposal can no longer be changed."
+        )
+    if isinstance(exc, TargetChangedError):
+        return _error(
+            409, "target_changed", "The proposal target changed; review it again."
+        )
+    return _error(422, "validation_error", "The mutation request is invalid.")
 
 
 def _error(
