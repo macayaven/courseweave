@@ -35,6 +35,7 @@ from ag_ui.core import (
 )
 from ag_ui.encoder import EventEncoder
 from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
+from starlette.datastructures import Headers
 
 from courseweave import __version__
 from courseweave.context import (
@@ -67,6 +68,32 @@ from courseweave.store import (
 )
 
 _STATIC_ROOT = Path(__file__).parent / "static"
+_SESSION_COOKIE = "courseweave_session"
+_REDACTED_SHARED_CONTENT = "[Shared content omitted.]"
+
+
+class _CapabilityTokenMiddleware:
+    """Pure ASGI auth middleware that does not buffer streaming response sends."""
+
+    def __init__(self, app, *, capability_token: str) -> None:
+        self.app = app
+        self.capability_token = capability_token
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http" and scope["path"].startswith("/api/"):
+            provided = Headers(scope=scope).get("authorization", "")
+            expected = f"Bearer {self.capability_token}"
+            if not hmac.compare_digest(provided.encode(), expected.encode()):
+                await JSONResponse(
+                    status_code=403,
+                    content={
+                        "code": "forbidden",
+                        "message": "A valid capability token is required.",
+                        "details": {},
+                    },
+                )(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def create_app(
@@ -87,32 +114,20 @@ def create_app(
     app.state.context_manifest_etag = None
     app.state.course_store = None
     app.state.shared_runs: dict[str, dict[str, str | None]] = {}
-    app.state.guide_history: dict[str, list[ModelMessage]] = {}
+    app.state.guide_history: dict[tuple[str, Role, str], list[ModelMessage]] = {}
+    app.state.guide_sessions: set[str] = set()
     app.state.interrupted_runs: set[str] = set()
     app.state.provider_config_factory = lambda: ProviderConfig.from_environ(os.environ)
     app.state.professor_model_factory = create_model
+    app.add_middleware(
+        _CapabilityTokenMiddleware, capability_token=app.state.capability_token
+    )
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error(
         _request: Request, _exc: RequestValidationError
     ) -> JSONResponse:
         return _error(422, "validation_error", "The request is invalid.")
-
-    @app.middleware("http")
-    async def require_capability_token(request: Request, call_next):
-        if request.url.path.startswith("/api/"):
-            provided = request.headers.get("authorization", "")
-            expected = f"Bearer {app.state.capability_token}"
-            if not hmac.compare_digest(provided.encode(), expected.encode()):
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "code": "forbidden",
-                        "message": "A valid capability token is required.",
-                        "details": {},
-                    },
-                )
-        return await call_next(request)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
@@ -286,11 +301,19 @@ def create_app(
 
     @app.post("/api/guide")
     async def guide(request: Request) -> Response:
-        return await _guide_response(app, request, "learner")
+        session_id, new_session = _guide_session(app, request)
+        response = await _guide_response(app, request, "learner", session_id)
+        if new_session:
+            response.set_cookie(_SESSION_COOKIE, session_id, httponly=True, samesite="lax")
+        return response
 
     @app.post("/api/author/guide")
     async def author_guide(request: Request) -> Response:
-        return await _guide_response(app, request, "author")
+        session_id, new_session = _guide_session(app, request)
+        response = await _guide_response(app, request, "author", session_id)
+        if new_session:
+            response.set_cookie(_SESSION_COOKIE, session_id, httponly=True, samesite="lax")
+        return response
 
     @app.get("/api/state")
     async def get_state() -> Response:
@@ -445,7 +468,9 @@ async def _request_json(request: Request) -> dict[str, Any] | Response:
     return value
 
 
-async def _guide_response(app: FastAPI, request: Request, role: Role) -> Response:
+async def _guide_response(
+    app: FastAPI, request: Request, role: Role, session_id: str
+) -> Response:
     """Build trusted dependencies and return either a pre-stream error or AG-UI SSE."""
     raw_request = await request.body()
     recoverable_run_id = _recover_run_id(raw_request)
@@ -480,6 +505,8 @@ async def _guide_response(app: FastAPI, request: Request, role: Role) -> Respons
             WorkspaceContext(source_id="courseweave-guide", sequence=0),
         )
     )
+    history_source = stored.context.source_id if stored is not None else _default_history_source(resolved)
+    history_key = (session_id, role, history_source)
     try:
         store = _course_store(app)
         learner_state = store.get_state()
@@ -530,7 +557,8 @@ async def _guide_response(app: FastAPI, request: Request, role: Role) -> Respons
             model_request,
             prepared,
             request_text,
-            app.state.guide_history.get(run_input.thread_id, ()),
+            app.state.guide_history.get(history_key, ()),
+            history_key,
             shared,
         ),
         media_type=EventEncoder().get_content_type(),
@@ -562,6 +590,23 @@ def _source_id(forwarded_props: Any) -> str | None:
         return None
     source_id = forwarded_props.get("source_id")
     return source_id if isinstance(source_id, str) and source_id else None
+
+
+def _guide_session(app: FastAPI, request: Request) -> tuple[str, bool]:
+    """Return a process-local session value issued only by this service."""
+    session_id = request.cookies.get(_SESSION_COOKIE)
+    if session_id is not None and session_id in app.state.guide_sessions:
+        return session_id, False
+    session_id = secrets.token_urlsafe(32)
+    app.state.guide_sessions.add(session_id)
+    return session_id, True
+
+
+def _default_history_source(resolved) -> str:
+    """Namespace fallback context by the server's deterministic resolution."""
+    return ":".join(
+        part or "none" for part in (resolved.module_id, resolved.phase_id, resolved.surface_id)
+    )
 
 
 def _recover_run_id(raw_request: bytes) -> str | None:
@@ -609,6 +654,7 @@ async def _guide_events(
     prepared: ProfessorOutcome | ModelResult,
     user_text: str,
     message_history: tuple[ModelMessage, ...] | list[ModelMessage],
+    history_key: tuple[str, Role, str],
     shared: dict[str, str | None] | None,
 ):
     """Emit official AG-UI events and clear all one-run data on every exit path."""
@@ -616,6 +662,7 @@ async def _guide_events(
     message_id = f"{run_id}-assistant"
     stager = ProposalStager() if shared is None else None
     completed = False
+    terminal_emitted = False
     try:
         yield encoder.encode(RunStartedEvent(threadId=thread_id, runId=run_id))
         if isinstance(prepared, ProfessorOutcome):
@@ -625,6 +672,7 @@ async def _guide_events(
         else:
             chunks: list[str] = []
             started_message = False
+            redactor = _SharedChunkRedactor(shared["content"] if shared is not None else None)
             async with professor.stream_prepared(
                 request_text,
                 prepared,
@@ -636,42 +684,46 @@ async def _guide_events(
                     if not started_message:
                         yield encoder.encode(TextMessageStartEvent(messageId=message_id))
                         started_message = True
-                        if shared is not None:
-                            yield encoder.encode(
-                                TextMessageContentEvent(
-                                    messageId=message_id,
-                                    delta="[Processing shared content.]",
-                                )
-                            )
-                    chunks.append(delta)
                     if shared is None:
+                        chunks.append(delta)
+                    safe_delta = redactor.feed(delta)
+                    if safe_delta:
                         yield encoder.encode(
-                            TextMessageContentEvent(messageId=message_id, delta=delta)
+                            TextMessageContentEvent(messageId=message_id, delta=safe_delta)
                         )
             if not started_message:
                 yield encoder.encode(TextMessageStartEvent(messageId=message_id))
                 yield encoder.encode(TextMessageContentEvent(messageId=message_id, delta=""))
-            content = _redact_shared_content("".join(chunks), shared)
-            if shared is not None and chunks:
+            safe_remainder = redactor.flush()
+            if safe_remainder:
                 yield encoder.encode(
-                    TextMessageContentEvent(messageId=message_id, delta=content)
+                    TextMessageContentEvent(messageId=message_id, delta=safe_remainder)
                 )
-            if stager is not None:
-                stager.commit(professor.store)  # type: ignore[arg-type]
+            content = "".join(chunks) if shared is None else ""
         yield encoder.encode(TextMessageEndEvent(messageId=message_id))
+        terminal_emitted = True
+        yield encoder.encode(RunFinishedEvent(threadId=thread_id, runId=run_id))
+        # Code after the terminal yield runs only after the ASGI response
+        # consumer has accepted RUN_FINISHED and resumed this generator.
+        if stager is not None:
+            stager.commit(professor.store)  # type: ignore[arg-type]
         if shared is None:
-            app.state.guide_history.setdefault(thread_id, []).extend(
+            app.state.guide_history.setdefault(history_key, []).extend(
                 [
                     ModelRequest(parts=[UserPromptPart(content=user_text)]),
                     ModelResponse(parts=[TextPart(content=content)]),
                 ]
             )
-        yield encoder.encode(RunFinishedEvent(threadId=thread_id, runId=run_id))
         completed = True
     except asyncio.CancelledError:
         app.state.interrupted_runs.add(run_id)
         return
+    except GeneratorExit:
+        app.state.interrupted_runs.add(run_id)
+        raise
     except Exception:
+        if terminal_emitted:
+            raise
         yield encoder.encode(RunErrorEvent(message="The provider request failed."))
     finally:
         if not completed and stager is not None:
@@ -690,6 +742,46 @@ def _redact_shared_content(
     if shared is not None and (excerpt := shared["content"]):
         content = content.replace(excerpt, "[Shared content omitted.]")
     return content
+
+
+class _SharedChunkRedactor:
+    """Stream an excerpt-safe response with only a bounded overlap carry."""
+
+    def __init__(self, excerpt: str | None) -> None:
+        self.excerpt = excerpt or ""
+        self.carry = ""
+
+    def feed(self, chunk: str) -> str:
+        if not self.excerpt:
+            return chunk
+        combined = self.carry + chunk
+        output: list[str] = []
+        position = 0
+        while True:
+            match = combined.find(self.excerpt, position)
+            if match < 0:
+                tail = combined[position:]
+                overlap = _prefix_overlap(tail, self.excerpt)
+                output.append(tail[:-overlap] if overlap else tail)
+                self.carry = tail[-overlap:] if overlap else ""
+                return "".join(output)
+            output.append(combined[position:match])
+            output.append(_REDACTED_SHARED_CONTENT)
+            position = match + len(self.excerpt)
+
+    def flush(self) -> str:
+        remainder = self.carry
+        self.carry = ""
+        return remainder
+
+
+def _prefix_overlap(value: str, excerpt: str) -> int:
+    """Find the longest suffix that may become an excerpt in the next chunk."""
+    limit = min(len(value), len(excerpt) - 1)
+    for size in range(limit, 0, -1):
+        if value.endswith(excerpt[:size]):
+            return size
+    return 0
 
 
 async def _proposal_decision(

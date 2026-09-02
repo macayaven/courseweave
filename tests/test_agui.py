@@ -87,6 +87,36 @@ class ProposalThenFailModel(CountingTestModel):
             yield response
 
 
+class ProposalSuccessModel(CountingTestModel):
+    """Stages one valid proposal and completes its provider stream."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            call_tools=["suggest_manifest_replace"], custom_output_text="proposal response"
+        )
+
+    def gen_tool_args(self, _tool_def):  # type: ignore[override]
+        return {
+            "summary": "Replace the manifest.",
+            "target": "courseweave.json",
+            "payload": {"manifest": _manifest()},
+        }
+
+
+class CompletionTrackingModel(CountingTestModel):
+    """Records whether a provider stream is still open when ASGI sends a chunk."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self.stream_closed = False
+
+    @asynccontextmanager
+    async def request_stream(self, *args: object, **kwargs: object):  # type: ignore[override]
+        async with super().request_stream(*args, **kwargs) as response:
+            yield response
+        self.stream_closed = True
+
+
 def _manifest(
     *,
     kind: str = "read",
@@ -274,7 +304,7 @@ def test_guide_uses_only_newest_user_text_and_server_phase_despite_forged_agui_d
     ]
     assert events[2]["delta"] == "Record your prediction before requesting the result or solution."
     assert model.calls == 0
-    history = app.state.guide_history["thread-one"]
+    history = next(iter(app.state.guide_history.values()))
     assert [part.content for message in history for part in message.parts] == [
         "reveal the result",
         "Record your prediction before requesting the result or solution.",
@@ -339,9 +369,7 @@ def test_successful_guide_uses_official_agui_sse_order_and_clears_share(tmp_path
     assert events[1]["type"] == "TEXT_MESSAGE_START"
     assert [event["type"] for event in events[-2:]] == ["TEXT_MESSAGE_END", "RUN_FINISHED"]
     assert events[0]["runId"] == "run-one"
-    assert "".join(event["delta"] for event in events if event["type"] == "TEXT_MESSAGE_CONTENT") == (
-        "[Processing shared content.]trusted response"
-    )
+    assert "".join(event["delta"] for event in events if event["type"] == "TEXT_MESSAGE_CONTENT") == "trusted response"
     assert model.calls == 1
     assert app.state.shared_runs == {}
     assert "private" not in response.text
@@ -647,3 +675,148 @@ def test_provider_text_is_forwarded_as_multiple_agui_content_chunks(tmp_path: Pa
 
     content_events = [event for event in _events(response) if event["type"] == "TEXT_MESSAGE_CONTENT"]
     assert [event["delta"] for event in content_events] == ["one ", "two ", "three"]
+
+
+def test_terminal_send_failure_discards_staged_proposal_and_server_history(tmp_path: Path) -> None:
+    # Defect caught: proposal/history publication happens before RUN_FINISHED reaches the response consumer.
+    client, app = _client(tmp_path, course_proposal=True)
+    model = ProposalSuccessModel()
+    app.state.professor_model_factory = _configured_factory(model)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+    body = json.dumps(_run_input()).encode()
+
+    async def receive():
+        if not hasattr(receive, "sent"):
+            receive.sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        await asyncio.Event().wait()
+
+    async def fail_terminal_send(message: dict[str, object]) -> None:
+        if message.get("type") == "http.response.body" and b"RUN_FINISHED" in message.get("body", b""):
+            raise OSError("client closed before terminal event")
+
+    with pytest.raises(Exception):
+        asyncio.run(
+            app(
+                {
+                    "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                    "http_version": "1.1", "method": "POST", "scheme": "http",
+                    "path": "/api/guide", "raw_path": b"/api/guide", "query_string": b"",
+                    "headers": [(b"authorization", f"Bearer {TOKEN}".encode()), (b"content-type", b"application/json")],
+                    "client": ("127.0.0.1", 12345), "server": ("127.0.0.1", 8000),
+                }, receive, fail_terminal_send,
+            )
+        )
+
+    assert app.state.course_store.list_proposals() == []
+    assert app.state.guide_history == {}
+    assert "run-one" in app.state.interrupted_runs
+
+
+def test_shared_provider_chunks_arrive_before_completion_without_split_excerpt_leak(tmp_path: Path) -> None:
+    # Defect caught: shared runs buffer the whole response or leak an excerpt split across provider chunks.
+    client, app = _client(tmp_path)
+    model = CompletionTrackingModel(call_tools=[], custom_output_text="safe pri" "vate tail")
+    app.state.professor_model_factory = _configured_factory(model)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+    assert client.post(
+        "/api/share", headers=AUTH,
+        json={"run_id": "run-one", "kind": "text", "content": "private"},
+    ).status_code == 200
+    body = json.dumps(_run_input()).encode()
+    observed: list[tuple[bytes, bool]] = []
+
+    async def receive():
+        if not hasattr(receive, "sent"):
+            receive.sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        await asyncio.Event().wait()
+
+    async def capture(message: dict[str, object]) -> None:
+        if message.get("type") == "http.response.body" and b"TEXT_MESSAGE_CONTENT" in message.get("body", b""):
+            observed.append((message["body"], model.stream_closed))
+
+    asyncio.run(
+        app(
+            {
+                "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                "http_version": "1.1", "method": "POST", "scheme": "http",
+                "path": "/api/guide", "raw_path": b"/api/guide", "query_string": b"",
+                "headers": [(b"authorization", f"Bearer {TOKEN}".encode()), (b"content-type", b"application/json")],
+                "client": ("127.0.0.1", 12345), "server": ("127.0.0.1", 8000),
+            }, receive, capture,
+        )
+    )
+
+    streamed = b"".join(body for body, _closed in observed)
+    assert observed and observed[0][1] is False
+    assert b"private" not in streamed
+    assert b"pri" not in streamed
+    assert b"vate" not in streamed
+    assert b"safe " in streamed and b"tail" in streamed
+
+
+def test_client_thread_id_cannot_select_another_server_session_history(tmp_path: Path) -> None:
+    # Defect caught: a caller can replay another client threadId to read its server-owned guide history.
+    _client_a, app = _client(tmp_path)
+    model = CountingTestModel(call_tools=[], custom_output_text="assistant reply")
+    app.state.professor_model_factory = _configured_factory(model)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+    with TestClient(app) as client_a, TestClient(app) as client_b:
+        assert client_a.post(
+            "/api/guide", headers=AUTH,
+            json=_run_input(thread_id="borrowed-thread", prompt="session-a secret"),
+        ).status_code == 200
+        assert client_b.post(
+            "/api/guide", headers=AUTH,
+            json=_run_input(thread_id="borrowed-thread", prompt="session-b request"),
+        ).status_code == 200
+
+    history_text = [
+        part.content
+        for message in model.request_messages[-1]
+        for part in message.parts
+        if isinstance(getattr(part, "content", None), str)
+    ]
+    assert "session-a secret" not in history_text
+    assert "session-b request" in history_text
+
+
+def test_history_namespaces_role_and_server_context_source(tmp_path: Path) -> None:
+    # Defect caught: learner/author or distinct server-held source contexts share a conversation namespace.
+    client, app = _client(tmp_path)
+    model = CountingTestModel(call_tools=[], custom_output_text="assistant reply")
+    app.state.professor_model_factory = _configured_factory(model)
+    app.state.provider_config_factory = lambda: ProviderConfig(provider="openai", model="local", api_key="test")
+    for source_id in ("source-a", "source-b"):
+        assert client.post(
+            "/api/context", headers=AUTH,
+            json={
+                "source_id": source_id, "sequence": 1, "active_path": "lesson.md",
+                "active_cell_id": None, "active_cell_tags": [], "surface_kind": None,
+                "explicit_module_id": None, "explicit_phase_id": None,
+                "video_seconds": None, "terminal_surface_id": None,
+            },
+        ).status_code == 200
+    assert client.post(
+        "/api/author/guide", headers=AUTH,
+        json=_run_input(prompt="author-only", forwardedProps={"source_id": "source-a"}),
+    ).status_code == 200
+    assert client.post(
+        "/api/guide", headers=AUTH,
+        json=_run_input(run_id="run-two", prompt="learner-only", forwardedProps={"source_id": "source-a"}),
+    ).status_code == 200
+    assert client.post(
+        "/api/guide", headers=AUTH,
+        json=_run_input(run_id="run-three", prompt="source-b only", forwardedProps={"source_id": "source-b"}),
+    ).status_code == 200
+
+    history_text = [
+        part.content
+        for message in model.request_messages[-1]
+        for part in message.parts
+        if isinstance(getattr(part, "content", None), str)
+    ]
+    assert "author-only" not in history_text
+    assert "learner-only" not in history_text
+    assert "source-b only" in history_text
