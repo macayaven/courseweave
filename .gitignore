@@ -11,4 +11,6 @@ __pycache__/
 .env.local
 .worktrees/
 frontend/packages/lab/lib/
+frontend/test-results/
+frontend/playwright-report/
 *.tsbuildinfo
