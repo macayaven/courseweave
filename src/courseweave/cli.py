@@ -18,6 +18,7 @@ import uvicorn
 
 from courseweave import __version__
 from courseweave.api import create_app
+from courseweave.providers import ProviderConfig
 
 ENV_CAPABILITY_TOKEN = "COURSEWEAVE_CAPABILITY_TOKEN"
 
@@ -26,6 +27,26 @@ app = typer.Typer(
     help="CourseWeave: local-first course platform.",
     no_args_is_help=True,
 )
+
+
+@app.command()
+def doctor(
+    course_root: Path = typer.Option(
+        ...,
+        "--course-root",
+        exists=True,
+        file_okay=False,
+        resolve_path=True,
+        help="Root directory of the course repository.",
+    ),
+) -> None:
+    """Report redacted provider configuration for a course root."""
+    del course_root  # The command validates the supplied root; no course data is read.
+    config = ProviderConfig.from_environ(os.environ)
+    typer.echo(f"provider: {config.provider or 'MISSING'}")
+    typer.echo(f"model: {config.model or 'MISSING'}")
+    typer.echo(f"base_url: {config.base_url_status}")
+    typer.echo(f"credential: {config.credential_status}")
 
 
 @app.command()
