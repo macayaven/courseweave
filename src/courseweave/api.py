@@ -11,23 +11,36 @@ common error envelope ``{"code", "message", "details"}``.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
+import os
 import secrets
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
+from pydantic_ai.ui.ag_ui import AGUIAdapter
+from ag_ui.core import (
+    RunErrorEvent,
+    RunFinishedEvent,
+    RunStartedEvent,
+    TextMessageContentEvent,
+    TextMessageEndEvent,
+    TextMessageStartEvent,
+)
+from ag_ui.encoder import EventEncoder
 
 from courseweave import __version__
 from courseweave.context import (
     ContextConflictError,
     ContextRegistry,
     StaleContextError,
+    resolve_context,
 )
 from courseweave.manifest import (
     ETagMismatchError,
@@ -38,7 +51,9 @@ from courseweave.manifest import (
     parse_manifest_data,
     read_manifest,
 )
-from courseweave.models import WorkspaceContext
+from courseweave.models import ResolutionState, WorkspaceContext
+from courseweave.professor import ProfessorOutcome, ProfessorService, Role
+from courseweave.providers import ModelResult, ProviderConfig, create_model
 from courseweave.store import (
     CourseStore,
     IdempotencyConflictError,
@@ -70,6 +85,11 @@ def create_app(
     app.state.context_registry = None
     app.state.context_manifest_etag = None
     app.state.course_store = None
+    app.state.shared_runs: dict[str, list[dict[str, str | None]]] = {}
+    app.state.guide_history: dict[str, list[str]] = {}
+    app.state.interrupted_runs: set[str] = set()
+    app.state.provider_config_factory = lambda: ProviderConfig.from_environ(os.environ)
+    app.state.professor_model_factory = create_model
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error(
@@ -220,6 +240,52 @@ def create_app(
                 exc,
             )
         return JSONResponse(resolved.model_dump(mode="json"))
+
+    @app.post("/api/share")
+    async def post_share(request: Request) -> Response:
+        registry_or_error = _context_registry(app)
+        if isinstance(registry_or_error, Response):
+            return registry_or_error
+        body_or_error = await _request_json(request)
+        if isinstance(body_or_error, Response):
+            return body_or_error
+        body = body_or_error
+        allowed = {"run_id", "kind", "label", "content"}
+        if set(body) - allowed or not {"run_id", "kind", "content"} <= set(body):
+            return _error(422, "validation_error", "The Share request is invalid.")
+        run_id = body.get("run_id")
+        kind = body.get("kind")
+        label = body.get("label")
+        content = body.get("content")
+        if (
+            not isinstance(run_id, str)
+            or not run_id
+            or len(run_id) > 240
+            or kind not in {"selection", "cell", "output", "text"}
+            or not isinstance(content, str)
+            or (label is not None and (not isinstance(label, str) or len(label) > 240))
+        ):
+            return _error(422, "validation_error", "The Share request is invalid.")
+        if len(content) > registry_or_error.manifest.policies.max_shared_chars:
+            return _error(422, "validation_error", "Shared content exceeds the course limit.")
+        app.state.shared_runs.setdefault(run_id, []).append(
+            {"kind": kind, "label": label, "content": content}
+        )
+        response: dict[str, str | int | None] = {
+            "run_id": run_id,
+            "kind": kind,
+            "label": label,
+            "char_count": len(content),
+        }
+        return JSONResponse(response)
+
+    @app.post("/api/guide")
+    async def guide(request: Request) -> Response:
+        return await _guide_response(app, request, "learner")
+
+    @app.post("/api/author/guide")
+    async def author_guide(request: Request) -> Response:
+        return await _guide_response(app, request, "author")
 
     @app.get("/api/state")
     async def get_state() -> Response:
@@ -372,6 +438,179 @@ async def _request_json(request: Request) -> dict[str, Any] | Response:
     if not isinstance(value, dict):
         return _error(422, "validation_error", "The request must be a JSON object.")
     return value
+
+
+async def _guide_response(app: FastAPI, request: Request, role: Role) -> Response:
+    """Build trusted dependencies and return either a pre-stream error or AG-UI SSE."""
+    raw_request = await request.body()
+    if len(raw_request) > 1024 * 1024:
+        return _error(413, "validation_error", "Request body exceeds the 1 MiB limit.")
+    try:
+        run_input = AGUIAdapter.build_run_input(raw_request)
+    except ValidationError:
+        return _error(422, "validation_error", "The AG-UI request is invalid.")
+
+    request_text = _newest_user_text(run_input.messages)
+    if request_text is None:
+        _clear_shared_run(app, run_input.run_id)
+        return _error(422, "validation_error", "The AG-UI request requires a user message.")
+    registry_or_error = _context_registry(app)
+    if isinstance(registry_or_error, Response):
+        _clear_shared_run(app, run_input.run_id)
+        return registry_or_error
+    manifest = registry_or_error.manifest
+    source_id = _source_id(run_input.forwarded_props)
+    stored = registry_or_error.get(source_id) if source_id is not None else None
+    resolved = (
+        stored.resolved
+        if stored is not None
+        else resolve_context(
+            manifest,
+            ResolutionState(),
+            WorkspaceContext(source_id="courseweave-guide", sequence=0),
+        )
+    )
+    try:
+        store = _course_store(app)
+        learner_state = store.get_state()
+    except StoreError as exc:
+        _clear_shared_run(app, run_input.run_id)
+        return _store_error(exc)
+
+    model_factory = app.state.professor_model_factory
+    professor = ProfessorService(
+        manifest,
+        resolved,
+        learner_state,
+        role,
+        ProviderConfig(provider=None),
+        store=store,
+        model_factory=model_factory,
+    )
+    gate = professor.gate(request_text)
+    app.state.guide_history.setdefault(run_input.thread_id, []).append(request_text)
+    if gate is None:
+        try:
+            professor.provider_config = app.state.provider_config_factory()
+            prepared = professor.prepare(request_text)
+        except Exception:
+            _clear_shared_run(app, run_input.run_id)
+            return _error(502, "provider_error", "The provider could not be configured.")
+        if isinstance(prepared, ProfessorOutcome) and prepared.status == "not_configured":
+            _clear_shared_run(app, run_input.run_id)
+            return _error(409, "not_configured", "No chat provider is configured.")
+    else:
+        prepared = gate
+
+    if await request.is_disconnected():
+        _clear_shared_run(app, run_input.run_id)
+        app.state.interrupted_runs.add(run_input.run_id)
+        return Response(status_code=204)
+
+    shared = app.state.shared_runs.get(run_input.run_id, [])
+    model_request = _request_with_shared_content(request_text, shared)
+    return StreamingResponse(
+        _guide_events(
+            app,
+            professor,
+            run_input.thread_id,
+            run_input.run_id,
+            model_request,
+            prepared,
+            shared,
+        ),
+        media_type=EventEncoder().get_content_type(),
+    )
+
+
+def _newest_user_text(messages: list[Any]) -> str | None:
+    """Accept only the newest AG-UI user-authored text; all other client data is inert."""
+    newest: str | None = None
+    for message in messages:
+        if getattr(message, "role", None) != "user":
+            continue
+        content = getattr(message, "content", None)
+        if isinstance(content, str):
+            newest = content
+        elif isinstance(content, list):
+            newest = "".join(
+                part.text
+                for part in content
+                if getattr(part, "type", None) == "text"
+                and isinstance(getattr(part, "text", None), str)
+            )
+    return newest
+
+
+def _source_id(forwarded_props: Any) -> str | None:
+    """Allow only a source identifier to select already-held server context."""
+    if not isinstance(forwarded_props, dict):
+        return None
+    source_id = forwarded_props.get("source_id")
+    return source_id if isinstance(source_id, str) and source_id else None
+
+
+def _request_with_shared_content(
+    request_text: str, shared: list[dict[str, str | None]]
+) -> str:
+    """Attach private excerpts to one provider request without retaining them in history."""
+    if not shared:
+        return request_text
+    excerpts = "\n\n".join(
+        f"[Explicitly shared {item['kind']}]\n{item['content']}" for item in shared
+    )
+    return f"{request_text}\n\n{excerpts}"
+
+
+async def _guide_events(
+    app: FastAPI,
+    professor: ProfessorService,
+    thread_id: str,
+    run_id: str,
+    request_text: str,
+    prepared: ProfessorOutcome | ModelResult,
+    shared: list[dict[str, str | None]],
+):
+    """Emit official AG-UI events and clear all one-run data on every exit path."""
+    encoder = EventEncoder()
+    message_id = f"{run_id}-assistant"
+    try:
+        yield encoder.encode(RunStartedEvent(threadId=thread_id, runId=run_id))
+        outcome = (
+            prepared
+            if isinstance(prepared, ProfessorOutcome)
+            else await professor.respond_prepared(request_text, prepared)
+        )
+        if outcome.status == "provider_error":
+            yield encoder.encode(RunErrorEvent(message="The provider request failed."))
+            return
+        content = _redact_shared_content(outcome.content or "", shared)
+        yield encoder.encode(TextMessageStartEvent(messageId=message_id))
+        yield encoder.encode(TextMessageContentEvent(messageId=message_id, delta=content))
+        yield encoder.encode(TextMessageEndEvent(messageId=message_id))
+        yield encoder.encode(RunFinishedEvent(threadId=thread_id, runId=run_id))
+    except (asyncio.CancelledError, GeneratorExit):
+        app.state.interrupted_runs.add(run_id)
+        raise
+    except Exception:
+        yield encoder.encode(RunErrorEvent(message="The provider request failed."))
+    finally:
+        _clear_shared_run(app, run_id)
+
+
+def _clear_shared_run(app: FastAPI, run_id: str) -> None:
+    app.state.shared_runs.pop(run_id, None)
+
+
+def _redact_shared_content(
+    content: str, shared: list[dict[str, str | None]]
+) -> str:
+    """Do not reflect a private excerpt through an AG-UI content event."""
+    for item in shared:
+        excerpt = item["content"]
+        if excerpt:
+            content = content.replace(excerpt, "[Shared content omitted.]")
+    return content
 
 
 async def _proposal_decision(

@@ -183,22 +183,15 @@ class ProfessorService:
 
     def gate(self, request: str) -> ProfessorOutcome | None:
         """Return a fixed deterministic denial, or ``None`` when the model may run."""
-        if _is_substantive(request) and (
-            self.policy.capabilities is not None and not self.policy.capabilities.chat
-        ):
-            return ProfessorOutcome("blocked", CHAT_DISABLED_MESSAGE, self.policy)
-        if _requires_prediction(self.policy, self.learner_state) and _is_substantive(request):
-            return ProfessorOutcome("blocked", PREDICTION_REQUIRED_MESSAGE, self.policy)
-        if (
-            self.policy.phase_kind == "audit"
-            and self.policy.teacher_mode == "observer"
-            and _is_substantive(request)
-        ):
-            return ProfessorOutcome("blocked", OBSERVER_ONLY_MESSAGE, self.policy)
-        return None
+        return gate_professor_request(self.policy, self.learner_state, request)
 
-    async def respond(self, request: str) -> ProfessorOutcome:
-        """Gate a request, then lazily run the configured Pydantic AI professor."""
+    def prepare(self, request: str) -> ProfessorOutcome | ModelResult:
+        """Run policy gates then construct a model without starting a request.
+
+        The AG-UI transport uses this seam to keep an unconfigured provider as a
+        pre-stream JSON error, while provider failures after a stream starts are
+        represented by the protocol's ``RUN_ERROR`` event.
+        """
         denied = self.gate(request)
         if denied is not None:
             return denied
@@ -207,6 +200,19 @@ class ProfessorService:
             return ProfessorOutcome(
                 "not_configured", None, self.policy, model_result.missing
             )
+        return model_result
+
+    async def respond(self, request: str) -> ProfessorOutcome:
+        """Gate a request, then lazily run the configured Pydantic AI professor."""
+        prepared = self.prepare(request)
+        if isinstance(prepared, ProfessorOutcome):
+            return prepared
+        return await self.respond_prepared(request, prepared)
+
+    async def respond_prepared(
+        self, request: str, model_result: ModelResult
+    ) -> ProfessorOutcome:
+        """Run a provider that was safely preflighted before stream creation."""
         agent = self._agent_for(model_result)
         try:
             result = await agent.run(request)
@@ -314,6 +320,25 @@ def _requires_prediction(policy: ProfessorPolicy, state: LearnerState) -> bool:
     assert policy.module_id is not None and policy.phase_id is not None
     key = f"{policy.module_id}/{policy.phase_id}/{policy.prediction_record_id}"
     return key not in state.predictions
+
+
+def gate_professor_request(
+    policy: ProfessorPolicy, state: LearnerState, request: str
+) -> ProfessorOutcome | None:
+    """Evaluate deterministic policy before provider configuration or calls."""
+    if _is_substantive(request) and (
+        policy.capabilities is not None and not policy.capabilities.chat
+    ):
+        return ProfessorOutcome("blocked", CHAT_DISABLED_MESSAGE, policy)
+    if _requires_prediction(policy, state) and _is_substantive(request):
+        return ProfessorOutcome("blocked", PREDICTION_REQUIRED_MESSAGE, policy)
+    if (
+        policy.phase_kind == "audit"
+        and policy.teacher_mode == "observer"
+        and _is_substantive(request)
+    ):
+        return ProfessorOutcome("blocked", OBSERVER_ONLY_MESSAGE, policy)
+    return None
 
 
 def _is_substantive(request: str) -> bool:
