@@ -88,3 +88,38 @@ provider traffic guard. No hosted model request is permitted by the test seam.
 No blocking concerns. Hosted-provider calls were deliberately not canaried:
 the global test guard makes such a call fail, and loopback protocol stubs cover
 the adapter boundary without credentials or external network dependence.
+
+## Fix round 1/5: loopback-only provider test transport
+
+The original denylist guarded only asynchronous `httpx`/`httpx2` calls and two
+hostnames. It could therefore miss synchronous SDK paths and arbitrary remote
+custom base URLs. The test-wide guard now wraps `send` on `Client` and
+`AsyncClient` for both libraries, permits only literal loopback IPs or
+`localhost`, and preserves Starlette/ASGI in-process test transports. All other
+HTTP client traffic fails before its transport is invoked.
+
+The canaries cover OpenAI and Anthropic hosted names through the two async
+variants, as well as a non-loopback `custom-provider.invalid` endpoint through
+both sync and async variants. They use `MockTransport`, so the RED phase did
+not create external traffic.
+
+RED:
+
+```text
+$ uv run pytest tests/test_providers.py -q
+6 failed, 14 passed in 11.02s
+```
+
+The two hosted cases still raised the old denylist message, while all four
+remote-custom sync/async cases reached their mock transport rather than being
+blocked.
+
+GREEN:
+
+```text
+$ uv run pytest tests/test_providers.py -q
+20 passed in 10.78s
+
+$ git diff --check && uv run pytest -q
+148 passed in 15.11s
+```

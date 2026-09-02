@@ -7,21 +7,49 @@ inherits credentials from the developer environment.
 
 from __future__ import annotations
 
+import ipaddress
+
 import pytest
 
 
 @pytest.fixture(autouse=True)
 def block_real_model_providers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reject direct traffic to the two hosted provider domains."""
+    """Allow HTTP client traffic only to loopback or in-process test transports."""
     import httpx
     import httpx2
 
+    def allow_request(client, request) -> bool:
+        if type(getattr(client, "_transport", None)).__module__.startswith(
+            ("starlette.testclient", "httpx._transports.asgi")
+        ):
+            return True
+        host = request.url.host
+        if host == "localhost":
+            return True
+        try:
+            return ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            return False
+
+    def guarded_async_send(original_send):
+        async def send(self, request, *args, **kwargs):
+            if not allow_request(self, request):
+                raise AssertionError("Tests use loopback-only HTTP transport")
+            return await original_send(self, request, *args, **kwargs)
+
+        return send
+
+    def guarded_sync_send(original_send):
+        def send(self, request, *args, **kwargs):
+            if not allow_request(self, request):
+                raise AssertionError("Tests use loopback-only HTTP transport")
+            return original_send(self, request, *args, **kwargs)
+
+        return send
+
     for client_type in (httpx.AsyncClient, httpx2.AsyncClient):
         original_send = client_type.send
-
-        async def guarded_send(self, request, *args, _send=original_send, **kwargs):
-            if request.url.host in {"api.openai.com", "api.anthropic.com"}:
-                raise AssertionError("Tests must not call a real model provider")
-            return await _send(self, request, *args, **kwargs)
-
-        monkeypatch.setattr(client_type, "send", guarded_send)
+        monkeypatch.setattr(client_type, "send", guarded_async_send(original_send))
+    for client_type in (httpx.Client, httpx2.Client):
+        original_send = client_type.send
+        monkeypatch.setattr(client_type, "send", guarded_sync_send(original_send))

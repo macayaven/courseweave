@@ -7,8 +7,8 @@ of the adapter implementation.
 
 from __future__ import annotations
 
-import json
 import asyncio
+import json
 import threading
 import time
 from collections.abc import Iterator
@@ -16,6 +16,8 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+import httpx
+import httpx2
 from typer.testing import CliRunner
 
 from courseweave.cli import app
@@ -214,16 +216,46 @@ def test_missing_configuration_is_a_structured_not_configured_result() -> None:
     assert result.missing == ("OPENAI_MODEL", "OPENAI_API_KEY")
 
 
-def test_global_provider_guard_blocks_hosted_endpoints() -> None:
-    # Defect caught: an adapter test can accidentally send traffic to a hosted provider.
-    import httpx2
-
+@pytest.mark.parametrize(
+    "client_module,provider_host",
+    [(httpx, "api.openai.com"), (httpx2, "api.anthropic.com")],
+)
+def test_global_provider_guard_blocks_each_hosted_provider_async(
+    client_module, provider_host: str
+) -> None:
+    # Defect caught: either provider's async SDK client can reach its hosted endpoint.
     async def request_hosted_endpoint() -> None:
-        async with httpx2.AsyncClient() as client:
-            await client.get("https://api.openai.com/v1/models")
+        async with client_module.AsyncClient() as client:
+            await client.get(f"https://{provider_host}/v1/models")
 
-    with pytest.raises(AssertionError, match="must not call a real model provider"):
+    with pytest.raises(AssertionError, match="loopback-only"):
         asyncio.run(request_hosted_endpoint())
+
+
+@pytest.mark.parametrize("client_module", [httpx, httpx2])
+def test_global_provider_guard_blocks_non_loopback_custom_endpoint_sync(
+    client_module,
+) -> None:
+    # Defect caught: a synchronous SDK path can send a custom remote base URL.
+    transport = client_module.MockTransport(lambda _request: client_module.Response(200))
+    with client_module.Client(transport=transport) as client:
+        with pytest.raises(AssertionError, match="loopback-only"):
+            client.get("https://custom-provider.invalid/v1/models")
+
+
+@pytest.mark.parametrize("client_module", [httpx, httpx2])
+def test_global_provider_guard_blocks_non_loopback_custom_endpoint_async(
+    client_module,
+) -> None:
+    # Defect caught: an async SDK path can send a custom remote base URL.
+    transport = client_module.MockTransport(lambda _request: client_module.Response(200))
+
+    async def request_custom_endpoint() -> None:
+        async with client_module.AsyncClient(transport=transport) as client:
+            await client.get("https://custom-provider.invalid/v1/models")
+
+    with pytest.raises(AssertionError, match="loopback-only"):
+        asyncio.run(request_custom_endpoint())
 
 
 def test_doctor_redacts_provider_credentials(tmp_path) -> None:
