@@ -18,4 +18,17 @@ describe('ShareDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Share and ask' }));
     await vi.waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ kind: 'selection', content: 'safe', label: undefined }));
   });
+
+  it('uses a modal consent dialog, focuses its first control, escapes, and counts Unicode code points', () => {
+    const cancel = vi.fn();
+    render(<ShareDialog maxChars={1} allowedKinds={['selection']} onCancel={cancel} onConfirm={vi.fn()} />);
+    const dialog = screen.getByRole('dialog', { name: 'Share with teacher' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveAttribute('aria-describedby');
+    expect(screen.getByLabelText('Share kind')).toHaveFocus();
+    fireEvent.change(screen.getByLabelText('Share content'), { target: { value: '😀' } });
+    expect(screen.getByText('1 / 1 characters')).toBeInTheDocument();
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
 });

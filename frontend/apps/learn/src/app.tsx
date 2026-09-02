@@ -63,7 +63,10 @@ export function LearnApp() {
   const [data, setData] = useState<{ course: CourseManifest; state: LearnerState; proposals: Proposal[]; context: StoredContext | null } | null>(null);
   const [provider, setProvider] = useState<ProviderStatus>('unknown');
   const [recovery, setRecovery] = useState(false);
+  const [teacherDraft, setTeacherDraft] = useState(false);
+  const [proposalDraft, setProposalDraft] = useState(false);
   const loadedSource = useRef<string | null>(null);
+  const activeRead = useRef<AbortController | null>(null);
 
   const refreshDurableData = useCallback(async () => {
     if (runtime.status !== 'ready') return;
@@ -73,11 +76,39 @@ export function LearnApp() {
   }, [runtime]);
 
   useEffect(() => {
+    setProvider('unknown');
+  }, [runtime.status, runtime.runtime]);
+
+  const reconnect = useCallback(async () => {
+    if (runtime.status !== 'ready') return;
+    activeRead.current?.abort();
+    const controller = new AbortController();
+    activeRead.current = controller;
+    const client = createCourseweaveClient(runtime.runtime);
+    try {
+      const getContext = async () => {
+        try { return await client.getContext(controller.signal); }
+        catch (error) { if (error instanceof CourseweaveApiError && error.status === 404) return null; throw error; }
+      };
+      const [course, state, proposals, context] = await Promise.all([client.getCourse(controller.signal), client.getState(controller.signal), client.getProposals(controller.signal), getContext()]);
+      if (!controller.signal.aborted) {
+        loadedSource.current = runtime.runtime.sourceId;
+        setData({ course, state, proposals, context });
+        setRecovery(false);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) setRecovery(true);
+    } finally { if (activeRead.current === controller) activeRead.current = null; }
+  }, [runtime]);
+
+  useEffect(() => {
     if (runtime.status !== 'ready') {
       loadedSource.current = null;
       return;
     }
     const controller = new AbortController();
+    activeRead.current?.abort();
+    activeRead.current = controller;
     const client = createCourseweaveClient(runtime.runtime);
     const getContext = async () => {
       try {
@@ -106,14 +137,14 @@ export function LearnApp() {
           setRecovery(true);
         }
       });
-    return () => controller.abort();
+    return () => { controller.abort(); if (activeRead.current === controller) activeRead.current = null; };
   }, [runtime.status, runtime.runtime, runtime.contextVersion]);
 
   if (runtime.status !== 'ready') {
     return <main className="cw-rail" data-testid="learn-rail"><EmptyState title="Connecting to CourseWeave"><p>Waiting for the trusted JupyterLab bridge.</p><Button onClick={runtime.retry}>Retry connection</Button></EmptyState></main>;
   }
-  if (recovery) {
-    return <main className="cw-rail" data-testid="learn-rail"><ReconnectPanel hasDraft={false} onReconnect={async () => { setRecovery(false); runtime.retry(); }} /></main>;
+  if (recovery && data === null) {
+    return <main className="cw-rail" data-testid="learn-rail"><ReconnectPanel hasDraft={false} onReconnect={reconnect} /></main>;
   }
   if (data === null) return <main className="cw-rail" data-testid="learn-rail"><p aria-live="polite">Loading course guide…</p></main>;
   const resolved = data.context?.resolved ?? null;
@@ -134,8 +165,9 @@ export function LearnApp() {
   return <LearnHeader course={data.course} active={active} provider={provider} timeBudget={data.state.time_budget_minutes ?? null}>
     {activePhase !== null && activeModule !== null ? <PhaseCard key={`phase:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} serviceOrigin={runtime.runtime.serviceOrigin} surfaceId={activeSurface?.id ?? null} videoSeconds={data.context?.context.video_seconds} onStateOperation={applyStateOperation} onRefresh={refreshDurableData} /> : null}
     {activePhase?.kind === 'predict' && activeModule !== null ? <PredictionCard key={`prediction:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} client={client} onState={(state) => setData((current) => current === null ? current : { ...current, state })} onRefresh={refreshDurableData} /> : null}
-    <TeacherThread client={client} sourceId={runtime.runtime.sourceId} allowedShareKinds={allowedShareKinds} maxShareChars={data.course.policies?.max_shared_chars ?? 8192} onProvider={setProvider} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.some((item) => item.id === proposal.id) ? current.proposals.map((item) => item.id === proposal.id ? proposal : item) : [...current.proposals, proposal] })} onRefresh={refreshDurableData} />
-    <ProposalDrawer proposals={data.proposals} state={data.state} client={client} onRefresh={refreshDurableData} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.map((item) => item.id === proposal.id ? proposal : item) })} />
+    <TeacherThread client={client} sourceId={runtime.runtime.sourceId} allowedShareKinds={allowedShareKinds} maxShareChars={data.course.policies?.max_shared_chars ?? 8192} onProvider={setProvider} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.some((item) => item.id === proposal.id) ? current.proposals.map((item) => item.id === proposal.id ? proposal : item) : [...current.proposals, proposal] })} onRefresh={refreshDurableData} onDraftChange={setTeacherDraft} recovery={recovery} />
+    <ProposalDrawer proposals={data.proposals} state={data.state} client={client} onRefresh={refreshDurableData} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.map((item) => item.id === proposal.id ? proposal : item) })} onDraftChange={setProposalDraft} recovery={recovery} />
     <Dashboard course={data.course} serviceOrigin={runtime.runtime.serviceOrigin} />
+    {recovery ? <ReconnectPanel hasDraft={teacherDraft || proposalDraft} onReconnect={reconnect} /> : null}
   </LearnHeader>;
 }

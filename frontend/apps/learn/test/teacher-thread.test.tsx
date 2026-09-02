@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TeacherThread } from '../src/teacher-thread';
@@ -46,7 +46,7 @@ describe('TeacherThread', () => {
 
   it('persists an inert candidate only through candidate_id and never makes a shared-run candidate actionable', async () => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('00000000-0000-4000-8000-000000000001').mockReturnValueOnce('00000000-0000-4000-8000-000000000002').mockReturnValueOnce('00000000-0000-4000-8000-000000000003');
-    const candidateStream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\ndata: {"type":"CUSTOM","name":"courseweave.proposal_candidate","value":{"candidate":{"id":"candidate-a"}}}\n\ndata: {"type":"RUN_FINISHED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\n')); controller.close(); } });
+    const candidateStream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\ndata: {"type":"CUSTOM","name":"courseweave.proposal_candidate","value":{"candidate":{"id":"candidate-a","type":"profile_patch","origin":"teacher_suggested","summary":"Improve profile","target":"profile","payload":{},"target_hash":null}}}\n\ndata: {"type":"RUN_FINISHED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\n')); controller.close(); } });
     const postGuide = vi.fn().mockResolvedValue(new Response(candidateStream, { headers: { 'content-type': 'text/event-stream' } }));
     const createProposal = vi.fn().mockResolvedValue({ id: 'candidate-a', revision: 1, status: 'pending' });
     const onProposal = vi.fn();
@@ -55,7 +55,7 @@ describe('TeacherThread', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ask teacher' }));
     expect(await screen.findByRole('button', { name: 'Save suggested change' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save suggested change' }));
-    await vi.waitFor(() => expect(createProposal).toHaveBeenCalledWith('candidate-a'));
+    await vi.waitFor(() => expect(createProposal).toHaveBeenCalledWith('candidate-a', expect.any(AbortSignal)));
     expect(onProposal).toHaveBeenCalledOnce();
   });
 
@@ -70,5 +70,62 @@ describe('TeacherThread', () => {
     await vi.waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({ run_id: expect.any(String), kind: 'selection', content: 'private excerpt', source_id: 'source-a' }), expect.any(AbortSignal)));
     expect(await screen.findByText('Teacher unavailable')).toBeInTheDocument();
     expect(screen.queryByLabelText('Share content')).not.toBeInTheDocument();
+  });
+
+  it('returns focus to the Share trigger after consent is cancelled with Escape', async () => {
+    render(<TeacherThread client={{ postGuide: vi.fn(), share: vi.fn(), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['selection']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'ask safely' } });
+    const trigger = screen.getByRole('button', { name: 'Share before asking' });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Share with teacher' }), { key: 'Escape' });
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
+  it('renders each assistant delta before the terminal event and retains it after RUN_ERROR', async () => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('00000000-0000-4000-8000-000000000001').mockReturnValueOnce('00000000-0000-4000-8000-000000000002').mockReturnValueOnce('00000000-0000-4000-8000-000000000003');
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const guide = new ReadableStream<Uint8Array>({ start(next) { controller = next; } });
+    const postGuide = vi.fn().mockResolvedValue(new Response(guide, { headers: { 'content-type': 'text/event-stream' } }));
+    render(<TeacherThread client={{ postGuide, share: vi.fn(), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={[]} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'stream it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask teacher' }));
+    await vi.waitFor(() => expect(postGuide).toHaveBeenCalledOnce());
+    await act(async () => controller!.enqueue(new TextEncoder().encode('data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_CONTENT","messageId":"assistant","delta":"partial"}\n\n')));
+    expect(await screen.findByText('partial')).toBeInTheDocument();
+    await act(async () => { controller!.enqueue(new TextEncoder().encode('data: {"type":"RUN_ERROR"}\n\n')); controller!.close(); });
+    expect(await screen.findByText('The teacher run failed. Try again with a new request.')).toBeInTheDocument();
+    expect(screen.getByText('partial')).toBeInTheDocument();
+  });
+
+  it('retires a candidate after its POST succeeds even when the refresh fails and never posts twice', async () => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('00000000-0000-4000-8000-000000000001').mockReturnValueOnce('00000000-0000-4000-8000-000000000002').mockReturnValueOnce('00000000-0000-4000-8000-000000000003');
+    const wire = 'data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\ndata: {"type":"CUSTOM","name":"courseweave.proposal_candidate","value":{"candidate":{"id":"candidate-a","type":"profile_patch","origin":"teacher_suggested","summary":"Improve profile","target":"profile","payload":{},"target_hash":null}}}\n\ndata: {"type":"RUN_FINISHED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\n';
+    const postGuide = vi.fn().mockResolvedValue(new Response(wire, { headers: { 'content-type': 'text/event-stream' } }));
+    const createProposal = vi.fn().mockResolvedValue({ id: 'proposal-a', revision: 1, status: 'pending' });
+    const onProposal = vi.fn();
+    render(<TeacherThread client={{ postGuide, share: vi.fn(), createProposal }} sourceId="source-a" allowedShareKinds={[]} maxShareChars={20} onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockRejectedValue(new Error('offline'))} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'suggest' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask teacher' }));
+    const save = await screen.findByRole('button', { name: 'Save suggested change' });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    await vi.waitFor(() => expect(createProposal).toHaveBeenCalledOnce());
+    expect(onProposal).toHaveBeenCalledOnce();
+    expect(await screen.findByText('Suggested change saved, refresh unavailable.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save suggested change' })).not.toBeInTheDocument();
+  });
+
+  it.each([403, 404, 409])('retires a candidate after terminal %i without another POST', async (status) => {
+    vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('00000000-0000-4000-8000-000000000001').mockReturnValueOnce('00000000-0000-4000-8000-000000000002').mockReturnValueOnce('00000000-0000-4000-8000-000000000003');
+    const wire = 'data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\ndata: {"type":"CUSTOM","name":"courseweave.proposal_candidate","value":{"candidate":{"id":"candidate-a","type":"profile_patch","origin":"teacher_suggested","summary":"Improve profile","target":"profile","payload":{},"target_hash":null}}}\n\ndata: {"type":"RUN_FINISHED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\n';
+    const createProposal = vi.fn().mockRejectedValue({ status });
+    render(<TeacherThread client={{ postGuide: vi.fn().mockResolvedValue(new Response(wire)), share: vi.fn(), createProposal }} sourceId="source-a" allowedShareKinds={[]} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'suggest' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask teacher' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save suggested change' }));
+    expect(await screen.findByText('Suggested change is unavailable. Ask the teacher again.')).toBeInTheDocument();
+    expect(createProposal).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Save suggested change' })).not.toBeInTheDocument();
   });
 });

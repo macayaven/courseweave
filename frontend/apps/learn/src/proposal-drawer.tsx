@@ -10,7 +10,7 @@ type ProposalClient = {
   editProposal(id: string, body: { expected_revision: number; request: ProposalEditRequest }, signal?: AbortSignal): Promise<Proposal>;
 };
 
-export function ProposalDrawer({ proposals, client, onRefresh, onProposal }: { proposals: Proposal[]; state: LearnerState; client: ProposalClient; onRefresh(): Promise<void>; onProposal(proposal: Proposal): void }) {
+export function ProposalDrawer({ proposals, client, onRefresh, onProposal, onDraftChange, recovery = false }: { proposals: Proposal[]; state: LearnerState; client: ProposalClient; onRefresh(): Promise<void>; onProposal(proposal: Proposal): void; onDraftChange?(hasDraft: boolean): void; recovery?: boolean }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<Record<string, boolean>>({});
@@ -20,6 +20,13 @@ export function ProposalDrawer({ proposals, client, onRefresh, onProposal }: { p
     alive.current = true;
     return () => { alive.current = false; flights.current.forEach((controller) => controller.abort()); };
   }, []);
+  useEffect(() => { onDraftChange?.(Object.values(drafts).some((draft) => draft.trim().length > 0)); }, [drafts, onDraftChange]);
+  useEffect(() => {
+    if (!recovery) return;
+    flights.current.forEach((controller) => controller.abort());
+    flights.current.clear();
+    setPending({});
+  }, [recovery]);
   async function request(proposalId: string, action: (signal: AbortSignal) => Promise<Proposal>) {
     if (pending[proposalId]) return;
     const controller = new AbortController();
