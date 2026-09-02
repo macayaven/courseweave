@@ -31,7 +31,7 @@
     "schemaDir": "schema",
     "outputDir": "../../../src/courseweave/labextension",
     "_build": {
-      "load": "static/remoteEntry.8c4c9303658dcb09.js",
+      "load": "static/remoteEntry.67b1d99b0220c372.js",
       "extension": "./extension"
     }
   }

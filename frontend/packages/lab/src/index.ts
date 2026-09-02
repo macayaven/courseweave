@@ -16,7 +16,12 @@ import { PageConfig } from '@jupyterlab/coreutils';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { Widget } from '@lumino/widgets';
 
-const PLUGIN_ID = 'courseweave:bridge';
+/**
+ * Runtime plugin identity. JupyterLab-server derives the settings plugin ID
+ * from the shipped schema path, so this must stay aligned exactly:
+ * `@courseweave/lab:plugin` ↔ `schemas/@courseweave/lab/plugin.json`.
+ */
+const PLUGIN_ID = '@courseweave/lab:plugin';
 const OPEN_GUIDE_COMMAND = 'courseweave:open-guide';
 const GUIDE_WIDGET_ID = 'courseweave-guide';
 
@@ -126,14 +131,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
   autoStart: true,
   requires: [ILabShell],
   optional: [ISettingRegistry],
-  activate: (
+  activate: async (
     app: JupyterFrontEnd,
     shell: ILabShell,
     registry: ISettingRegistry | null
-  ): void => {
-    // Provisional origin until settings resolve; the guide is (re)created
-    // with the resolved origin below before the user normally interacts.
-    let serviceOrigin = DEFAULT_SERVICE_ORIGIN;
+  ): Promise<void> => {
+    // Resolve the service origin BEFORE anything can create a guide: there
+    // must be no window in which the command would open a default-origin
+    // guide while a custom origin is still resolving.
+    const serviceOrigin = await resolveServiceOrigin(registry);
     let guide: CourseWeaveGuide | null = null;
 
     const openGuide = (): void => {
@@ -161,11 +167,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
       execute: openGuide
     });
 
-    void resolveServiceOrigin(registry).then(resolved => {
-      serviceOrigin = resolved;
-      installOriginGuard(serviceOrigin);
-      openGuide();
-    });
+    installOriginGuard(serviceOrigin);
+    openGuide();
   }
 };
 

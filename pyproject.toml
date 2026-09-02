@@ -33,7 +33,7 @@ path = "src/courseweave/__init__.py"
 packages = ["src/courseweave"]
 
 [tool.hatch.build.targets.wheel.shared-data]
-"src/courseweave/labextension" = "share/jupyter/labextensions/courseweave"
+"src/courseweave/labextension" = "share/jupyter/labextensions/@courseweave/lab"
 
 [tool.hatch.build.targets.sdist]
 include = [

@@ -40,13 +40,15 @@ REMOTE_ENTRY_RE = re.compile(
     r"^courseweave/labextension/static/remoteEntry\.[0-9a-f]+\.js$"
 )
 SHARED_LABEXTENSION_PACKAGE_RE = re.compile(
-    r"^[^/]+\.data/data/share/jupyter/labextensions/courseweave/package\.json$"
+    r"^[^/]+\.data/data/share/jupyter/labextensions/@courseweave/lab/package\.json$"
 )
+LABEXTENSIONS_ARCHIVE_PREFIX = ".data/data/share/jupyter/labextensions/"
+PLUGIN_ID = "@courseweave/lab:plugin"
 
 
 @pytest.fixture(scope="module")
-def wheel_contents(tmp_path_factory: pytest.TempPathFactory) -> dict[str, bytes]:
-    """Build a wheel from the current source tree and read it back.
+def wheel_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Build a wheel from the current source tree.
 
     Never read ``dist/``: that would validate whatever artifact happens to be
     lying around. Building here proves the inspected wheel derives from the
@@ -57,8 +59,35 @@ def wheel_contents(tmp_path_factory: pytest.TempPathFactory) -> dict[str, bytes]
     artifacts = [Path(path) for path in builder.build(directory=str(output_dir))]
     wheels = [path for path in artifacts if path.suffix == ".whl"]
     assert len(wheels) == 1, artifacts
-    with zipfile.ZipFile(wheels[0]) as archive:
+    return wheels[0]
+
+
+@pytest.fixture(scope="module")
+def wheel_contents(wheel_path: Path) -> dict[str, bytes]:
+    with zipfile.ZipFile(wheel_path) as archive:
         return {name: archive.read(name) for name in archive.namelist()}
+
+
+@pytest.fixture(scope="module")
+def installed_labextensions(
+    wheel_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> Path:
+    """Extract the wheel's shared-data labextensions tree, relocated exactly
+    as an installer would place it under ``share/jupyter/labextensions``."""
+    target = tmp_path_factory.mktemp("share") / "jupyter" / "labextensions"
+    with zipfile.ZipFile(wheel_path) as archive:
+        members = [
+            name for name in archive.namelist() if LABEXTENSIONS_ARCHIVE_PREFIX in name
+        ]
+        assert members, "wheel contains no share/jupyter/labextensions data"
+        for name in members:
+            relative = name.split(LABEXTENSIONS_ARCHIVE_PREFIX, 1)[1]
+            if not relative or relative.endswith("/"):
+                continue
+            destination = target / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(archive.read(name))
+    return target
 
 
 def _bridge_javascript(wheel_contents: dict[str, bytes]) -> list[bytes]:
@@ -102,7 +131,7 @@ class TestWheelContents:
             in wheel_contents
         )
 
-    def test_wheel_registers_labextension_for_jupyter_discovery(
+    def test_wheel_registers_scoped_labextension_for_jupyter_discovery(
         self, wheel_contents: dict[str, bytes]
     ) -> None:
         shared = [
@@ -112,6 +141,7 @@ class TestWheelContents:
             name for name in wheel_contents if "share/jupyter" in name
         )
         metadata = json.loads(wheel_contents[shared[0]])
+        assert metadata["name"] == "@courseweave/lab"
         assert metadata["jupyterlab"]["_build"]["load"]
 
     def test_wheel_declares_console_script(
@@ -208,3 +238,63 @@ class TestLabBridgeIsReactFree:
         source = LAB_ENTRY_TS.read_text(encoding="utf-8")
         assert not re.search(r"from\s+['\"]react", source)
         assert "@lumino/widgets" in source
+
+
+class TestFederatedSettingsDiscovery:
+    """Integration proof through JupyterLab-server's own settings discovery.
+
+    ``jupyterlab_server.get_settings`` is the exact code path the settings
+    handler uses to list plugins from federated labextensions: plugin IDs are
+    derived from the shipped schema path (``schemas/<name>/<plugin>.json`` →
+    ``<name>:<plugin>``). The runtime plugin ID and ``registry.load()`` target
+    must match that identity exactly.
+    """
+
+    def test_plugin_identity_loads_and_exposes_service_origin(
+        self,
+        installed_labextensions: Path,
+        wheel_contents: dict[str, bytes],
+        tmp_path: Path,
+    ) -> None:
+        from jupyterlab_server.settings_utils import get_settings
+
+        # Empty but existing core/user trees: the federated branch must still
+        # discover our shipped schemas.
+        schemas_dir = tmp_path / "schemas"
+        settings_dir = tmp_path / "settings"
+        schemas_dir.mkdir()
+        settings_dir.mkdir()
+        result, _warnings = get_settings(
+            app_settings_dir=str(tmp_path),
+            schemas_dir=str(schemas_dir),
+            settings_dir=str(settings_dir),
+            labextensions_path=[str(installed_labextensions)],
+        )
+        plugins = {plugin["id"]: plugin for plugin in result["settings"]}
+        assert PLUGIN_ID in plugins, sorted(plugins)
+        schema = plugins[PLUGIN_ID]["schema"]
+        default = schema["properties"]["serviceOrigin"]["default"]
+        assert default == "http://127.0.0.1:8765"
+
+        # The built bridge must use the very same runtime identity.
+        bundle = _bridge_javascript(wheel_contents)
+        assert any(PLUGIN_ID.encode() in data for data in bundle), (
+            f"built bridge does not use the {PLUGIN_ID} runtime identity"
+        )
+
+
+class TestActivationOrder:
+    def test_command_registration_awaits_service_origin_resolution(self) -> None:
+        """No window may exist where the command can create a default-origin
+        guide before a custom origin resolves: registration, guard install,
+        and initial open must all follow the awaited resolution."""
+        source = LAB_ENTRY_TS.read_text(encoding="utf-8")
+        resolution = source.index("await resolveServiceOrigin")
+        registration = source.index("app.commands.addCommand")
+        guard = source.index("installOriginGuard(serviceOrigin);")
+        open_call = source.rindex("openGuide();")
+        assert resolution < registration, (
+            "command registered before service origin resolution completed"
+        )
+        assert registration < guard < open_call
+        assert "async (" in source or "async:" in source or "Promise<void>" in source
