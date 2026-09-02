@@ -270,6 +270,32 @@ def create_app(
             headers={"ETag": snapshot.etag},
         )
 
+    @app.post("/api/author/validate")
+    async def validate_author_manifest(request: Request) -> Response:
+        """Validate a supplied Author draft without reading or changing saved state."""
+        root = _configured_root(app)
+        if root is None:
+            return _error(409, "not_configured", "No course root is configured.")
+        raw_request = await request.body()
+        if len(raw_request) > 1024 * 1024:
+            return _error(413, "validation_error", "Request body exceeds the 1 MiB limit.")
+        try:
+            body = json.loads(raw_request)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return _error(422, "validation_error", "The validation request is invalid.")
+        if not isinstance(body, dict) or set(body) != {"manifest", "mode"}:
+            return _error(422, "validation_error", "The validation request is invalid.")
+        mode = body.get("mode")
+        if mode not in {"structural", "runnable"}:
+            return _error(422, "validation_error", "The validation request is invalid.")
+        try:
+            manifest = parse_manifest_data(body["manifest"], root, runnable=mode == "runnable")
+        except ManifestValidationError as exc:
+            issues = exc.issues or [{"path": "", "code": "schema_validation", "message": "The manifest is invalid."}]
+            return _validation_issues_response(issues)
+        formatted = manifest_bytes(manifest).decode("utf-8")
+        return JSONResponse({"manifest": manifest.model_dump(mode="json"), "formatted_json": formatted})
+
     @app.get("/api/context")
     async def get_context(
         source_id: str = Query(..., min_length=1, max_length=240),
@@ -459,12 +485,34 @@ def create_app(
         StaticFiles(directory=_STATIC_ROOT / "learn", html=True),
         name="learn",
     )
+    app.mount(
+        "/author",
+        StaticFiles(directory=_STATIC_ROOT / "author", html=True),
+        name="author",
+    )
     return app
 
 
 def _configured_root(app: FastAPI) -> Path | None:
     root = app.state.course_root
     return Path(root) if root is not None else None
+
+
+def _validation_issues_response(issues: list[dict[str, str]]) -> JSONResponse:
+    """Return the Author contract's small, deterministic validation envelope."""
+
+    normalized = sorted(
+        ({"path": item["path"], "code": item["code"], "message": item["message"]} for item in issues),
+        key=lambda item: (item["path"], item["code"], item["message"]),
+    )
+    return JSONResponse(
+        status_code=422,
+        content={
+            "code": "validation_error",
+            "message": "The manifest is invalid.",
+            "details": {"issues": normalized},
+        },
+    )
 
 
 def _context_registry(app: FastAPI) -> ContextRegistry | Response:

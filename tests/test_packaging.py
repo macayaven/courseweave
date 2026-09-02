@@ -30,7 +30,10 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from hatchling.builders.wheel import WheelBuilder
+
+from courseweave.api import create_app
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LAB_PACKAGE_JSON = REPO_ROOT / "frontend" / "packages" / "lab" / "package.json"
@@ -112,6 +115,28 @@ class TestWheelContents:
         assert referenced
         for asset in referenced:
             assert f"courseweave/static/learn/assets/{asset}" in wheel_contents
+
+    def test_wheel_contains_static_author_asset(
+        self, wheel_contents: dict[str, bytes]
+    ) -> None:
+        assert "courseweave/static/author/index.html" in wheel_contents
+        index = wheel_contents["courseweave/static/author/index.html"].decode()
+        referenced = re.findall(r"/author/assets/([^\"']+\.(?:js|css))", index)
+        assert referenced
+        for asset in referenced:
+            assert f"courseweave/static/author/assets/{asset}" in wheel_contents
+
+
+class TestAuthorStaticRoute:
+    def test_author_mount_does_not_mask_api_routes(self, tmp_path: Path) -> None:
+        client = TestClient(create_app(tmp_path, capability_token="packaging-token"))
+        author = client.get("/author/")
+        api = client.get("/api/not-an-author-page", headers={"Authorization": "Bearer packaging-token"})
+
+        assert author.status_code == 200
+        assert "CourseWeave Author" in author.text
+        assert api.status_code == 404
+        assert "CourseWeave Author" not in api.text
 
     def test_wheel_contains_labextension_package_metadata(
         self, wheel_contents: dict[str, bytes]

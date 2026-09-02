@@ -162,6 +162,24 @@ replacement. Startup recovery compares the recorded before/after hashes:
 
 ## Professor
 
+## Author validation
+
+`POST /api/author/validate` is authenticated with the launch capability token
+and is a read-only Author boundary. Its JSON object body is exactly
+`{"manifest": <object>, "mode": "structural" | "runnable"}` and is limited to
+1 MiB. `structural` validates schema, model invariants, and jailed local paths;
+`runnable` additionally checks ordinary local surface files, terminal working
+directories, and local-video LFS pointers. It never fetches remote URLs.
+
+On success it returns the normalized schema-v1 `manifest` and canonical UTF-8
+`formatted_json`. On failure it returns the normal `validation_error` envelope
+with `details.issues`, each containing a stable JSON Pointer `path`, a stable
+`code` (`schema_validation`, `path_escape`, `missing_artifact`,
+`wrong_artifact_type`, `lfs_pointer`, or `invalid_terminal_cwd`), and a redacted
+message. Malformed request objects, modes, and bodies use the ordinary top-level
+`validation_error` envelope. It never writes the manifest, store, proposal
+database, or filesystem.
+
 `POST /api/guide` is an AG-UI endpoint. The server ignores client-supplied
 system messages, tools, capabilities, phase state, and proposal status. Trusted
 dependencies are rebuilt from the manifest, ephemeral context, and store.
@@ -178,4 +196,3 @@ dependencies are rebuilt from the manifest, ephemeral context, and store.
 `POST /api/author/guide` uses the same transport and trust rules with a
 curriculum-designer system policy. Suggested manifest changes are pending
 `manifest_replace` proposals.
-

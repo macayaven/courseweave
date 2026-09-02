@@ -2,6 +2,8 @@ import type { ButtonHTMLAttributes, PropsWithChildren, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 
 export * from './courseweave-types';
+export * from './author-types';
+export * from './authenticated-client';
 
 export function Button(props: ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button {...props} className={`cw-button ${props.className ?? ''}`.trim()} />;

@@ -601,6 +601,10 @@ def test_author_guide_rebuilds_curriculum_designer_policy_and_exposes_only_manif
     assert response.status_code == 200
     assert [event["type"] for event in _events(response)][-1] == "RUN_FINISHED"
     assert {tool.name for tool in model.last_model_request_parameters.function_tools} == {"suggest_manifest_replace"}
+    instruction = model.request_messages[0][0].instructions
+    assert instruction is not None
+    assert '"title":"AG-UI Course"' in instruction
+    assert "authoritative normalized saved manifest" in instruction
     assert app.state.course_store.list_proposals() == []
 
 

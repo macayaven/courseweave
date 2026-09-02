@@ -532,14 +532,16 @@ class CourseStore:
                 state = self._mutate_state(state, operation, increment=False)
                 result = {"applied": True}
             elif proposal.type == "manifest_replace":
-                current = (self.course_root / "courseweave.json").read_bytes()
-                if _file_hash(current) != proposal.target_hash:
+                manifest_path = self.course_root / "courseweave.json"
+                current = manifest_path.read_bytes() if manifest_path.exists() else None
+                current_hash = _file_hash(current) if current is not None else None
+                if current_hash != proposal.target_hash:
                     raise TargetChangedError("Manifest target hash changed")
                 manifest = parse_manifest_data(
                     proposal.payload["manifest"], self.course_root
                 )
                 snapshot = save_manifest(
-                    self.course_root, manifest, if_match=manifest_etag(current)
+                    self.course_root, manifest, if_match=manifest_etag(current) if current is not None else '""'
                 )
                 result = {"applied": True, "etag": snapshot.etag}
             else:
@@ -648,8 +650,9 @@ class CourseStore:
             manifest = parse_manifest_data(
                 request.payload.get("manifest"), self.course_root
             )
-            current = (self.course_root / "courseweave.json").read_bytes()
-            current_hash = _file_hash(current)
+            manifest_path = self.course_root / "courseweave.json"
+            current = manifest_path.read_bytes() if manifest_path.exists() else None
+            current_hash = _file_hash(current) if current is not None else None
             if target_hash is None:
                 target_hash = current_hash
             if target_hash != current_hash:
