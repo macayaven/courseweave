@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LearnApp, LearnHeader, type LearnHeaderProps } from '../src/app';
+import { IconButton } from '@courseweave/ui';
 
 const props: LearnHeaderProps = {
   course: { title: 'Agent Harnessing', modules: [{ id: 's01', title: 'Foundations', phases: [{ id: 'orient', title: 'Orient' }] }] },
@@ -11,7 +12,19 @@ const props: LearnHeaderProps = {
   timeBudget: 45
 };
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+function dispatchRuntime(): void {
+  const reply = new MessageEvent('message', {
+    data: { type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token' },
+    source: window.parent
+  });
+  Object.defineProperty(reply, 'origin', { value: 'https://courseweave.test' });
+  act(() => window.dispatchEvent(reply));
+}
 
 describe('learner shell header', () => {
   it('renders course, module, phase, time budget, and provider status', () => {
@@ -38,20 +51,25 @@ describe('learner shell header', () => {
     expect(screen.getByRole('button', { name: 'Open course dashboard' })).toHaveFocus();
   });
 
-  it('uses semantic keyboard labels in a narrow rail', async () => {
+  it('uses a usable 320px narrow-rail layout and semantic keyboard labels', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 });
     const user = userEvent.setup();
     render(<LearnHeader {...props} />);
     const dashboard = screen.getByRole('button', { name: 'Open course dashboard' });
     expect(dashboard).toBeVisible();
     await user.tab();
     expect(dashboard).toHaveFocus();
-    expect(screen.getByTestId('learn-rail')).toHaveClass('cw-rail');
+    const rail = screen.getByTestId('learn-rail');
+    expect(rail).toHaveClass('cw-rail--narrow');
+    expect(getComputedStyle(rail).maxWidth).toBe('320px');
   });
 
-  it('honors reduced motion', () => {
+  it('removes effective transition and animation under reduced motion', () => {
     vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     render(<LearnHeader {...props} />);
-    expect(screen.getByTestId('learn-rail')).toHaveClass('cw-reduced-motion');
+    const rail = screen.getByTestId('learn-rail');
+    expect(rail.style.transition).toBe('none');
+    expect(rail.style.animation).toBe('none');
   });
 
   it.todo('interrupted stream placeholder/recovery');
@@ -69,14 +87,31 @@ describe('learner shell header', () => {
     );
     vi.stubGlobal('fetch', fetch);
     render(<LearnApp />);
-    const reply = new MessageEvent('message', {
-      data: { type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token' },
-      source: window.parent
-    });
-    Object.defineProperty(reply, 'origin', { value: 'https://courseweave.test' });
-    act(() => window.dispatchEvent(reply));
+    dispatchRuntime();
 
     expect(await screen.findByRole('heading', { name: 'Reconnect to CourseWeave' })).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(3);
   });
+
+  it('keeps provider status unknown after successful read-side routes', async () => {
+    const fetch = vi.fn((url: string) => {
+      const body = url.endsWith('/course') ? { title: 'Agent Harnessing', modules: [] } : url.endsWith('/state') ? { revision: 1, time_budget_minutes: 45 } : [];
+      return Promise.resolve(new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }));
+    });
+    vi.stubGlobal('fetch', fetch);
+    render(<LearnApp />);
+    dispatchRuntime();
+
+    expect(await screen.findByText('Teacher status unknown')).toBeInTheDocument();
+    expect(screen.queryByText('Teacher ready')).not.toBeInTheDocument();
+  });
+
+  it('renders IconButton with its required accessible name', () => {
+    render(<IconButton aria-label="Close guide">×</IconButton>);
+    expect(screen.getByRole('button', { name: 'Close guide' })).toBeInTheDocument();
+  });
+
+  // @ts-expect-error IconButton cannot omit its accessible name.
+  const unnamedIconButton = <IconButton />;
+  void unnamedIconButton;
 });

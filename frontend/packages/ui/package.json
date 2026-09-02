@@ -11,6 +11,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
+  "devDependencies": {
+    "@types/react": "19.2.14"
+  },
   "peerDependencies": {
     "react": "19.2.8",
     "react-dom": "19.2.8"

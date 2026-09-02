@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, PropsWithChildren } from 'react';
+import type { ButtonHTMLAttributes, PropsWithChildren, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 
 export * from './courseweave-types';
@@ -7,7 +7,12 @@ export function Button(props: ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button {...props} className={`cw-button ${props.className ?? ''}`.trim()} />;
 }
 
-export function IconButton({ 'aria-label': label, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+export type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-label'> & {
+  'aria-label': string;
+  children?: ReactNode;
+};
+
+export function IconButton({ 'aria-label': label, ...props }: IconButtonProps) {
   return <button {...props} aria-label={label} className={`cw-icon-button ${props.className ?? ''}`.trim()} />;
 }
 

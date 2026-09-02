@@ -11,6 +11,13 @@ export interface ErrorEnvelope {
   details: Record<string, unknown>;
 }
 
+export type StateOperation =
+  | { type: 'record_prediction'; module_id: string; phase_id: string; record_id: string; text: string }
+  | { type: 'record_reflection'; module_id: string; phase_id: string; record_id: string; text: string }
+  | { type: 'record_evidence'; module_id: string; phase_id: string; record_id: string; reference: string; note?: string }
+  | { type: 'complete_phase'; module_id: string; phase_id: string; record_id: string; note?: string }
+  | { type: 'set_time_budget'; minutes: number };
+
 export class CourseweaveApiError extends Error {
   readonly code: string;
   readonly status: number;
@@ -25,14 +32,29 @@ export class CourseweaveApiError extends Error {
   }
 }
 
-function asErrorEnvelope(value: unknown): ErrorEnvelope {
+function containsCapability(value: unknown, capabilityToken: string): boolean {
+  if (typeof value === 'string') return value.includes(capabilityToken);
+  if (Array.isArray(value)) return value.some((item) => containsCapability(item, capabilityToken));
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value).some(([key, item]) => containsCapability(key, capabilityToken) || containsCapability(item, capabilityToken));
+  }
+  return false;
+}
+
+function asErrorEnvelope(value: unknown, capabilityToken: string): ErrorEnvelope {
+  const fallback: ErrorEnvelope = {
+    code: 'request_failed',
+    message: 'CourseWeave could not complete that request.',
+    details: {}
+  };
   if (typeof value === 'object' && value !== null) {
     const candidate = value as Partial<ErrorEnvelope>;
     if (typeof candidate.code === 'string' && typeof candidate.message === 'string') {
+      if (containsCapability(candidate, capabilityToken)) return fallback;
       return { code: candidate.code, message: candidate.message, details: candidate.details ?? {} };
     }
   }
-  return { code: 'request_failed', message: 'CourseWeave could not complete that request.', details: {} };
+  return fallback;
 }
 
 function uuid(): string {
@@ -55,7 +77,7 @@ export function createCourseweaveClient(runtime: RuntimeConfiguration) {
       cache: 'no-store'
     });
     const body: unknown = await response.json().catch(() => null);
-    if (!response.ok) throw new CourseweaveApiError(response.status, asErrorEnvelope(body));
+    if (!response.ok) throw new CourseweaveApiError(response.status, asErrorEnvelope(body, capabilityToken));
     return body as T;
   }
 
@@ -64,7 +86,7 @@ export function createCourseweaveClient(runtime: RuntimeConfiguration) {
     getState: (signal?: AbortSignal) => request<LearnerState>('/api/state', {}, signal),
     getProposals: (signal?: AbortSignal) => request<Proposal[]>('/api/proposals', {}, signal),
     patchState: (
-      body: { expected_revision: number; operation: Record<string, unknown> },
+      body: { expected_revision: number; operation: StateOperation },
       signal?: AbortSignal
     ) => request<LearnerState>('/api/state', {
       method: 'PATCH',

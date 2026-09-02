@@ -1,7 +1,7 @@
 body { background: var(--cw-bg); color: var(--cw-text); font-family: system-ui, sans-serif; margin: 0; }
 .cw-rail { box-sizing: border-box; display: grid; gap: var(--cw-space); min-height: 100vh; padding: 1rem; width: 100%; }
+.cw-rail--narrow { max-width: 320px; overflow-x: hidden; padding: 0.75rem; }
 .cw-eyebrow { color: var(--cw-muted); font-size: 0.875rem; margin: 0; }
 .cw-rail h1 { font-size: clamp(1.25rem, 7vw, 1.75rem); margin: 0.25rem 0; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: no-preference) { .cw-rail { transition: background-color 160ms ease; } }
 .cw-reduced-motion, .cw-reduced-motion * { animation: none !important; transition: none !important; }
-@media (max-width: 320px) { .cw-rail { padding: 0.75rem; } }

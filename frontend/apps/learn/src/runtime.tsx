@@ -8,12 +8,15 @@ export type RuntimeState =
   | { status: 'recovery'; runtime: null };
 
 function parseRuntimeMessage(value: unknown, origin: string): RuntimeConfiguration | null {
-  if (typeof value !== 'object' || value === null) return null;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const data = value as Record<string, unknown>;
+  const expectedKeys = ['capabilityToken', 'serviceOrigin', 'type'];
+  if (Object.keys(data).sort().join(',') !== expectedKeys.join(',')) return null;
   if (
     data.type !== 'courseweave.runtime.v1' ||
     typeof data.serviceOrigin !== 'string' ||
     typeof data.capabilityToken !== 'string' ||
+    data.capabilityToken.trim() !== data.capabilityToken ||
     data.capabilityToken.length === 0
   ) return null;
   try {

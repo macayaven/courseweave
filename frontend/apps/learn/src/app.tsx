@@ -2,7 +2,7 @@ import { Button, EmptyState, StatusBadge, useReducedMotion } from '@courseweave/
 import type { CourseManifest, ProviderStatus } from '@courseweave/ui/courseweave-types';
 import { useEffect, useState } from 'react';
 
-import { CourseweaveApiError, createCourseweaveClient } from './api';
+import { createCourseweaveClient } from './api';
 import { useRuntimeBootstrap } from './runtime';
 
 export interface LearnHeaderProps {
@@ -18,12 +18,23 @@ function activeLabels(course: CourseManifest, active: LearnHeaderProps['active']
   return { module, phase };
 }
 
+function useNarrowRail(): boolean {
+  const [narrow, setNarrow] = useState(() => window.innerWidth <= 320);
+  useEffect(() => {
+    const update = () => setNarrow(window.innerWidth <= 320);
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+  return narrow;
+}
+
 export function LearnHeader({ course, active, provider, timeBudget }: LearnHeaderProps) {
   const reducedMotion = useReducedMotion();
+  const narrowRail = useNarrowRail();
   const { module, phase } = activeLabels(course, active);
   const noDocument = active === null && course.modules.length > 0;
   return (
-    <main className={`cw-rail ${reducedMotion ? 'cw-reduced-motion' : ''}`} data-testid="learn-rail">
+    <main className={`cw-rail ${narrowRail ? 'cw-rail--narrow' : ''} ${reducedMotion ? 'cw-reduced-motion' : ''}`} style={{ ...(narrowRail ? { maxWidth: '320px', overflowX: 'hidden' } : {}), ...(reducedMotion ? { transition: 'none', animation: 'none' } : {}) }} data-testid="learn-rail">
       <header>
         <p className="cw-eyebrow">CourseWeave Learn</p>
         <h1>{course.title}</h1>
@@ -44,7 +55,7 @@ export function LearnHeader({ course, active, provider, timeBudget }: LearnHeade
 export function LearnApp() {
   const runtime = useRuntimeBootstrap();
   const [data, setData] = useState<{ course: CourseManifest; timeBudget: number | null } | null>(null);
-  const [provider, setProvider] = useState<ProviderStatus>('unknown');
+  const [provider] = useState<ProviderStatus>('unknown');
   const [recovery, setRecovery] = useState(false);
 
   useEffect(() => {
@@ -54,12 +65,9 @@ export function LearnApp() {
     void Promise.all([client.getCourse(controller.signal), client.getState(controller.signal), client.getProposals(controller.signal)])
       .then(([course, state]) => {
         setData({ course, timeBudget: state.time_budget_minutes ?? null });
-        setProvider('ready');
       })
       .catch((error: unknown) => {
-        if (error instanceof CourseweaveApiError && error.code === 'not_configured') setProvider('not_configured');
-        else if (!(error instanceof DOMException && error.name === 'AbortError')) {
-          setProvider('provider_error');
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
           setRecovery(true);
         }
       });

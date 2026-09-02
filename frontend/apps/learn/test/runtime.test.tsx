@@ -3,7 +3,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { RuntimeProbe } from '../src/runtime';
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+function dispatchRuntime(data: unknown, origin = 'https://courseweave.test'): void {
+  const event = new MessageEvent('message', { data, source: window.parent });
+  Object.defineProperty(event, 'origin', { value: origin });
+  act(() => window.dispatchEvent(event));
+}
 
 describe('useRuntimeBootstrap', () => {
   it('emits only the versioned runtime request and accepts one valid parent reply', () => {
@@ -11,42 +20,36 @@ describe('useRuntimeBootstrap', () => {
     render(<RuntimeProbe />);
     expect(postMessage).toHaveBeenCalledWith({ type: 'courseweave.runtime.request.v1' }, '*');
 
-    const reply = new MessageEvent('message', {
-        data: {
-          type: 'courseweave.runtime.v1',
-          serviceOrigin: 'https://courseweave.test',
-          capabilityToken: 'runtime-test-token'
-        },
-        origin: 'https://courseweave.test',
-        source: window.parent
-      });
-    Object.defineProperty(reply, 'origin', { value: 'https://courseweave.test' });
-    act(() => window.dispatchEvent(reply));
+    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token' });
     expect(screen.getByText('ready')).toBeInTheDocument();
   });
 
-  it('ignores malformed, wrong-source, missing-token, and non-origin runtime messages', () => {
+  it('rejects malformed, wrong-source, non-canonical, origin-mismatched, whitespace-token, and unexpected-field replies', () => {
     render(<RuntimeProbe />);
-    for (const event of [
-      new MessageEvent('message', { data: { type: 'courseweave.runtime.v1' }, origin: 'https://courseweave.test' }),
-      new MessageEvent('message', { data: { type: 'courseweave.runtime.v1', serviceOrigin: 'ftp://bad.test', capabilityToken: 'x' }, origin: 'https://courseweave.test', source: window.parent }),
-      new MessageEvent('message', { data: { type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: '' }, origin: 'https://courseweave.test', source: window.parent })
-    ]) window.dispatchEvent(event);
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'x' } }));
+    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test/', capabilityToken: 'x' });
+    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'x' }, 'https://other.test');
+    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: '  x  ' });
+    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'x', unexpected: true });
     expect(screen.getByText('connecting')).toBeInTheDocument();
   });
 
-  it('keeps token custody out of browser persistence', () => {
+  it('keeps an accepted valid token out of browser persistence', () => {
     render(<RuntimeProbe />);
+    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token' });
+    expect(screen.getByText('ready')).toBeInTheDocument();
     expect(location.href).not.toContain('runtime-test-token');
     expect(JSON.stringify(history.state)).not.toContain('runtime-test-token');
     expect(localStorage.getItem('capabilityToken')).toBeNull();
     expect(sessionStorage.getItem('capabilityToken')).toBeNull();
   });
 
-  it('cleans up after unmount', () => {
+  it('removes the runtime listener after unmount', () => {
+    const removeEventListener = vi.spyOn(window, 'removeEventListener');
     const view = render(<RuntimeProbe />);
     view.unmount();
-    window.dispatchEvent(new MessageEvent('message', { data: { type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token' }, origin: 'https://courseweave.test', source: window.parent }));
+    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token' });
+    expect(removeEventListener).toHaveBeenCalledWith('message', expect.any(Function));
     expect(view.container).toBeEmptyDOMElement();
   });
 });
