@@ -39,6 +39,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 LAB_PACKAGE_JSON = REPO_ROOT / "frontend" / "packages" / "lab" / "package.json"
 LAB_ENTRY_TS = REPO_ROOT / "frontend" / "packages" / "lab" / "src" / "index.ts"
 FRONTEND_LOCK = REPO_ROOT / "frontend" / "pnpm-lock.yaml"
+FRONTEND_WORKSPACE = REPO_ROOT / "frontend" / "pnpm-workspace.yaml"
 
 REMOTE_ENTRY_RE = re.compile(
     r"^courseweave/labextension/static/remoteEntry\.[0-9a-f]+\.js$"
@@ -145,6 +146,11 @@ class TestAuthorStaticRoute:
         assert "version: 4.6.3(react@18.3.1)" in lab
         assert "react@19.2.8" not in lab
         assert "react-dom@18.3.1(react@18.3.1)" in lock
+
+    def test_frontend_allows_only_font_awesome_to_run_its_known_build_script(self) -> None:
+        workspace = FRONTEND_WORKSPACE.read_text(encoding="utf-8")
+        assert "onlyBuiltDependencies:\n  - '@fortawesome/fontawesome-free'\n" in workspace
+        assert "ignoredBuiltDependencies" not in workspace
 
     def test_wheel_contains_labextension_package_metadata(
         self, wheel_contents: dict[str, bytes]

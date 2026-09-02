@@ -5,15 +5,25 @@ const runtime = { serviceOrigin: 'http://127.0.0.1:8765', capabilityToken: 'auth
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Author API', () => {
-  it('keeps the token in headers, captures ETags, and writes exact raw JSON once', async () => {
+  it('uses authenticated GET and PUT requests with ETags, raw JSON, and caller signals', async () => {
     const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response('{"id":"course"}', { headers: { etag: '"etag"' } })));
     vi.stubGlobal('fetch', fetch);
     const client = createAuthorClient(runtime);
-    expect((await client.getCourse()).etag).toBe('"etag"');
-    await client.putCourse('{\n  "id": "course"\n}\n', '"etag"');
+    const getController = new AbortController();
+    const putController = new AbortController();
+    expect((await client.getCourse(getController.signal)).etag).toBe('"etag"');
+    await client.putCourse('{\n  "id": "course"\n}\n', '"etag"', putController.signal);
+    const get = fetch.mock.calls[0]?.[1] as RequestInit;
     const request = fetch.mock.calls[1]?.[1] as RequestInit;
+    expect(get.method).toBe('GET');
+    expect(get.signal).toBe(getController.signal);
+    expect(new Headers(get.headers).get('Authorization')).toBe('Bearer author-token');
+    expect(new Headers(get.headers).get('Content-Type')).toBeNull();
+    expect(request.method).toBe('PUT');
+    expect(request.signal).toBe(putController.signal);
     expect(request.body).toBe('{\n  "id": "course"\n}\n');
     expect(new Headers(request.headers).get('Authorization')).toBe('Bearer author-token');
+    expect(new Headers(request.headers).get('Content-Type')).toBe('application/json');
     expect(new Headers(request.headers).get('If-Match')).toBe('"etag"');
     expect(new Headers(request.headers).get('Idempotency-Key')).toBeTruthy();
     expect(String(fetch.mock.calls[1]?.[0])).not.toContain('author-token');
@@ -28,29 +38,51 @@ describe('Author API', () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
-  it('uses the exact Author proposal routes, fresh keys, and caller AbortSignals', async () => {
+  it('uses exact authenticated JSON bodies, methods, fresh keys, and signals for every Author action', async () => {
     const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response('{}')));
     vi.stubGlobal('fetch', fetch);
     const client = createAuthorClient(runtime);
-    const controller = new AbortController();
-    await client.validateCourse({ schema_version: 1 }, 'structural', controller.signal);
-    await client.postGuide({ messages: [] }, controller.signal);
-    await client.createProposal('candidate-a', controller.signal);
-    await client.editProposal('proposal/a', { expected_revision: 1, request: {} }, controller.signal);
-    await client.acceptProposal('proposal/a', { expected_revision: 2 }, controller.signal);
-    await client.rejectProposal('proposal/a', { expected_revision: 3 }, controller.signal);
+    const controllers = Array.from({ length: 7 }, () => new AbortController());
+    const manifest = { schema_version: 1, title: 'Draft' };
+    const guide = { messages: [{ role: 'user', content: 'Help' }] };
+    const edit = { expected_revision: 1, request: { summary: 'Edited' } };
+    const accept = { expected_revision: 2 };
+    const reject = { expected_revision: 3 };
+    await client.validateCourse(manifest, 'structural', controllers[0]?.signal);
+    await client.postGuide(guide, controllers[1]?.signal);
+    await client.getProposals(controllers[2]?.signal);
+    await client.createProposal('candidate-a', controllers[3]?.signal);
+    await client.editProposal('proposal/a', edit, controllers[4]?.signal);
+    await client.acceptProposal('proposal/a', accept, controllers[5]?.signal);
+    await client.rejectProposal('proposal/a', reject, controllers[6]?.signal);
 
-    const durable = fetch.mock.calls.slice(2);
+    const durable = fetch.mock.calls.slice(3);
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
       'http://127.0.0.1:8765/api/author/validate',
       'http://127.0.0.1:8765/api/author/guide',
+      'http://127.0.0.1:8765/api/proposals',
       'http://127.0.0.1:8765/api/proposals',
       'http://127.0.0.1:8765/api/proposals/proposal%2Fa/edit',
       'http://127.0.0.1:8765/api/proposals/proposal%2Fa/accept',
       'http://127.0.0.1:8765/api/proposals/proposal%2Fa/reject',
     ]);
-    expect(new Headers(fetch.mock.calls[0]?.[1].headers).get('Authorization')).toBe('Bearer author-token');
-    expect(fetch.mock.calls.every(([, request]) => request.signal === controller.signal)).toBe(true);
+    const requests = fetch.mock.calls.map(([, request]) => request as RequestInit);
+    expect(requests.map((request) => request.method)).toEqual(['POST', 'POST', 'GET', 'POST', 'POST', 'POST', 'POST']);
+    expect(requests.map((request) => request.signal)).toEqual(controllers.map((controller) => controller.signal));
+    expect(requests.every((request) => new Headers(request.headers).get('Authorization') === 'Bearer author-token')).toBe(true);
+    expect(new Headers(requests[2]?.headers).get('Content-Type')).toBeNull();
+    for (const request of [...requests.slice(0, 2), ...requests.slice(3)]) {
+      expect(new Headers(request.headers).get('Content-Type')).toBe('application/json');
+    }
+    expect(requests.map((request) => request.body)).toEqual([
+      JSON.stringify({ manifest, mode: 'structural' }),
+      JSON.stringify(guide),
+      undefined,
+      JSON.stringify({ candidate_id: 'candidate-a' }),
+      JSON.stringify(edit),
+      JSON.stringify(accept),
+      JSON.stringify(reject),
+    ]);
     const keys = durable.map(([, request]) => new Headers(request.headers).get('Idempotency-Key'));
     expect(new Set(keys).size).toBe(4);
     expect(keys.every(Boolean)).toBe(true);

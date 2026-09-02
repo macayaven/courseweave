@@ -1,3 +1,7 @@
 packages:
   - packages/*
   - apps/*
+
+# Permit the sole existing dependency lifecycle script; all others stay blocked.
+onlyBuiltDependencies:
+  - '@fortawesome/fontawesome-free'

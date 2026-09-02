@@ -52,7 +52,7 @@ export function createAuthorClient(runtime: AuthorRuntime) {
   }, signal);
   return {
     async getCourse(signal?: AbortSignal): Promise<CourseResponse> {
-      const response = await request('/api/course', {}, signal);
+      const response = await request('/api/course', { method: 'GET' }, signal);
       const raw = await response.text();
       return { manifest: JSON.parse(raw), raw, etag: response.headers.get('etag') ?? '' };
     },
@@ -68,7 +68,7 @@ export function createAuthorClient(runtime: AuthorRuntime) {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifest, mode }),
     }, signal),
     postGuide: (body: unknown, signal?: AbortSignal) => request('/api/author/guide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, signal),
-    getProposals: (signal?: AbortSignal) => json<unknown[]>('/api/proposals', {}, signal),
+    getProposals: (signal?: AbortSignal) => json<unknown[]>('/api/proposals', { method: 'GET' }, signal),
     createProposal: (candidateId: string, signal?: AbortSignal) => mutation('/api/proposals', { candidate_id: candidateId }, signal),
     editProposal: (proposalId: string, body: unknown, signal?: AbortSignal) => mutation(`/api/proposals/${encodeURIComponent(proposalId)}/edit`, body, signal),
     acceptProposal: (proposalId: string, body: unknown, signal?: AbortSignal) => mutation(`/api/proposals/${encodeURIComponent(proposalId)}/accept`, body, signal),
