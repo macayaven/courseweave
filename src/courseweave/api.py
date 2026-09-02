@@ -738,48 +738,49 @@ def _redact_shared_content(
     content: str, shared: dict[str, str | None] | None
 ) -> str:
     """Do not reflect a private excerpt through an AG-UI content event."""
-    if shared is not None and (excerpt := shared["content"]):
-        content = content.replace(excerpt, "")
-    return content
+    redactor = _SharedChunkRedactor(shared["content"] if shared is not None else None)
+    return redactor.feed(content) + redactor.flush()
 
 
 class _SharedChunkRedactor:
-    """Stream an excerpt-safe response with only a bounded overlap carry."""
+    """Emit text incrementally without completing the shared excerpt."""
 
     def __init__(self, excerpt: str | None) -> None:
         self.excerpt = excerpt or ""
-        self.carry = ""
+        self.failure = _kmp_failure_table(self.excerpt)
+        self.state = 0
 
     def feed(self, chunk: str) -> str:
         if not self.excerpt:
             return chunk
-        combined = self.carry + chunk
         output: list[str] = []
-        position = 0
-        while True:
-            match = combined.find(self.excerpt, position)
-            if match < 0:
-                tail = combined[position:]
-                overlap = _prefix_overlap(tail, self.excerpt)
-                output.append(tail[:-overlap] if overlap else tail)
-                self.carry = tail[-overlap:] if overlap else ""
-                return "".join(output)
-            output.append(combined[position:match])
-            position = match + len(self.excerpt)
+        for char in chunk:
+            next_state = self.state
+            while next_state and char != self.excerpt[next_state]:
+                next_state = self.failure[next_state - 1]
+            if char == self.excerpt[next_state]:
+                next_state += 1
+            if next_state == len(self.excerpt):
+                continue
+            output.append(char)
+            self.state = next_state
+        return "".join(output)
 
     def flush(self) -> str:
-        remainder = self.carry
-        self.carry = ""
-        return remainder
+        return ""
 
 
-def _prefix_overlap(value: str, excerpt: str) -> int:
-    """Find the longest suffix that may become an excerpt in the next chunk."""
-    limit = min(len(value), len(excerpt) - 1)
-    for size in range(limit, 0, -1):
-        if value.endswith(excerpt[:size]):
-            return size
-    return 0
+def _kmp_failure_table(pattern: str) -> list[int]:
+    """Return the longest proper-prefix length for each pattern position."""
+    failure = [0] * len(pattern)
+    prefix = 0
+    for position in range(1, len(pattern)):
+        while prefix and pattern[position] != pattern[prefix]:
+            prefix = failure[prefix - 1]
+        if pattern[position] == pattern[prefix]:
+            prefix += 1
+        failure[position] = prefix
+    return failure
 
 
 async def _proposal_decision(

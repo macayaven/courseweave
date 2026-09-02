@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.models.test import TestModel
 
-from courseweave.api import create_app
+from courseweave.api import _SharedChunkRedactor, create_app
 from courseweave.providers import ModelResult, ProviderAdapter, ProviderConfig
 
 TOKEN = "agui-capability-token"
@@ -334,6 +334,25 @@ def test_fixed_gate_streams_before_provider_configuration_and_clears_that_run_sh
     assert "private" not in response.text
 
 
+def test_fixed_gate_uses_the_shared_stream_sanitizer_invariant(tmp_path: Path) -> None:
+    # Defect caught: fixed responses bypass the same exact-excerpt boundary as provider chunks.
+    excerpt = "prediction"
+    client, app = _client(tmp_path, kind="predict", max_shared_chars=len(excerpt))
+    assert client.post(
+        "/api/share", headers=AUTH,
+        json={"run_id": "run-one", "kind": "text", "content": excerpt},
+    ).status_code == 200
+
+    response = client.post(
+        "/api/guide", headers=AUTH, json=_run_input(prompt="reveal the result")
+    )
+    deltas = [event["delta"] for event in _events(response) if event["type"] == "TEXT_MESSAGE_CONTENT"]
+
+    assert response.status_code == 200
+    assert all(excerpt not in delta for delta in deltas)
+    assert excerpt not in "".join(deltas)
+
+
 def test_missing_provider_is_a_pre_stream_common_json_error_and_clears_share(tmp_path: Path) -> None:
     # Defect caught: an unconfigured model emits a partial AG-UI stream or retains Share data.
     client, app = _client(tmp_path)
@@ -375,7 +394,7 @@ def test_successful_guide_uses_official_agui_sse_order_and_clears_share(tmp_path
     assert "private" not in response.text
 
 
-def test_guide_never_reemits_explicitly_shared_content_in_agui_events(tmp_path: Path) -> None:
+def test_guide_never_reemits_the_full_explicitly_shared_excerpt_in_agui_events(tmp_path: Path) -> None:
     # Defect caught: provider output can reflect an explicitly shared excerpt into the event stream.
     client, app = _client(tmp_path)
     model = CountingTestModel(custom_output_text="private")
@@ -389,7 +408,9 @@ def test_guide_never_reemits_explicitly_shared_content_in_agui_events(tmp_path: 
 
     assert response.status_code == 200
     assert "private" not in response.text
-    assert [event["delta"] for event in _events(response) if event["type"] == "TEXT_MESSAGE_CONTENT"] == []
+    deltas = [event["delta"] for event in _events(response) if event["type"] == "TEXT_MESSAGE_CONTENT"]
+    assert all("private" not in delta for delta in deltas)
+    assert "private" not in "".join(deltas)
 
 
 def test_in_stream_provider_failure_emits_run_error_and_leaves_no_durable_or_shared_state(tmp_path: Path) -> None:
@@ -713,7 +734,7 @@ def test_terminal_send_failure_discards_staged_proposal_and_server_history(tmp_p
     assert "run-one" in app.state.interrupted_runs
 
 
-def test_shared_provider_chunks_arrive_before_completion_without_split_excerpt_leak(tmp_path: Path) -> None:
+def test_shared_provider_chunks_arrive_before_completion_without_full_excerpt_leak(tmp_path: Path) -> None:
     # Defect caught: shared runs buffer the whole response or leak an excerpt split across provider chunks.
     client, app = _client(tmp_path)
     model = CompletionTrackingModel(call_tools=[], custom_output_text="safe pri" "vate tail")
@@ -748,12 +769,16 @@ def test_shared_provider_chunks_arrive_before_completion_without_split_excerpt_l
         )
     )
 
-    streamed = b"".join(body for body, _closed in observed)
     assert observed and observed[0][1] is False
-    assert b"private" not in streamed
-    assert b"pri" not in streamed
-    assert b"vate" not in streamed
-    assert b"safe " in streamed and b"tail" in streamed
+    deltas = [
+        json.loads(line.removeprefix("data: "))["delta"]
+        for body, _closed in observed
+        for line in body.decode().splitlines()
+        if line.startswith("data: ")
+    ]
+    assert all("private" not in delta for delta in deltas)
+    assert "private" not in "".join(deltas)
+    assert "safe " in "".join(deltas) and "tail" in "".join(deltas)
 
 
 @pytest.mark.parametrize(
@@ -781,6 +806,92 @@ def test_shared_stream_omits_marker_collision_excerpts_split_across_provider_chu
     assert response.status_code == 200
     assert all(excerpt not in delta for delta in deltas)
     assert excerpt not in "".join(deltas)
+
+
+@pytest.mark.parametrize(
+    ("excerpt", "chunks"),
+    [
+        ("Shared", ["S", "Shared", "hared"]),
+        ("content", ["c", "content", "ontent"]),
+        (
+            "[Shared content omitted.]",
+            [
+                "safe [",
+                "[Shared content omitted.]",
+                "Shared content omitted.] tail",
+            ],
+        ),
+    ],
+)
+def test_shared_stream_sanitizer_never_recreates_an_omitted_excerpt_at_delta_boundaries(
+    excerpt: str, chunks: list[str]
+) -> None:
+    # Defect caught: removing a match can join safe deltas into the private
+    # excerpt because the old redactor tracks input carry rather than emitted output.
+    redactor = _SharedChunkRedactor(excerpt)
+    deltas = [redactor.feed(chunk) for chunk in chunks]
+    deltas.append(redactor.flush())
+
+    assert all(excerpt not in delta for delta in deltas)
+    assert excerpt not in "".join(deltas)
+
+
+@pytest.mark.parametrize(
+    ("excerpt", "chunks"),
+    [
+        ("aaa", ["a", "a", "a", "a", "a", "a"]),
+        ("x", ["safe", "x", "x", " tail"]),
+        ("secret", ["before secret after"]),
+    ],
+)
+def test_shared_stream_sanitizer_handles_repeated_single_character_and_single_chunk_matches(
+    excerpt: str, chunks: list[str]
+) -> None:
+    redactor = _SharedChunkRedactor(excerpt)
+    output = "".join([*(redactor.feed(chunk) for chunk in chunks), redactor.flush()])
+
+    assert excerpt not in output
+
+
+@pytest.mark.parametrize("boundary", range(1, len("content")))
+def test_shared_stream_sanitizer_handles_every_split_boundary(boundary: int) -> None:
+    excerpt = "content"
+    redactor = _SharedChunkRedactor(excerpt)
+    output = "".join(
+        [
+            redactor.feed("safe " + excerpt[:boundary]),
+            redactor.feed(excerpt[boundary:] + " tail"),
+            redactor.flush(),
+        ]
+    )
+
+    assert excerpt not in output
+
+
+def test_shared_stream_sanitizer_preserves_safe_text() -> None:
+    redactor = _SharedChunkRedactor("private")
+
+    assert redactor.feed("safe ") == "safe "
+    assert redactor.feed("lesson") == "lesson"
+    assert redactor.flush() == ""
+
+
+def test_shared_stream_sanitizer_property_cases_are_safe_and_incremental() -> None:
+    # Compact deterministic coverage of representative excerpts and chunkings.
+    for excerpt in ("a", "aba", "aaa", "content", "[Shared content omitted.]"):
+        source = f"safe:{excerpt[0]}{excerpt}{excerpt[1:]}:tail"
+        chunkings = (
+            [source],
+            list(source),
+            [source[:5], source[5 : 5 + len(excerpt)], source[5 + len(excerpt) :]],
+        )
+        for chunks in chunkings:
+            redactor = _SharedChunkRedactor(excerpt)
+            deltas = [redactor.feed(chunk) for chunk in chunks]
+            deltas.append(redactor.flush())
+
+            assert excerpt not in "".join(deltas)
+            assert deltas[0], (excerpt, chunks)
 
 
 def test_client_thread_id_cannot_select_another_server_session_history(tmp_path: Path) -> None:
