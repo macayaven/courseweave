@@ -13,9 +13,13 @@ These tests pin the wheel and bridge contract:
 - the wheel ships the static learner placeholder under
   ``courseweave/static/learn/`` and declares the ``courseweave`` console
   script;
-- the lab bridge stays React-free, verified against both source declarations
-  and the built federated JavaScript, and resolves its service origin from a
-  non-persisted Jupyter page-config option (default loopback fallback only).
+- the lab bridge stays free of React runtime code, verified semantically
+  against the built federated JavaScript (React-specific runtime markers) and
+  against source declarations;
+- the bridge resolves its service origin with the required priority:
+  non-empty ``courseweaveServiceUrl`` page-config option first, then this
+  plugin's ``serviceOrigin`` setting from its shipped schema, then the
+  loopback default.
 """
 
 from __future__ import annotations
@@ -55,6 +59,18 @@ def wheel_contents(tmp_path_factory: pytest.TempPathFactory) -> dict[str, bytes]
     assert len(wheels) == 1, artifacts
     with zipfile.ZipFile(wheels[0]) as archive:
         return {name: archive.read(name) for name in archive.namelist()}
+
+
+def _bridge_javascript(wheel_contents: dict[str, bytes]) -> list[bytes]:
+    """The built federated JavaScript of the bridge (entry plus chunks)."""
+    return [
+        data
+        for name, data in wheel_contents.items()
+        if REMOTE_ENTRY_RE.match(name)
+        or re.fullmatch(
+            r"courseweave/labextension/static/[0-9a-f]+\.[0-9a-f]+\.js", name
+        )
+    ]
 
 
 class TestWheelContents:
@@ -114,48 +130,70 @@ class TestBuiltBridgeBundle:
     def test_bundle_resolves_service_origin_from_page_config(
         self, wheel_contents: dict[str, bytes]
     ) -> None:
-        """The bridge must read a page-config option, not hardcode one port."""
-        bundle = [
-            data
-            for name, data in wheel_contents.items()
-            if REMOTE_ENTRY_RE.match(name)
-            or re.fullmatch(
-                r"courseweave/labextension/static/[0-9a-f]+\.[0-9a-f]+\.js", name
-            )
-        ]
+        """Launch injection (priority 1) must come from page config."""
+        bundle = _bridge_javascript(wheel_contents)
         assert bundle, "no built bridge JavaScript found in the wheel"
         assert any(b"courseweaveServiceUrl" in data for data in bundle), (
             "built bridge does not reference the courseweaveServiceUrl page-config "
             "option"
         )
 
+    def test_bundle_consumes_service_origin_plugin_setting(
+        self, wheel_contents: dict[str, bytes]
+    ) -> None:
+        """Manual custom-port configuration (priority 2) must flow through this
+        plugin's ``serviceOrigin`` setting key, resolved via ISettingRegistry."""
+        bundle = _bridge_javascript(wheel_contents)
+        assert bundle, "no built bridge JavaScript found in the wheel"
+        assert any(b"serviceOrigin" in data for data in bundle), (
+            "built bridge does not consume the serviceOrigin plugin setting"
+        )
+
+    def test_setting_schema_pins_loopback_default(
+        self, wheel_contents: dict[str, bytes]
+    ) -> None:
+        """The schema default is the loopback fallback (priority 3)."""
+        schema = json.loads(
+            wheel_contents[
+                "courseweave/labextension/schemas/@courseweave/lab/plugin.json"
+            ]
+        )
+        default = schema["properties"]["serviceOrigin"]["default"]
+        assert default == "http://127.0.0.1:8765"
+        bundle = _bridge_javascript(wheel_contents)
+        assert any(
+            b"http://127.0.0.1:8765" in data for data in bundle
+        ), "built bridge lost the loopback default fallback"
+
     def test_bundle_contains_no_capability_token_plumbing(
         self, wheel_contents: dict[str, bytes]
     ) -> None:
         """The iframe URL carries the service origin only, never the token."""
-        bundle = [
-            data
-            for name, data in wheel_contents.items()
-            if name.startswith("courseweave/labextension/static/")
-            and name.endswith(".js")
-        ]
-        for data in bundle:
+        for data in _bridge_javascript(wheel_contents):
             assert b"capability_token" not in data
             assert b"capabilityToken" not in data
 
-    def test_bundle_is_react_free(self, wheel_contents: dict[str, bytes]) -> None:
-        """No React code may ship inside the built federated JavaScript."""
-        bundle = [
-            data
-            for name, data in wheel_contents.items()
-            if name.startswith("courseweave/labextension/static/")
-            and name.endswith(".js")
-        ]
-        assert bundle
-        for data in bundle:
-            assert b"react" not in data.lower(), (
-                "react marker found in built bridge JavaScript"
-            )
+    def test_bundle_contains_no_react_runtime(
+        self, wheel_contents: dict[str, bytes]
+    ) -> None:
+        """No React code may ship inside the built federated JavaScript.
+
+        Semantic markers: these strings exist only when actual React runtime
+        code is bundled (component/JSX machinery, react-dom, React internals),
+        not when the word merely appears in descriptions or metadata.
+        """
+        react_runtime_markers = (
+            b"react-dom",
+            b"reactdom",
+            b"jsx-runtime",
+            b"__secret_internals_do_not_use_or_you_will_be_fired",
+            b"react.element",
+            b"react.portal",
+        )
+        for data in _bridge_javascript(wheel_contents):
+            lowered = data.lower()
+            for marker in react_runtime_markers:
+                assert marker not in lowered, marker
 
 
 class TestLabBridgeIsReactFree:

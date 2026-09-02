@@ -20,6 +20,9 @@ importers:
       '@jupyterlab/coreutils':
         specifier: ~6.6.3
         version: 6.6.3
+      '@jupyterlab/settingregistry':
+        specifier: ~4.6.3
+        version: 4.6.3(react@18.3.1)
       '@lumino/widgets':
         specifier: ~2.8.0
         version: 2.8.0

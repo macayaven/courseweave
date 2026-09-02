@@ -13,6 +13,7 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 import { PageConfig } from '@jupyterlab/coreutils';
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { Widget } from '@lumino/widgets';
 
 const PLUGIN_ID = 'courseweave:bridge';
@@ -23,21 +24,58 @@ const GUIDE_WIDGET_ID = 'courseweave-guide';
  * Non-persisted page-config option carrying the CourseWeave service URL.
  * Task 6 injects it into the authenticated Jupyter server page configuration
  * from the `COURSEWEAVE_URL` environment variable of the owned child process;
- * nothing is read from disk.
+ * nothing is read from disk. Resolution priority 1.
  */
 const SERVICE_URL_OPTION = 'courseweaveServiceUrl';
 
-/** Loopback fallback used only when the page config provides no URL. */
+/**
+ * Plugin setting key for manual Task 0 custom-port configuration, read via
+ * `ISettingRegistry` from this plugin's shipped schema. Resolution priority 2.
+ */
+const SERVICE_ORIGIN_SETTING = 'serviceOrigin';
+
+/** Loopback fallback used only when both higher priorities are unset. */
 const DEFAULT_SERVICE_ORIGIN = 'http://127.0.0.1:8765';
 
 /**
- * Resolve the service origin from Jupyter page configuration, so custom
- * ports and hosts chosen at launch work without rebuilding. The capability
- * token is server-side state and never appears in the iframe URL.
+ * Resolve the service origin, in required priority order:
+ *
+ * 1. non-empty `courseweaveServiceUrl` page-config option (future automatic
+ *    launch injection),
+ * 2. non-empty `serviceOrigin` from this plugin's setting schema (manual
+ *    custom-port configuration; the schema default flows through here too),
+ * 3. the loopback default.
+ *
+ * The capability token is server-side state and never appears in the iframe
+ * URL.
  */
-function resolveServiceOrigin(): string {
-  const configured = PageConfig.getOption(SERVICE_URL_OPTION).replace(/\/+$/, '');
-  return configured || DEFAULT_SERVICE_ORIGIN;
+async function resolveServiceOrigin(
+  registry: ISettingRegistry | null
+): Promise<string> {
+  const fromPageConfig = PageConfig.getOption(SERVICE_URL_OPTION).replace(
+    /\/+$/,
+    ''
+  );
+  if (fromPageConfig) {
+    return fromPageConfig;
+  }
+  if (registry !== null) {
+    try {
+      const settings = await registry.load(PLUGIN_ID);
+      const composite = settings.get(SERVICE_ORIGIN_SETTING).composite;
+      const fromSettings =
+        typeof composite === 'string' ? composite.replace(/\/+$/, '') : '';
+      if (fromSettings) {
+        return fromSettings;
+      }
+    } catch (error) {
+      console.warn(
+        'CourseWeave bridge: settings unavailable, using the loopback default origin.',
+        error
+      );
+    }
+  }
+  return DEFAULT_SERVICE_ORIGIN;
 }
 
 /**
@@ -87,8 +125,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
     'Persistent CourseWeave guide rail: one sandboxed iframe, origin-guarded messages.',
   autoStart: true,
   requires: [ILabShell],
-  activate: (app: JupyterFrontEnd, shell: ILabShell): void => {
-    const serviceOrigin = resolveServiceOrigin();
+  optional: [ISettingRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    shell: ILabShell,
+    registry: ISettingRegistry | null
+  ): void => {
+    // Provisional origin until settings resolve; the guide is (re)created
+    // with the resolved origin below before the user normally interacts.
+    let serviceOrigin = DEFAULT_SERVICE_ORIGIN;
     let guide: CourseWeaveGuide | null = null;
 
     const openGuide = (): void => {
@@ -116,8 +161,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
       execute: openGuide
     });
 
-    installOriginGuard(serviceOrigin);
-    openGuide();
+    void resolveServiceOrigin(registry).then(resolved => {
+      serviceOrigin = resolved;
+      installOriginGuard(serviceOrigin);
+      openGuide();
+    });
   }
 };
 

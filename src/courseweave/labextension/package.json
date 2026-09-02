@@ -19,6 +19,7 @@
   "dependencies": {
     "@jupyterlab/application": "~4.6.3",
     "@jupyterlab/coreutils": "~6.6.3",
+    "@jupyterlab/settingregistry": "~4.6.3",
     "@lumino/widgets": "~2.8.0"
   },
   "devDependencies": {
@@ -30,7 +31,7 @@
     "schemaDir": "schema",
     "outputDir": "../../../src/courseweave/labextension",
     "_build": {
-      "load": "static/remoteEntry.dc65b88a62f93e5c.js",
+      "load": "static/remoteEntry.8c4c9303658dcb09.js",
       "extension": "./extension"
     }
   }
