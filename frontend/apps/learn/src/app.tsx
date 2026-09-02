@@ -9,7 +9,9 @@ import { PredictionCard } from './prediction-card';
 import { ProposalDrawer } from './proposal-drawer';
 import { TeacherThread } from './teacher-thread';
 import { ReconnectPanel } from './reconnect';
+import { useReaderRoute } from './reader-routes';
 import { useRuntimeBootstrap } from './runtime';
+import { SurfaceReader } from './surface-reader';
 
 export interface LearnHeaderProps {
   course: CourseManifest;
@@ -61,6 +63,12 @@ export function LearnHeader({ course, active, provider, timeBudget, children }: 
 function UnsentDrafts({ composer, onComposer, proposalDrafts, onProposalDraft }: { composer: string; onComposer(value: string): void; proposalDrafts: Record<string, string>; onProposalDraft(id: string, value: string): void }) {
   const entries = Object.entries(proposalDrafts).filter(([, value]) => value.trim().length > 0);
   return <section aria-label="Unsent drafts"><p>Your draft is unsent.</p>{composer.trim().length > 0 ? <label>Ask the teacher<textarea value={composer} onChange={(event) => onComposer(event.target.value)} /></label> : null}{entries.map(([id, value]) => <label key={id}>Unsent edit for {id}<input value={value} onChange={(event) => onProposalDraft(id, event.target.value)} /></label>)}</section>;
+}
+
+function ActiveSurfaceReader({ course, runtime, activeSurface }: { course: CourseManifest; runtime: Parameters<typeof createCourseweaveClient>[0]; activeSurface: ReturnType<typeof findSurface> }) {
+  const route = useReaderRoute(course, runtime, activeSurface);
+  if (route === null) return null;
+  return <section aria-label="Course reader"><SurfaceReader surface={route.surface} htmlSource={route.htmlSource} serviceOrigin={runtime.serviceOrigin} /></section>;
 }
 
 export function LearnApp() {
@@ -164,6 +172,7 @@ export function LearnApp() {
   return <LearnHeader course={data.course} active={active} provider={provider} timeBudget={data.state.time_budget_minutes ?? null}>
     {activePhase !== null && activeModule !== null ? <PhaseCard key={`phase:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} serviceOrigin={runtime.runtime.serviceOrigin} surfaceId={activeSurface?.id ?? null} videoSeconds={data.context?.context.video_seconds} onStateOperation={applyStateOperation} onRefresh={refreshDurableData} recovery={recovery} /> : null}
     {activePhase?.kind === 'predict' && activeModule !== null ? <PredictionCard key={`prediction:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} client={client} onState={(state) => setData((current) => current === null ? current : { ...current, state })} onRefresh={refreshDurableData} recovery={recovery} /> : null}
+    <ActiveSurfaceReader course={data.course} runtime={runtime.runtime} activeSurface={activeSurface} />
     <TeacherThread client={client} sourceId={runtime.runtime.sourceId} allowedShareKinds={allowedShareKinds} maxShareChars={data.course.policies?.max_shared_chars ?? 8192} onProvider={setProvider} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.some((item) => item.id === proposal.id) ? current.proposals.map((item) => item.id === proposal.id ? proposal : item) : [...current.proposals, proposal] })} onRefresh={refreshDurableData} composer={teacherComposer} onComposerChange={setTeacherComposer} recovery={recovery} />
     <ProposalDrawer proposals={data.proposals} state={data.state} client={client} onRefresh={refreshDurableData} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.map((item) => item.id === proposal.id ? proposal : item) })} drafts={proposalDrafts} onDraftsChange={setProposalDrafts} recovery={recovery} />
     <Dashboard course={data.course} serviceOrigin={runtime.runtime.serviceOrigin} />
