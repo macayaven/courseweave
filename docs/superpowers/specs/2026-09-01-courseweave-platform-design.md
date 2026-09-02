@@ -464,8 +464,11 @@ Commands:
 `launch` acquires the single-course process lock, atomically binds a loopback
 port, starts the CourseWeave service, then starts JupyterLab rooted at the course.
 It does not install credentials, modify shell startup files, or change global
-Jupyter settings. It communicates the selected URL and random capability token
-to the extension through a generated, gitignored runtime settings file.
+Jupyter settings. It passes the selected URL and random capability token only
+through the owned child process environment. An authenticated Jupyter server
+hook exposes the URL through PageConfig and hands the token to the learner
+iframe after origin/source validation; neither value is written to disk or
+placed in an iframe URL.
 
 SIGINT/SIGTERM stops owned child processes gracefully and invalidates runtime
 settings. A failed service start prevents JupyterLab launch and prints a concrete
@@ -483,7 +486,7 @@ The adapter must:
 - configure S14 as verification/ship;
 - add a recommended but optional CourseWeave quickstart;
 - add a launcher that locates a sibling checkout or an installed `courseweave`;
-- ignore `.courseweave/` and runtime settings;
+- ignore `.courseweave/` learner state;
 - make no edits to the original dirty checkout;
 - keep existing build, link, notebook, SOTA, and lab-replay gates passing.
 
@@ -526,4 +529,3 @@ Course fork:
 - Generic production coding-agent tools.
 - Automatic SOTA refresh; the teacher may propose a sourced update, which an
   author must accept.
-

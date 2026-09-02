@@ -180,9 +180,9 @@
 **Produces:** persistent right rail, dashboard/reader widgets, native Markdown/notebook/source/terminal opening, active widget/cell metadata, explicit sharing, authenticated runtime discovery, and graceful launch.
 
 - [ ] Write TypeScript tests for active notebook/cell/tags, file editor, rendered Markdown, terminal surface IDs, MIME/reader widgets, source ID/sequence, deduplication, origin/source/schema rejection, command allowlist, capability-token handling, backend failure, and reconnect.
-- [ ] Write CLI tests for single-course lock, atomic loopback bind, readiness, stale runtime file, paths with spaces, installed/sibling use, Jupyter startup failure, browser-open failure, and graceful SIGINT/SIGTERM ownership.
+- [ ] Write CLI tests for single-course lock, atomic loopback bind, readiness, absent/invalid PageConfig injection, paths with spaces, installed/sibling use, Jupyter startup failure, browser-open failure, and graceful SIGINT/SIGTERM ownership.
 - [ ] Run focused tests and record RED failures.
-- [ ] Implement the native surface factory matrix, sandboxed reader, guide iframe, CourseWeave commands, context trackers, explicit Share actions, and dynamic runtime settings.
+- [ ] Implement the native surface factory matrix, sandboxed reader, guide iframe, CourseWeave commands, context trackers, explicit Share actions, and environment-to-PageConfig runtime injection without credential files.
 - [ ] Implement process supervision without generic shell execution.
 - [ ] Build wheel, install into a clean Python 3.11/JupyterLab 4.6.3 environment with no Node executable, and run browser smoke tests against the installed wheel.
 - [ ] Run all platform tests and frozen builds.
