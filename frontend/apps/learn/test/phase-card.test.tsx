@@ -9,6 +9,7 @@ const capabilities = { chat: true, hint_level: 'graduated' as const, share_selec
 afterEach(() => cleanup());
 
 describe('PhaseCard', () => {
+  const parentWindow = (postMessage = vi.fn()) => ({ postMessage }) as unknown as Pick<Window, 'postMessage'>;
   it.each([
     ['orient', 'Open orientation'],
     ['read', 'Open reading'],
@@ -32,6 +33,51 @@ describe('PhaseCard', () => {
   ])('renders Phase complete from the authoritative %s record', (completion, phaseId) => {
     render(<PhaseCard moduleId="m01" phase={{ id: phaseId, title: 'Server phase', kind: phaseId as 'predict' | 'review' | 'ship', capabilities, completion, surfaces: [] }} state={{ revision: 1, completed_phases: { [`m01/${phaseId}/${completion.record_id}`]: { committed: true } } }} serviceOrigin="https://courseweave.test" surfaceId={null} />);
     expect(screen.getByRole('status')).toHaveTextContent('Phase complete');
+  });
+
+  it('starts Orient with the authoritative time budget and opens the optional profile prompt', () => {
+    render(<PhaseCard moduleId="m01" phase={{ id: 'orient', title: 'Orient', kind: 'orient', capabilities: { ...capabilities, create_profile_proposal: true }, completion: { type: 'manual' }, surfaces: [] }} state={{ revision: 1, time_budget_minutes: 25 }} serviceOrigin="https://courseweave.test" surfaceId={null} />);
+    expect(screen.getByText('Time budget: 25 minutes')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start orientation' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Orientation started for 25 minutes.');
+    fireEvent.click(screen.getByRole('button', { name: 'Review profile options' }));
+    expect(screen.getByText('Profile updates require an explicit proposal review.')).toBeInTheDocument();
+  });
+
+  it('tracks Lab protocol and test checks as session-only learner-owned work', () => {
+    render(<PhaseCard moduleId="m01" phase={{ id: 'lab', title: 'Lab', kind: 'lab', capabilities, completion: { type: 'manual' }, surfaces: [] }} state={{ revision: 1 }} serviceOrigin="https://courseweave.test" surfaceId={null} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'I read the protocol' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'I ran the named tests' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Lab session checks: 2 of 2 complete.');
+    expect(screen.getByText('These checks do not mark the phase complete.')).toBeInTheDocument();
+  });
+
+  it('tracks Ship named verifications separately from authoritative learner receipts', () => {
+    render(<PhaseCard moduleId="m01" phase={{ id: 'ship', title: 'Ship', kind: 'ship', capabilities, completion: { type: 'manual' }, surfaces: [] }} state={{ revision: 1, evidence: { 'm01/ship/check-1': { reference: 'pytest' }, 'm01/read/other': { reference: 'other' } } }} serviceOrigin="https://courseweave.test" surfaceId={null} />);
+    expect(screen.getByText('Learner-recorded receipts: 1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Typecheck passed' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tests passed' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Release checks: 2 of 3 complete.');
+    expect(screen.getByText('Only server state can mark this phase complete.')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['orient', 'Open orientation'],
+    ['lab', 'Open lab'],
+    ['ship', 'Open shipment']
+  ] as const)('sends only the trusted IDs when %s surface navigation is requested', (kind, label) => {
+    const postMessage = vi.fn();
+    render(<PhaseCard moduleId="m01" phase={{ id: kind, title: kind, kind, capabilities, completion: { type: 'manual' }, surfaces: [{ id: 'surface-1', type: 'markdown', role: 'primary', label: 'Surface' }] }} state={{ revision: 1 }} serviceOrigin="https://courseweave.test" surfaceId="surface-1" parentWindow={parentWindow(postMessage)} />);
+    fireEvent.click(screen.getByRole('button', { name: label }));
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(postMessage).toHaveBeenCalledWith({ type: 'courseweave.open-surface.v1', moduleId: 'm01', phaseId: kind, surfaceId: 'surface-1' }, 'https://courseweave.test');
+  });
+
+  it.each([null, 'missing-surface'])('does not navigate when the resolved surface is %s', (surfaceId) => {
+    const postMessage = vi.fn();
+    render(<PhaseCard moduleId="m01" phase={{ id: 'lab', title: 'Lab', kind: 'lab', capabilities, completion: { type: 'manual' }, surfaces: [{ id: 'surface-1', type: 'markdown', role: 'primary', label: 'Surface' }] }} state={{ revision: 1 }} serviceOrigin="https://courseweave.test" surfaceId={surfaceId} parentWindow={parentWindow(postMessage)} />);
+    expect(screen.queryByRole('button', { name: 'Open lab' })).not.toBeInTheDocument();
+    expect(postMessage).not.toHaveBeenCalled();
   });
 
   it('disables the hint ladder when the server capability denies hints', () => {
