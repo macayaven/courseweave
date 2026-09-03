@@ -33,6 +33,7 @@ export function CurriculumThread({
   onProvider,
   onProposal,
   onRefresh,
+  onAuthorityUnknown = () => undefined,
 }: {
   client: CurriculumClient;
   sourceId: string;
@@ -42,6 +43,7 @@ export function CurriculumThread({
   onProvider(status: ProviderStatus): void;
   onProposal(proposal: unknown): void;
   onRefresh(signal?: AbortSignal): Promise<RefreshResult>;
+  onAuthorityUnknown?(): void;
 }) {
   const [threadId] = useState(() => crypto.randomUUID());
   const [composer, setComposer] = useState("");
@@ -49,12 +51,10 @@ export function CurriculumThread({
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
-  const [refreshUnavailable, setRefreshUnavailable] = useState(false);
   const active = useRef<AbortController | null>(null);
   const candidateFlights = useRef(new Map<string, AbortController>());
   const composerValue = useRef(composer);
   const alive = useRef(true);
-  const wasRecovering = useRef(recovery);
   composerValue.current = composer;
 
   useEffect(() => {
@@ -79,11 +79,6 @@ export function CurriculumThread({
       ),
     );
   }, [recovery]);
-  useEffect(() => {
-    if (wasRecovering.current && !recovery && !authorityBlocked)
-      setRefreshUnavailable(false);
-    wasRecovering.current = recovery;
-  }, [authorityBlocked, recovery]);
 
   const finish = (id: string, state: Transcript["state"]) =>
     setTranscript((items) =>
@@ -107,11 +102,14 @@ export function CurriculumThread({
         refreshed = false;
       }
       if (!refreshed) {
-        setRefreshUnavailable(true);
         setNotice("Suggested change saved, refresh unavailable; reconnect/review before another action.");
       }
     } catch (error) {
-      if (!alive.current || controller.signal.aborted) return;
+      if (!alive.current) return;
+      if (controller.signal.aborted) {
+        onAuthorityUnknown();
+        return;
+      }
       const status =
         typeof error === "object" && error !== null
           ? (error as { status?: number }).status
@@ -122,13 +120,14 @@ export function CurriculumThread({
           ? "Suggested change is unavailable. Ask the teacher again."
           : "Suggested change could not be saved.",
       );
+      if (status !== 403 && status !== 404 && status !== 409) onAuthorityUnknown();
     } finally {
       candidateFlights.current.delete(candidateId);
     }
   };
 
   const send = async () => {
-    if (!clean || recovery || authorityBlocked || refreshUnavailable || pending || composer.trim().length === 0) return;
+    if (!clean || recovery || authorityBlocked || pending || composer.trim().length === 0) return;
     const submitted = composer;
     const controller = new AbortController();
     active.current = controller;
@@ -205,7 +204,7 @@ export function CurriculumThread({
     }
   };
 
-  const blocked = recovery || authorityBlocked || refreshUnavailable;
+  const blocked = recovery || authorityBlocked;
   const disabled = !clean || blocked || pending || composer.trim().length === 0;
   return (
     <section aria-label="Curriculum teacher">
@@ -219,7 +218,7 @@ export function CurriculumThread({
           Save or review your local draft first: the teacher operates on the saved manifest.
         </p>
       ) : null}
-      {authorityBlocked || refreshUnavailable ? (
+      {authorityBlocked ? (
         <p role="status">Reconnect and review authoritative course and proposals before another teacher action.</p>
       ) : null}
       {transcript.map((item) => (

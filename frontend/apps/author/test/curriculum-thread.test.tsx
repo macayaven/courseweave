@@ -109,12 +109,13 @@ describe("CurriculumThread", () => {
   it("blocks a second teacher operation after candidate persistence has no complete refresh", async () => {
     const postGuide = vi.fn().mockImplementation((body) => Promise.resolve(response(completed(body.threadId, body.runId, true))));
     const onProposal = vi.fn();
-    render(<CurriculumThread client={{ postGuide, createProposal: vi.fn().mockResolvedValue({ id: "proposal-a" }) }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockResolvedValue(false)} />);
+    const view = render(<CurriculumThread client={{ postGuide, createProposal: vi.fn().mockResolvedValue({ id: "proposal-a" }) }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockResolvedValue(false)} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Save candidate" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save suggested change" }));
     await screen.findByText(/suggested change saved, refresh unavailable/i);
     expect(onProposal).toHaveBeenCalledWith({ id: "proposal-a" });
+    view.rerender(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} authorityBlocked onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockResolvedValue(false)} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Second question" } });
     expect(screen.getByRole("button", { name: "Ask teacher" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));

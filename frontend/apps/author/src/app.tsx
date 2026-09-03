@@ -225,6 +225,7 @@ function AuthorEditor({
   client,
   connected,
   connectionEpoch,
+  courseAuthorityEpoch,
   sourceId,
   onCourseSaved,
 }: {
@@ -232,6 +233,7 @@ function AuthorEditor({
   client: Client;
   connected: boolean;
   connectionEpoch: number;
+  courseAuthorityEpoch: number;
   sourceId: string;
   onCourseSaved(course: CourseResponse): void;
 }) {
@@ -252,7 +254,10 @@ function AuthorEditor({
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [provider, setProvider] = useState<ProviderStatus>("unknown");
   const [proposalSavePending, setProposalSavePending] = useState(false);
-  const [refreshBlocked, setRefreshBlocked] = useState(false);
+  const [authorityState, setAuthorityState] = useState<
+    "fresh" | "refreshing" | "blocked"
+  >("fresh");
+  const refreshBlocked = authorityState !== "fresh";
   const [remote, setRemote] = useState<SavedCourse | null>(null);
   const [reconnectCanonical, setReconnectCanonical] = useState<{
     generation: number;
@@ -277,8 +282,22 @@ function AuthorEditor({
     checks.current.structural?.abort();
     checks.current.runnable?.abort();
   }, [epoch]);
+  const initialProposalsLoaded = useRef(false);
+  const observedConnectionEpoch = useRef(connectionEpoch);
+  const reconnectEpoch = useRef<number | null>(null);
+  const proposalsEpoch = useRef<number | null>(null);
   useEffect(() => {
-    if (!connected) return;
+    if (!connected) {
+      setAuthorityState("blocked");
+      return;
+    }
+    const reconnecting = observedConnectionEpoch.current !== connectionEpoch;
+    if (reconnecting) {
+      observedConnectionEpoch.current = connectionEpoch;
+      reconnectEpoch.current = connectionEpoch;
+      setAuthorityState("refreshing");
+    }
+    if (initialProposalsLoaded.current && !reconnecting) return;
     const getProposals = client.getProposals;
     if (typeof getProposals !== "function") return;
     const controller = new AbortController();
@@ -288,14 +307,33 @@ function AuthorEditor({
         if (
           !controller.signal.aborted &&
           started === latestConnectionEpoch.current &&
-          Array.isArray(items)
+          (Array.isArray(items) || items === undefined)
         ) {
-          setProposals(items as Proposal[]);
+          initialProposalsLoaded.current = true;
+          proposalsEpoch.current = started;
+          setProposals((Array.isArray(items) ? items : []) as Proposal[]);
+          if (
+            reconnectEpoch.current === started &&
+            courseAuthorityEpoch === started
+          ) {
+            reconnectEpoch.current = null;
+            setAuthorityState("fresh");
+          }
         }
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [client, connected, connectionEpoch]);
+  }, [client, connected, connectionEpoch, courseAuthorityEpoch]);
+  useEffect(() => {
+    if (
+      reconnectEpoch.current === connectionEpoch &&
+      proposalsEpoch.current === connectionEpoch &&
+      courseAuthorityEpoch === connectionEpoch
+    ) {
+      reconnectEpoch.current = null;
+      setAuthorityState("fresh");
+    }
+  }, [connectionEpoch, courseAuthorityEpoch]);
   useEffect(() => {
     if (course.etag === baseline.etag) return;
     if (dirty) {
@@ -442,7 +480,7 @@ function AuthorEditor({
   }, []);
   const refreshAuthorData = useCallback(async (signal?: AbortSignal) => {
     const started = connectionEpoch;
-    setRefreshBlocked(true);
+    setAuthorityState("refreshing");
     const [courseResult, proposalsResult] = await Promise.allSettled([
       client.getCourse(signal),
       client.getProposals(signal),
@@ -453,25 +491,29 @@ function AuthorEditor({
       current &&
       proposalsResult.status === "fulfilled" &&
       Array.isArray(proposalsResult.value);
-    if (course && courseResult.status === "fulfilled") onCourseSaved(courseResult.value);
-    if (proposalList && proposalsResult.status === "fulfilled")
-      setProposals(proposalsResult.value as Proposal[]);
     const complete = course && proposalList;
-    if (current) setRefreshBlocked(!complete);
+    if (!current) return { course, proposals: proposalList, complete: false, current };
+    if (!complete) {
+      setAuthorityState("blocked");
+      return { course, proposals: proposalList, complete: false, current };
+    }
+    if (courseResult.status === "fulfilled" && proposalsResult.status === "fulfilled") {
+      onCourseSaved(courseResult.value);
+      setProposals(proposalsResult.value as Proposal[]);
+    }
+    setAuthorityState("fresh");
     return { course, proposals: proposalList, complete, current };
   }, [client, connectionEpoch, onCourseSaved]);
-  const blockedReconnect = useRef(false);
-  useEffect(() => {
-    if (!connected) {
-      blockedReconnect.current = refreshBlocked;
-      return;
-    }
-    if (!blockedReconnect.current) return;
-    blockedReconnect.current = false;
+  const authorityRead = useRef<AbortController | null>(null);
+  const retryAuthority = useCallback(() => {
+    authorityRead.current?.abort();
     const controller = new AbortController();
+    authorityRead.current = controller;
     void refreshAuthorData(controller.signal);
-    return () => controller.abort();
-  }, [connected, connectionEpoch, refreshAuthorData, refreshBlocked]);
+  }, [refreshAuthorData]);
+  useEffect(() => {
+    return () => authorityRead.current?.abort();
+  }, []);
   const phase = selectedPhase(state);
   return (
     <>
@@ -543,6 +585,18 @@ function AuthorEditor({
         connectionEpoch={connectionEpoch}
         onRemoteSaved={setRemote}
       />
+      {refreshBlocked && connected ? (
+        <section aria-label="Authority recovery">
+          <p role="status">
+            {authorityState === "refreshing"
+              ? "Refreshing authoritative course and proposals…"
+              : "Authoritative course and proposals must be reviewed before another mutation."}
+          </p>
+          <button type="button" onClick={retryAuthority} disabled={authorityState === "refreshing"}>
+            Retry authoritative refresh
+          </button>
+        </section>
+      ) : null}
       <CurriculumThread
         client={client}
         sourceId={sourceId}
@@ -552,6 +606,7 @@ function AuthorEditor({
         onProvider={setProvider}
         onProposal={recordProposal}
         onRefresh={refreshAuthorData}
+        onAuthorityUnknown={() => setAuthorityState("blocked")}
       />
       <ProposalReview
         proposals={proposals}
@@ -572,6 +627,7 @@ function AuthorEditor({
         onProposal={recordProposal}
         onConflict={() => setNotice("Proposal changed; review the saved course before continuing.")}
         onAcceptedCourse={() => setNotice("Accepted proposal refreshed from the saved course.")}
+        onAuthorityUnknown={() => setAuthorityState("blocked")}
       />
       <p role="status">
         {provider === "not_configured" || provider === "provider_error"
@@ -589,6 +645,8 @@ export function AuthorApp() {
     "loading",
   );
   const [course, setCourse] = useState<CourseResponse | null>(null);
+  const [courseAuthorityEpoch, setCourseAuthorityEpoch] = useState(-1);
+  const retainedConnection = useRef(false);
   const client = useRef<Client | null>(null);
   const identity =
     runtime.status === "ready"
@@ -607,13 +665,15 @@ export function AuthorApp() {
       if (course) setLoad("disconnected");
       return;
     }
+    retainedConnection.current = course !== null;
     const controller = new AbortController();
-    setLoad(course ? "ready" : "loading");
+    setLoad("loading");
     void client
       .current!.getCourse(controller.signal)
       .then((next) => {
         if (!controller.signal.aborted) {
           setCourse(next);
+          setCourseAuthorityEpoch(connectionEpoch.current);
           setLoad("ready");
         }
       })
@@ -640,7 +700,7 @@ export function AuthorApp() {
         </button>
       </>
     );
-  if (load === "loading" || !course || !client.current)
+  if ((load === "loading" && !retainedConnection.current) || !course || !client.current)
     return <AuthorShell state="Loading saved course…" />;
   const connected = runtime.status === "ready" && load === "ready";
   if (!isAuthorManifest(course.manifest))
@@ -664,8 +724,12 @@ export function AuthorApp() {
         client={client.current}
         connected={connected}
         connectionEpoch={connectionEpoch.current}
+        courseAuthorityEpoch={courseAuthorityEpoch}
         sourceId={runtime.runtime?.sourceId ?? ""}
-        onCourseSaved={setCourse}
+        onCourseSaved={(next) => {
+          setCourse(next);
+          setCourseAuthorityEpoch(connectionEpoch.current);
+        }}
       />
       {!connected ? (
         <button type="button" onClick={runtime.retry}>

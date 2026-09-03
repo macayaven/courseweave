@@ -38,7 +38,7 @@ function textDiff(before: string, after: string): string {
   return `--- saved target\n+++ proposed replacement\n${lines("- ", before)}\n${lines("+ ", after)}`;
 }
 
-export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, recovery, authorityBlocked = false, savePending, onRefresh, onProposal, onConflict, onAcceptedCourse }: {
+export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, recovery, authorityBlocked = false, savePending, onRefresh, onProposal, onConflict, onAcceptedCourse, onAuthorityUnknown = () => undefined }: {
   proposals: Proposal[];
   savedRaw: string;
   savedEtag: string;
@@ -51,6 +51,7 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
   onProposal(proposal: Proposal): void;
   onConflict(): void;
   onAcceptedCourse(): void;
+  onAuthorityUnknown?(): void;
 }) {
   const authorProposals = proposals.filter(isAuthorManifestProposal);
   const [canonical, setCanonical] = useState<Record<string, string>>({});
@@ -114,7 +115,10 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
       if (action === "accept" && next.status === "accepted" && courseRefreshed) onAcceptedCourse();
       setNotice(refreshed ? "Proposal saved from the authoritative review." : "Proposal saved, refresh unavailable; reconnect/review before another action.");
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        onAuthorityUnknown();
+        return;
+      }
       const conflict = typeof error === "object" && error !== null && (error as { status?: unknown }).status === 409;
       if (conflict) {
         let refreshed = false;
@@ -124,7 +128,10 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
         } catch { /* Retain the local draft for review. */ }
         onConflict();
         setNotice(refreshed ? "Proposal changed; review refreshed proposals before trying again." : "Proposal changed, refresh unavailable; reconnect/review before trying again.");
-      } else setNotice("Proposal action could not be completed.");
+      } else {
+        onAuthorityUnknown();
+        setNotice("Proposal action could not be completed. Reconnect/review before another action.");
+      }
     } finally {
       controllers.current.delete(actionKey);
       setActive((current) => current === actionKey ? null : current);
