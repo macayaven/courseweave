@@ -37,7 +37,7 @@ export function CurriculumThread({
   recovery: boolean;
   onProvider(status: ProviderStatus): void;
   onProposal(proposal: unknown): void;
-  onRefresh(): Promise<void>;
+  onRefresh(): Promise<boolean>;
 }) {
   const [threadId] = useState(() => crypto.randomUUID());
   const [composer, setComposer] = useState("");
@@ -64,7 +64,14 @@ export function CurriculumThread({
     active.current?.abort();
     candidateFlights.current.forEach((controller) => controller.abort());
     candidateFlights.current.clear();
+    active.current = null;
     setPending(false);
+    setCandidates([]);
+    setTranscript((items) =>
+      items.map((item) =>
+        item.state === "streaming" ? { ...item, state: "interrupted" } : item,
+      ),
+    );
   }, [recovery]);
 
   const finish = (id: string, state: Transcript["state"]) =>
@@ -81,7 +88,14 @@ export function CurriculumThread({
       if (!alive.current || controller.signal.aborted) return;
       onProposal(proposal);
       setCandidates((items) => items.filter((id) => id !== candidateId));
-      await onRefresh();
+      let refreshed = false;
+      try {
+        refreshed = await onRefresh();
+      } catch {
+        refreshed = false;
+      }
+      if (!refreshed)
+        setNotice("Suggested change saved, refresh unavailable; reconnect/review before another action.");
     } catch (error) {
       if (!alive.current || controller.signal.aborted) return;
       const status =

@@ -425,13 +425,21 @@ function AuthorEditor({
     onCourseSaved(next);
     setNotice("Saved exact canonical course bytes.");
   };
+  const recordProposal = useCallback((next: Proposal) => {
+    setProposals((current) => {
+      const other = current.filter((proposal) => proposal.id !== next.id);
+      return [...other, next];
+    });
+  }, []);
   const refreshAuthorData = useCallback(async () => {
-    const [nextCourse, nextProposals] = await Promise.all([
+    const [courseResult, proposalsResult] = await Promise.allSettled([
       client.getCourse(),
       client.getProposals(),
     ]);
-    setProposals(nextProposals as Proposal[]);
-    onCourseSaved(nextCourse);
+    if (courseResult.status === "fulfilled") onCourseSaved(courseResult.value);
+    if (proposalsResult.status === "fulfilled" && Array.isArray(proposalsResult.value))
+      setProposals(proposalsResult.value as Proposal[]);
+    return courseResult.status === "fulfilled" && proposalsResult.status === "fulfilled";
   }, [client, onCourseSaved]);
   const phase = selectedPhase(state);
   return (
@@ -510,12 +518,13 @@ function AuthorEditor({
         clean={!dirty && !proposalSavePending}
         recovery={!connected}
         onProvider={setProvider}
-        onProposal={() => undefined}
+        onProposal={recordProposal}
         onRefresh={refreshAuthorData}
       />
       <ProposalReview
         proposals={proposals}
-        savedManifest={baseline.manifest}
+        savedRaw={baseline.raw}
+        savedEtag={baseline.etag}
         client={{
           validateCourse: (manifest, signal) =>
             client.validateCourse(manifest, "structural", signal),
@@ -527,6 +536,7 @@ function AuthorEditor({
         recovery={!connected}
         savePending={proposalSavePending}
         onRefresh={refreshAuthorData}
+        onProposal={recordProposal}
         onConflict={() => setNotice("Proposal changed; review the saved course before continuing.")}
         onAcceptedCourse={() => setNotice("Accepted proposal refreshed from the saved course.")}
       />

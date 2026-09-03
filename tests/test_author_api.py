@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import copy
+import concurrent.futures
 import hashlib
 import json
 import socket
+import threading
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -296,7 +298,7 @@ def test_author_manifest_review_rejects_exact_bytes_then_edits_and_accepts_once(
     assert (tmp_path / "courseweave.json").read_bytes() == manifest_bytes(parse_manifest_data(edited, tmp_path))
 
 
-def test_author_proposal_accept_refuses_a_direct_save_that_changed_the_target(tmp_path: Path) -> None:
+def test_author_proposal_accept_races_a_direct_save_without_stale_application(tmp_path: Path) -> None:
     before = manifest_bytes(parse_manifest_data(manifest(), tmp_path))
     (tmp_path / "courseweave.json").write_bytes(before)
     store = CourseStore(tmp_path)
@@ -314,27 +316,40 @@ def test_author_proposal_accept_refuses_a_direct_save_that_changed_the_target(tm
         },
         "seed-author-stale",
     )
-    app = client(tmp_path)
-    current = app.get("/api/course", headers=AUTH)
     direct = manifest()
     direct["title"] = "Direct author save"
-    saved = app.put(
-        "/api/course",
-        headers={
-            **AUTH,
-            "If-Match": current.headers["etag"],
-            "Idempotency-Key": "direct-author-save",
-            "X-CourseWeave-Origin": "student_requested",
-        },
-        content=manifest_bytes(parse_manifest_data(direct, tmp_path)),
-    )
-    assert saved.status_code == 200
+    initial_etag = f'"{hashlib.sha256(before).hexdigest()}"'
+    start = threading.Barrier(2)
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
-    stale = app.post(
-        f"/api/proposals/{pending.id}/accept",
-        headers={**AUTH, "Idempotency-Key": "accept-stale-author-review"},
-        json={"expected_revision": pending.revision},
-    )
-    assert stale.status_code == 409
-    assert stale.json()["code"] == "target_changed"
-    assert (tmp_path / "courseweave.json").read_bytes() == manifest_bytes(parse_manifest_data(direct, tmp_path))
+    def accept() -> str:
+        try:
+            start.wait()
+            return CourseStore(tmp_path).accept_proposal(pending.id, pending.revision, "race-accept").status
+        except Exception as exc:  # noqa: BLE001 - the status proves the loser did not apply stale bytes
+            return type(exc).__name__
+
+    def save() -> str:
+        try:
+            start.wait()
+            return CourseStore(tmp_path).save_course_manifest(
+                parse_manifest_data(direct, tmp_path), initial_etag, "race-save"
+            ).manifest.title
+        except Exception as exc:  # noqa: BLE001 - the status proves the loser lost CAS
+            return type(exc).__name__
+
+    try:
+        accept_future = executor.submit(accept)
+        save_future = executor.submit(save)
+        results = [accept_future.result(), save_future.result()]
+    finally:
+        executor.shutdown(wait=True)
+
+    final = (tmp_path / "courseweave.json").read_bytes()
+    accepted = [item for item in store.get_state().audit if item.proposal_id == pending.id and item.status == "accepted"]
+    assert sum(result in {"accepted", "Direct author save"} for result in results) == 1
+    assert final in {
+        manifest_bytes(parse_manifest_data(proposed, tmp_path)),
+        manifest_bytes(parse_manifest_data(direct, tmp_path)),
+    }
+    assert len(accepted) == (1 if final == manifest_bytes(parse_manifest_data(proposed, tmp_path)) else 0)
