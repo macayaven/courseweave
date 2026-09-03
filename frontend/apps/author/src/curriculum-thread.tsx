@@ -22,11 +22,14 @@ type Transcript = {
   state: "streaming" | "finished" | "interrupted" | "failed";
 };
 
+type RefreshResult = boolean | { complete: boolean };
+
 export function CurriculumThread({
   client,
   sourceId,
   clean,
   recovery,
+  authorityBlocked = false,
   onProvider,
   onProposal,
   onRefresh,
@@ -35,9 +38,10 @@ export function CurriculumThread({
   sourceId: string;
   clean: boolean;
   recovery: boolean;
+  authorityBlocked?: boolean;
   onProvider(status: ProviderStatus): void;
   onProposal(proposal: unknown): void;
-  onRefresh(): Promise<boolean>;
+  onRefresh(signal?: AbortSignal): Promise<RefreshResult>;
 }) {
   const [threadId] = useState(() => crypto.randomUUID());
   const [composer, setComposer] = useState("");
@@ -45,10 +49,12 @@ export function CurriculumThread({
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
+  const [refreshUnavailable, setRefreshUnavailable] = useState(false);
   const active = useRef<AbortController | null>(null);
   const candidateFlights = useRef(new Map<string, AbortController>());
   const composerValue = useRef(composer);
   const alive = useRef(true);
+  const wasRecovering = useRef(recovery);
   composerValue.current = composer;
 
   useEffect(() => {
@@ -73,6 +79,11 @@ export function CurriculumThread({
       ),
     );
   }, [recovery]);
+  useEffect(() => {
+    if (wasRecovering.current && !recovery && !authorityBlocked)
+      setRefreshUnavailable(false);
+    wasRecovering.current = recovery;
+  }, [authorityBlocked, recovery]);
 
   const finish = (id: string, state: Transcript["state"]) =>
     setTranscript((items) =>
@@ -90,12 +101,15 @@ export function CurriculumThread({
       setCandidates((items) => items.filter((id) => id !== candidateId));
       let refreshed = false;
       try {
-        refreshed = await onRefresh();
+        const result = await onRefresh(controller.signal);
+        refreshed = typeof result === "boolean" ? result : result.complete;
       } catch {
         refreshed = false;
       }
-      if (!refreshed)
+      if (!refreshed) {
+        setRefreshUnavailable(true);
         setNotice("Suggested change saved, refresh unavailable; reconnect/review before another action.");
+      }
     } catch (error) {
       if (!alive.current || controller.signal.aborted) return;
       const status =
@@ -114,7 +128,7 @@ export function CurriculumThread({
   };
 
   const send = async () => {
-    if (!clean || recovery || pending || composer.trim().length === 0) return;
+    if (!clean || recovery || authorityBlocked || refreshUnavailable || pending || composer.trim().length === 0) return;
     const submitted = composer;
     const controller = new AbortController();
     active.current = controller;
@@ -191,7 +205,8 @@ export function CurriculumThread({
     }
   };
 
-  const disabled = !clean || recovery || pending || composer.trim().length === 0;
+  const blocked = recovery || authorityBlocked || refreshUnavailable;
+  const disabled = !clean || blocked || pending || composer.trim().length === 0;
   return (
     <section aria-label="Curriculum teacher">
       <h2>Curriculum teacher</h2>
@@ -203,6 +218,9 @@ export function CurriculumThread({
         <p role="status">
           Save or review your local draft first: the teacher operates on the saved manifest.
         </p>
+      ) : null}
+      {authorityBlocked || refreshUnavailable ? (
+        <p role="status">Reconnect and review authoritative course and proposals before another teacher action.</p>
       ) : null}
       {transcript.map((item) => (
         <p key={item.id} data-state={item.state}>
@@ -221,7 +239,7 @@ export function CurriculumThread({
           <p>Suggested change ready for review.</p>
           <Button
             type="button"
-            disabled={recovery}
+            disabled={blocked}
             onClick={() => void persistCandidate(candidateId)}
           >
             Save suggested change

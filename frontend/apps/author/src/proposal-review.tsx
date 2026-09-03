@@ -7,6 +7,7 @@ type ProposalClient = {
   acceptProposal(proposalId: string, body: { expected_revision: number }, signal?: AbortSignal): Promise<Proposal>;
   rejectProposal(proposalId: string, body: { expected_revision: number }, signal?: AbortSignal): Promise<Proposal>;
 };
+type RefreshResult = boolean | { course: boolean; proposals: boolean; complete: boolean; current?: boolean };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -37,15 +38,16 @@ function textDiff(before: string, after: string): string {
   return `--- saved target\n+++ proposed replacement\n${lines("- ", before)}\n${lines("+ ", after)}`;
 }
 
-export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, recovery, savePending, onRefresh, onProposal, onConflict, onAcceptedCourse }: {
+export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, recovery, authorityBlocked = false, savePending, onRefresh, onProposal, onConflict, onAcceptedCourse }: {
   proposals: Proposal[];
   savedRaw: string;
   savedEtag: string;
   client: ProposalClient;
   clean: boolean;
   recovery: boolean;
+  authorityBlocked?: boolean;
   savePending: boolean;
-  onRefresh(): Promise<boolean>;
+  onRefresh(signal?: AbortSignal): Promise<RefreshResult>;
   onProposal(proposal: Proposal): void;
   onConflict(): void;
   onAcceptedCourse(): void;
@@ -78,6 +80,7 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
 
   const blockReason = !clean ? "Save or review your local draft first: proposal actions use the saved manifest."
     : recovery ? "Reconnect and review the saved course before changing a proposal."
+    : authorityBlocked ? "Reconnect and review authoritative course and proposals before changing a proposal."
     : savePending ? "Wait for the direct Save to finish before changing a proposal." : null;
   const savedHash = etagHash(savedEtag);
 
@@ -104,17 +107,23 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
       }
       if (controller.signal.aborted) return;
       onProposal(next);
-      let refreshed = false;
-      try { refreshed = await onRefresh(); } catch { refreshed = false; }
-      if (action === "accept" && next.status === "accepted") onAcceptedCourse();
+      let result: RefreshResult = false;
+      try { result = await onRefresh(controller.signal); } catch { result = false; }
+      const refreshed = typeof result === "boolean" ? result : result.complete;
+      const courseRefreshed = typeof result !== "boolean" ? result.course : refreshed;
+      if (action === "accept" && next.status === "accepted" && courseRefreshed) onAcceptedCourse();
       setNotice(refreshed ? "Proposal saved from the authoritative review." : "Proposal saved, refresh unavailable; reconnect/review before another action.");
     } catch (error) {
       if (controller.signal.aborted) return;
       const conflict = typeof error === "object" && error !== null && (error as { status?: unknown }).status === 409;
       if (conflict) {
-        try { await onRefresh(); } catch { /* Retain the local draft for review. */ }
+        let refreshed = false;
+        try {
+          const result = await onRefresh(controller.signal);
+          refreshed = typeof result === "boolean" ? result : result.complete;
+        } catch { /* Retain the local draft for review. */ }
         onConflict();
-        setNotice("Proposal changed; review refreshed proposals before trying again.");
+        setNotice(refreshed ? "Proposal changed; review refreshed proposals before trying again." : "Proposal changed, refresh unavailable; reconnect/review before trying again.");
       } else setNotice("Proposal action could not be completed.");
     } finally {
       controllers.current.delete(actionKey);

@@ -252,6 +252,7 @@ function AuthorEditor({
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [provider, setProvider] = useState<ProviderStatus>("unknown");
   const [proposalSavePending, setProposalSavePending] = useState(false);
+  const [refreshBlocked, setRefreshBlocked] = useState(false);
   const [remote, setRemote] = useState<SavedCourse | null>(null);
   const [reconnectCanonical, setReconnectCanonical] = useState<{
     generation: number;
@@ -266,6 +267,8 @@ function AuthorEditor({
   const epoch = `${draftGeneration}:${connectionEpoch}`;
   const latestEpoch = useRef(epoch);
   latestEpoch.current = epoch;
+  const latestConnectionEpoch = useRef(connectionEpoch);
+  latestConnectionEpoch.current = connectionEpoch;
   const currentState = useRef(state);
   currentState.current = state;
   const dirty = isDraftDirty(state.draft, state.saved);
@@ -279,14 +282,20 @@ function AuthorEditor({
     const getProposals = client.getProposals;
     if (typeof getProposals !== "function") return;
     const controller = new AbortController();
+    const started = connectionEpoch;
     void Promise.resolve(getProposals(controller.signal))
       .then((items) => {
-        if (!controller.signal.aborted && Array.isArray(items))
+        if (
+          !controller.signal.aborted &&
+          started === latestConnectionEpoch.current &&
+          Array.isArray(items)
+        ) {
           setProposals(items as Proposal[]);
+        }
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [client, connected]);
+  }, [client, connected, connectionEpoch]);
   useEffect(() => {
     if (course.etag === baseline.etag) return;
     if (dirty) {
@@ -431,16 +440,38 @@ function AuthorEditor({
       return [...other, next];
     });
   }, []);
-  const refreshAuthorData = useCallback(async () => {
+  const refreshAuthorData = useCallback(async (signal?: AbortSignal) => {
+    const started = connectionEpoch;
+    setRefreshBlocked(true);
     const [courseResult, proposalsResult] = await Promise.allSettled([
-      client.getCourse(),
-      client.getProposals(),
+      client.getCourse(signal),
+      client.getProposals(signal),
     ]);
-    if (courseResult.status === "fulfilled") onCourseSaved(courseResult.value);
-    if (proposalsResult.status === "fulfilled" && Array.isArray(proposalsResult.value))
+    const current = !signal?.aborted && started === latestConnectionEpoch.current;
+    const course = current && courseResult.status === "fulfilled";
+    const proposalList =
+      current &&
+      proposalsResult.status === "fulfilled" &&
+      Array.isArray(proposalsResult.value);
+    if (course && courseResult.status === "fulfilled") onCourseSaved(courseResult.value);
+    if (proposalList && proposalsResult.status === "fulfilled")
       setProposals(proposalsResult.value as Proposal[]);
-    return courseResult.status === "fulfilled" && proposalsResult.status === "fulfilled";
-  }, [client, onCourseSaved]);
+    const complete = course && proposalList;
+    if (current) setRefreshBlocked(!complete);
+    return { course, proposals: proposalList, complete, current };
+  }, [client, connectionEpoch, onCourseSaved]);
+  const blockedReconnect = useRef(false);
+  useEffect(() => {
+    if (!connected) {
+      blockedReconnect.current = refreshBlocked;
+      return;
+    }
+    if (!blockedReconnect.current) return;
+    blockedReconnect.current = false;
+    const controller = new AbortController();
+    void refreshAuthorData(controller.signal);
+    return () => controller.abort();
+  }, [connected, connectionEpoch, refreshAuthorData, refreshBlocked]);
   const phase = selectedPhase(state);
   return (
     <>
@@ -507,7 +538,7 @@ function AuthorEditor({
         }}
         remote={remote}
         canonicalFromDraft={reconnectCanonical}
-        disabled={!connected}
+        disabled={!connected || refreshBlocked}
         requestGeneration={draftGeneration}
         connectionEpoch={connectionEpoch}
         onRemoteSaved={setRemote}
@@ -515,8 +546,9 @@ function AuthorEditor({
       <CurriculumThread
         client={client}
         sourceId={sourceId}
-        clean={!dirty && !proposalSavePending}
+        clean={!dirty && !proposalSavePending && !refreshBlocked}
         recovery={!connected}
+        authorityBlocked={refreshBlocked}
         onProvider={setProvider}
         onProposal={recordProposal}
         onRefresh={refreshAuthorData}
@@ -534,6 +566,7 @@ function AuthorEditor({
         }}
         clean={!dirty}
         recovery={!connected}
+        authorityBlocked={refreshBlocked}
         savePending={proposalSavePending}
         onRefresh={refreshAuthorData}
         onProposal={recordProposal}

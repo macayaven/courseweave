@@ -192,4 +192,27 @@ describe("ProposalReview", () => {
     await screen.findByText(/remote version changed/i);
     expect(screen.getByLabelText("Course title")).toHaveValue("Dirty while accept");
   });
+
+  it("blocks Ask, Save, and later proposal decisions when Accept cannot reacquire the course", async () => {
+    const second = { ...proposal, id: "proposal-b", summary: "Second proposal", revision: 1 };
+    const initial = { manifest: proposal.payload.manifest, raw: savedRaw, etag: savedEtag };
+    app.getCourse.mockReset(); app.getProposals.mockReset(); app.validateCourse.mockReset(); app.acceptProposal.mockReset(); app.putCourse.mockReset();
+    app.runtime.mockReturnValue({ status: "ready", runtime: { serviceOrigin: "https://course.test", capabilityToken: "token", sourceId: "author" }, retry: app.retry });
+    app.getCourse.mockResolvedValueOnce(initial).mockRejectedValueOnce(new Error("course refresh unavailable"));
+    app.getProposals.mockResolvedValueOnce([proposal, second]).mockResolvedValueOnce([{ ...proposal, status: "accepted" }, second]);
+    app.validateCourse.mockResolvedValue({ formatted_json: "{}\n" });
+    app.acceptProposal.mockResolvedValue({ ...proposal, status: "accepted" });
+    render(<AuthorApp />);
+    await screen.findByText("Second proposal");
+    fireEvent.click(screen.getAllByRole("button", { name: "Accept" })[0]!);
+    await screen.findByText(/refresh unavailable; reconnect\/review/i);
+    fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Do not send" } });
+    expect(screen.getByRole("button", { name: "Ask teacher" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save course" })).toBeDisabled();
+    const secondAccept = screen.getByRole("button", { name: "Accept" });
+    expect(secondAccept).toBeDisabled();
+    fireEvent.click(secondAccept);
+    expect(app.acceptProposal).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/accepted proposal refreshed/i)).toBeNull();
+  });
 });
