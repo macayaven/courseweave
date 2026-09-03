@@ -10,7 +10,7 @@ import { ProposalDrawer } from './proposal-drawer';
 import { TeacherThread } from './teacher-thread';
 import { ReconnectPanel } from './reconnect';
 import { useReaderRoute } from './reader-routes';
-import { useRuntimeBootstrap } from './runtime';
+import { useParentCapture, useRuntimeBootstrap, type TrustedRuntimeConfiguration } from './runtime';
 import { SurfaceReader } from './surface-reader';
 
 export interface LearnHeaderProps {
@@ -65,9 +65,9 @@ function UnsentDrafts({ composer, onComposer, proposalDrafts, onProposalDraft }:
   return <section aria-label="Unsent drafts"><p>Your draft is unsent.</p>{composer.trim().length > 0 ? <label>Ask the teacher<textarea value={composer} onChange={(event) => onComposer(event.target.value)} /></label> : null}{entries.map(([id, value]) => <label key={id}>Unsent edit for {id}<input value={value} onChange={(event) => onProposalDraft(id, event.target.value)} /></label>)}</section>;
 }
 
-function ReaderNavigation({ course, runtime, moduleId, phaseId, activeSurface, contextVersion }: { course: CourseManifest; runtime: Parameters<typeof createCourseweaveClient>[0]; moduleId: string | null; phaseId: string | null; activeSurface: ReturnType<typeof findSurface>; contextVersion: number }) {
+function ReaderNavigation({ course, runtime, moduleId, phaseId, activeSurface, contextVersion }: { course: CourseManifest; runtime: TrustedRuntimeConfiguration; moduleId: string | null; phaseId: string | null; activeSurface: ReturnType<typeof findSurface>; contextVersion: number }) {
   const { route, requestNavigation } = useReaderRoute(course, runtime, moduleId !== null && phaseId !== null && activeSurface !== null ? { moduleId, phaseId, surface: activeSurface } : null, contextVersion);
-  return <>{route === null ? null : <section className="cw-surface-reader" aria-label="Course reader"><SurfaceReader surface={route.surface} htmlSource={route.htmlSource} serviceOrigin={runtime.serviceOrigin} /></section>}<Dashboard course={course} serviceOrigin={runtime.serviceOrigin} onOpenSurface={requestNavigation} /></>;
+  return <>{route === null ? null : <section className="cw-surface-reader" aria-label="Course reader"><SurfaceReader surface={route.surface} htmlSource={route.htmlSource} serviceOrigin={runtime.expectedParentOrigin} /></section>}<Dashboard course={course} expectedParentOrigin={runtime.expectedParentOrigin} onOpenSurface={requestNavigation} /></>;
 }
 
 export function LearnApp() {
@@ -82,8 +82,9 @@ export function LearnApp() {
   const loadedSource = useRef<string | null>(null);
   const activeRead = useRef<AbortController | null>(null);
   const refreshRead = useRef<AbortController | null>(null);
-  const retainedRuntime = useRef<Parameters<typeof createCourseweaveClient>[0] | null>(null);
+  const retainedRuntime = useRef<TrustedRuntimeConfiguration | null>(null);
   if (runtime.status === 'ready') retainedRuntime.current = runtime.runtime;
+  const captureShare = useParentCapture(runtime.status === 'ready' && !recovery ? runtime.runtime : null);
 
   const refreshDurableData = useCallback(async () => {
     if (runtime.status !== 'ready' || recovery) return;
@@ -186,7 +187,7 @@ export function LearnApp() {
     {activePhase !== null && activeModule !== null ? <PhaseCard key={`phase:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} serviceOrigin={activeRuntime.serviceOrigin} surfaceId={activeSurface?.id ?? null} videoSeconds={data.context?.context.video_seconds} onStateOperation={applyStateOperation} onRefresh={refreshDurableData} recovery={recovery} onRecovery={enterRecovery} /> : null}
     {activePhase?.kind === 'predict' && activeModule !== null ? <PredictionCard key={`prediction:${activeModule.id}/${activePhase.id}`} moduleId={activeModule.id} phase={activePhase} state={data.state} client={client} onState={(state) => setData((current) => current === null ? current : { ...current, state })} onRefresh={refreshDurableData} recovery={recovery} onRecovery={enterRecovery} /> : null}
     <ReaderNavigation course={data.course} runtime={activeRuntime} moduleId={activeModule?.id ?? null} phaseId={activePhase?.id ?? null} activeSurface={activeSurface} contextVersion={data.contextVersion} />
-    <TeacherThread client={client} sourceId={activeRuntime.sourceId} allowedShareKinds={allowedShareKinds} maxShareChars={data.course.policies?.max_shared_chars ?? 8192} onProvider={setProvider} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.some((item) => item.id === proposal.id) ? current.proposals.map((item) => item.id === proposal.id ? proposal : item) : [...current.proposals, proposal] })} onRefresh={refreshDurableData} composer={teacherComposer} onComposerChange={setTeacherComposer} recovery={recovery} enabled={teacherEnabled} lockReason={teacherLockReason} onRecovery={enterRecovery} onSharedRunPending={setSharedRunPending} sharedRunPending={sharedRunPending} onTranscriptChange={setTeacherHasTranscript} />
+    <TeacherThread client={client} sourceId={activeRuntime.sourceId} allowedShareKinds={allowedShareKinds} maxShareChars={data.course.policies?.max_shared_chars ?? 8192} captureShare={captureShare} onProvider={setProvider} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.some((item) => item.id === proposal.id) ? current.proposals.map((item) => item.id === proposal.id ? proposal : item) : [...current.proposals, proposal] })} onRefresh={refreshDurableData} composer={teacherComposer} onComposerChange={setTeacherComposer} recovery={recovery} enabled={teacherEnabled} lockReason={teacherLockReason} onRecovery={enterRecovery} onSharedRunPending={setSharedRunPending} sharedRunPending={sharedRunPending} onTranscriptChange={setTeacherHasTranscript} />
     <ProposalDrawer proposals={data.proposals} state={data.state} client={client} onRefresh={refreshDurableData} onProposal={(proposal) => setData((current) => current === null ? current : { ...current, proposals: current.proposals.map((item) => item.id === proposal.id ? proposal : item) })} drafts={proposalDrafts} onDraftsChange={setProposalDrafts} recovery={recovery} sharedRunPending={sharedRunPending} onRecovery={enterRecovery} />
     {recovery ? <ReconnectPanel hasDraft={teacherComposer.trim().length > 0 || Object.values(proposalDrafts).some((draft) => draft.trim().length > 0)} onReconnect={reconnect} /> : null}
   </LearnHeader>;

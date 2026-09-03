@@ -11,7 +11,7 @@ test('production Learner renders only the parent-selected sandboxed HTML route a
   await learn.getByRole('button', { name: 'Open Second lesson' }).click();
   const htmlReader = learn.locator('iframe[title="Second lesson"]');
   await expect(htmlReader).toHaveAttribute('sandbox', 'allow-scripts');
-  await expect(htmlReader).toHaveAttribute('src', /\/content\/html-lesson$/);
+  await expect(htmlReader).toHaveAttribute('src', /\/files\/lessons\/second\.html$/);
   expect(await learn.locator('[data-testid="learn-rail"]').evaluate((rail) => rail.scrollWidth <= rail.clientWidth)).toBe(true);
   const [htmlBox, htmlRailBox] = await Promise.all([htmlReader.boundingBox(), learn.locator('[data-testid="learn-rail"]').boundingBox()]);
   expect(htmlBox?.width).toBeLessThanOrEqual(htmlRailBox?.width ?? 0);
@@ -98,11 +98,11 @@ test('production Learner accepts a delayed HTML destination outcome only after n
 
   await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('#learn-frame');
-    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', htmlSource: `${location.origin}/content/html-lesson` }, location.origin);
+    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', htmlSource: `${location.origin}/files/lessons/second.html` }, location.origin);
   });
 
   await expect(htmlReader).toBeVisible();
-  await expect(htmlReader).toHaveAttribute('src', 'http://127.0.0.1:4173/content/html-lesson');
+  await expect(htmlReader).toHaveAttribute('src', 'http://127.0.0.1:4173/files/lessons/second.html');
   await expect(htmlReader).toHaveAttribute('sandbox', 'allow-scripts');
   expect(api.unhandledRequests ?? 0).toBe(0);
 });

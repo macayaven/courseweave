@@ -1,11 +1,10 @@
 /**
- * CourseWeave JupyterLab bridge — Task 0 walking skeleton.
+ * CourseWeave JupyterLab bridge.
  *
  * A prebuilt JupyterLab 4 extension with no React. It opens exactly one
  * sandboxed iframe hosting the CourseWeave guide rail served by the local
- * loopback CourseWeave service, keeps it in the right sidebar, and ignores
- * any postMessage whose origin is not the configured service origin
- * (design spec §12).
+ * loopback CourseWeave service, opens allowlisted course surfaces through
+ * native Jupyter APIs, and ignores untrusted child messages (design spec §12).
  */
 import {
   ILabShell,
@@ -13,10 +12,24 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 import { PageConfig } from '@jupyterlab/coreutils';
+import { IDocumentManager } from '@jupyterlab/docmanager';
+import { IEditorTracker } from '@jupyterlab/fileeditor';
+import { INotebookTracker } from '@jupyterlab/notebook';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
+import { ITerminalTracker } from '@jupyterlab/terminal';
 import { Widget } from '@lumino/widgets';
-import { parseLaunchConfiguration, type LaunchMode } from './protocol';
+import { ContextObserver, ContextPublisher } from './context';
+import { parseLaunchConfiguration } from './protocol';
 import { CourseWeaveRelayClient, RuntimeBroker, createCourseWeaveIframe } from './runtime';
+import { LabCaptureProvider } from './share';
+import {
+  CourseSurfaceFactory,
+  SurfaceRequestBroker,
+  coordinateForCoursePath,
+  parseCourseSnapshot,
+  registerCourseCommands,
+  type CourseSnapshot
+} from './surfaces';
 
 /**
  * Runtime plugin identity. JupyterLab-server derives the settings plugin ID
@@ -24,7 +37,6 @@ import { CourseWeaveRelayClient, RuntimeBroker, createCourseWeaveIframe } from '
  * `@courseweave/lab:plugin` ↔ `schemas/@courseweave/lab/plugin.json`.
  */
 const PLUGIN_ID = '@courseweave/lab:plugin';
-const OPEN_GUIDE_COMMAND = 'courseweave:open-guide';
 const GUIDE_WIDGET_ID = 'courseweave-guide';
 
 /**
@@ -112,11 +124,11 @@ function installOriginGuard(serviceOrigin: string): void {
 class CourseWeaveGuide extends Widget {
   readonly iframe: HTMLIFrameElement;
 
-  constructor(serviceOrigin: string, mode: LaunchMode) {
+  constructor(serviceOrigin: string) {
     const node = document.createElement('div');
     node.classList.add('cw-Guide');
 
-    const iframe = createCourseWeaveIframe(serviceOrigin, mode);
+    const iframe = createCourseWeaveIframe(serviceOrigin, 'learn');
     node.appendChild(iframe);
 
     super({ node });
@@ -131,13 +143,17 @@ class CourseWeaveGuide extends Widget {
 const plugin: JupyterFrontEndPlugin<void> = {
   id: PLUGIN_ID,
   description:
-    'Persistent CourseWeave guide rail: one sandboxed iframe, origin-guarded messages.',
+    'CourseWeave guide, dashboard, native course surfaces, context, and explicit Share bridge.',
   autoStart: true,
-  requires: [ILabShell],
+  requires: [ILabShell, IDocumentManager, IEditorTracker, INotebookTracker, ITerminalTracker],
   optional: [ISettingRegistry],
   activate: async (
     app: JupyterFrontEnd,
     shell: ILabShell,
+    documents: IDocumentManager,
+    editor: IEditorTracker,
+    notebook: INotebookTracker,
+    terminal: ITerminalTracker,
     registry: ISettingRegistry | null
   ): Promise<void> => {
     // Resolve the service origin BEFORE anything can create a guide: there
@@ -147,21 +163,105 @@ const plugin: JupyterFrontEndPlugin<void> = {
     const serviceOrigin = launch?.serviceOrigin ?? await resolveServiceOrigin(registry);
     const launchMode = launch?.launchMode ?? 'learn';
     const relay = launch === null ? null : new CourseWeaveRelayClient(serviceOrigin);
+    const sourceId = crypto.randomUUID();
+    const factory = new CourseSurfaceFactory({
+      shell,
+      documents,
+      commands: app.commands,
+      serviceOrigin,
+      jupyterOrigin: window.location.origin,
+      baseUrl: PageConfig.getBaseUrl()
+    });
+    let course: CourseSnapshot | null = null;
     let guide: CourseWeaveGuide | null = null;
-    let broker: RuntimeBroker | null = null;
+    let surfaceBroker: SurfaceRequestBroker | null = null;
+    let captureProvider: LabCaptureProvider | null = null;
+    let publisher: ContextPublisher | null = null;
+    let observer: ContextObserver | null = null;
+    const runtimeBrokers = new Map<Widget, RuntimeBroker>();
+
+    const showRecovery = (): void => {
+      if (guide === null || guide.isDisposed) return;
+      let status = guide.node.querySelector<HTMLElement>('[data-courseweave-recovery]');
+      if (status === null) {
+        status = document.createElement('p');
+        status.dataset.courseweaveRecovery = 'true';
+        status.setAttribute('role', 'status');
+        guide.node.appendChild(status);
+      }
+      status.textContent = 'CourseWeave backend unavailable. Retry from the CourseWeave command after restarting the service.';
+    };
+
+    const clearRecovery = (): void => {
+      guide?.node.querySelector('[data-courseweave-recovery]')?.remove();
+    };
+
+    const refreshCourse = async (): Promise<CourseSnapshot> => {
+      if (relay === null) throw new Error('Course relay unavailable.');
+      const response = await relay.getCourse();
+      if (!response.ok) throw new Error('Course relay unavailable.');
+      const next = parseCourseSnapshot(await response.json());
+      if (next === null) throw new Error('Course relay returned an invalid manifest.');
+      course = next;
+      factory.setCourse(next);
+      clearRecovery();
+      return next;
+    };
+
+    const attachRuntime = (widget: Widget, childWindow: Window): void => {
+      if (launch === null || relay === null || runtimeBrokers.has(widget)) return;
+      const runtimeBroker = new RuntimeBroker({
+        hostWindow: window,
+        childWindow,
+        serviceOrigin,
+        runtimeId: launch.runtimeId,
+        sourceId,
+        relay
+      });
+      runtimeBroker.start();
+      runtimeBrokers.set(widget, runtimeBroker);
+      widget.disposed.connect(() => {
+        runtimeBroker.dispose();
+        runtimeBrokers.delete(widget);
+      });
+    };
+
+    const observeContext = (childWindow: Window): void => {
+      if (relay === null) return;
+      if (publisher === null) {
+        publisher = new ContextPublisher({ sourceId, relay, childWindow, serviceOrigin, onRecovery: showRecovery });
+      } else {
+        publisher.setChildWindow(childWindow);
+        void publisher.retry();
+      }
+      observer?.dispose();
+      observer = new ContextObserver({
+        shell,
+        notebook,
+        editor,
+        terminal,
+        surfaceMetadata: (widget) => factory.metadataFor(widget),
+        publisher
+      });
+      observer.start();
+    };
 
     const openGuide = (): void => {
       let current = guide;
       if (current === null || current.isDisposed) {
-        current = new CourseWeaveGuide(serviceOrigin, launchMode);
+        current = new CourseWeaveGuide(serviceOrigin);
         const widget = current;
         // Clear the tracked reference when the widget is closed/disposed so
         // the command recreates the guide instead of touching a disposed
         // widget.
         widget.disposed.connect(() => {
           if (guide === widget) {
-            broker?.dispose();
-            broker = null;
+            surfaceBroker?.dispose();
+            captureProvider?.dispose();
+            observer?.dispose();
+            surfaceBroker = null;
+            captureProvider = null;
+            observer = null;
             guide = null;
           }
         });
@@ -169,28 +269,68 @@ const plugin: JupyterFrontEndPlugin<void> = {
         current.title.closable = true;
         shell.add(current, 'right', { rank: 900 });
         const childWindow = current.iframe.contentWindow;
-        if (launch !== null && relay !== null && childWindow !== null) {
-          broker = new RuntimeBroker({
+        if (childWindow !== null) {
+          attachRuntime(widget, childWindow);
+          surfaceBroker = new SurfaceRequestBroker({ hostWindow: window, childWindow, serviceOrigin, sourceId, factory });
+          surfaceBroker.start();
+          captureProvider = new LabCaptureProvider({
             hostWindow: window,
             childWindow,
             serviceOrigin,
-            runtimeId: launch.runtimeId,
-            sourceId: crypto.randomUUID(),
-            relay
+            course: () => course,
+            activeCoordinate: () => {
+              const metadata = factory.metadataFor(shell.currentWidget);
+              const explicit = metadata?.explicitModuleId !== null && metadata?.explicitModuleId !== undefined && metadata.explicitPhaseId !== null
+                ? { moduleId: metadata.explicitModuleId, phaseId: metadata.explicitPhaseId }
+                : null;
+              if (explicit !== null || course === null || shell.currentWidget === null) return explicit;
+              const activePath = (shell.currentWidget as { context?: { path?: unknown } }).context?.path;
+              return typeof activePath === 'string' ? coordinateForCoursePath(course, activePath) : null;
+            },
+            activeWidget: () => shell.currentWidget,
+            notebook,
+            editor,
+            terminal
           });
-          broker.start();
+          captureProvider.start();
+          observeContext(childWindow);
         }
       }
       shell.activateById(current.id);
     };
 
-    app.commands.addCommand(OPEN_GUIDE_COMMAND, {
-      label: 'Open CourseWeave Guide',
-      execute: openGuide
+    const openDashboard = async (): Promise<void> => {
+      try {
+        await refreshCourse();
+        factory.openDashboard();
+      } catch {
+        showRecovery();
+      }
+    };
+
+    const openAuthor = (): void => {
+      const author = factory.openAuthor();
+      const childWindow = author.node.querySelector<HTMLIFrameElement>('iframe')?.contentWindow;
+      if (childWindow !== null && childWindow !== undefined) attachRuntime(author, childWindow);
+    };
+
+    registerCourseCommands({
+      addCommand: (id, options) => app.commands.addCommand(id, options)
+    }, {
+      openGuide,
+      openDashboard,
+      openAuthor,
+      requestShare: () => openGuide()
     });
 
     installOriginGuard(serviceOrigin);
-    openGuide();
+    try {
+      await refreshCourse();
+    } catch {
+      // Runtime/guide recovery remains available while normal JupyterLab stays usable.
+    }
+    if (launchMode === 'author') openAuthor();
+    else openGuide();
   }
 };
 

@@ -43,7 +43,7 @@ export async function mountLearner(page: Page, api: MockApi): Promise<FrameLocat
     if (body === null) throw new Error('Unexpected API contract.');
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
-  await page.route(`${serviceOrigin}/content/html-lesson`, (route) => route.fulfill({ contentType: 'text/html', body: '<h1>Lesson</h1>' }));
+  await page.route(`${serviceOrigin}/files/lessons/second.html`, (route) => route.fulfill({ contentType: 'text/html', body: '<h1>Lesson</h1>' }));
   await page.route('https://video.example.test/second.mp4', (route) => route.fulfill({ contentType: 'video/mp4', body: '' }));
   await page.goto('/learn/');
   await page.evaluate(() => {
@@ -53,6 +53,7 @@ export async function mountLearner(page: Page, api: MockApi): Promise<FrameLocat
     frame.title = 'CourseWeave Learn host';
     frame.style.width = '320px';
     frame.style.height = '800px';
+    frame.referrerPolicy = 'origin';
     frame.src = '/learn/';
     window.addEventListener('message', (event) => {
       const data = event.data as Record<string, unknown>;
@@ -63,7 +64,7 @@ export async function mountLearner(page: Page, api: MockApi): Promise<FrameLocat
       if (data?.type !== 'courseweave.open-surface.v1' || event.source === window) return;
       window.dispatchEvent(new CustomEvent('courseweave-test-navigation', { detail: data }));
       if (document.documentElement.dataset.deferReaderOutcome === 'true') return;
-      const htmlSource = data.surfaceId === 'html-lesson' ? `${window.location.origin}/content/html-lesson` : null;
+      const htmlSource = data.surfaceId === 'html-lesson' ? `${window.location.origin}/files/lessons/second.html` : data.surfaceId === 'video-lesson' ? 'https://video.example.test/second.mp4' : null;
       (event.source as Window).postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: data.moduleId, phaseId: data.phaseId, surfaceId: data.surfaceId, htmlSource }, window.location.origin);
     });
     document.body.append(frame);

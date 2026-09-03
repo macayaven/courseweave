@@ -118,7 +118,7 @@ describe('learner shell header', () => {
     expect(fetch.mock.calls.filter(([url, init]) => String(url).includes('/proposal-2/edit') && (init as RequestInit | undefined)?.method === 'POST')).toHaveLength(1);
 
     const contextChanged = new MessageEvent('message', { data: { type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, source: window.parent });
-    Object.defineProperty(contextChanged, 'origin', { value: 'https://courseweave.test' });
+    Object.defineProperty(contextChanged, 'origin', { value: 'https://lab.test' });
     act(() => window.dispatchEvent(contextChanged));
     await vi.waitFor(() => expect(fetch.mock.calls.filter(([url]) => String(url).includes('/context?'))).toHaveLength(2));
   });
@@ -140,7 +140,7 @@ describe('learner shell header', () => {
     fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'only phase A' } });
 
     const changed = new MessageEvent('message', { data: { type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, source: window.parent });
-    Object.defineProperty(changed, 'origin', { value: 'https://courseweave.test' });
+    Object.defineProperty(changed, 'origin', { value: 'https://lab.test' });
     act(() => window.dispatchEvent(changed));
 
     expect(await screen.findByRole('heading', { name: 'predict-b', level: 2 })).toBeInTheDocument();
@@ -178,7 +178,7 @@ describe('learner shell header', () => {
     fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'unsent question' } });
     fireEvent.change(screen.getByLabelText('Edit summary'), { target: { value: 'unsent edit' } });
     const changed = new MessageEvent('message', { data: { type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, source: window.parent });
-    Object.defineProperty(changed, 'origin', { value: 'https://courseweave.test' });
+    Object.defineProperty(changed, 'origin', { value: 'https://lab.test' });
     act(() => window.dispatchEvent(changed));
     expect(await screen.findByRole('heading', { name: 'Reconnect to CourseWeave' })).toBeInTheDocument();
     expect(screen.getByText('Your draft is unsent.')).toBeInTheDocument();
@@ -210,7 +210,7 @@ describe('learner shell header', () => {
     fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'survives rebootstrap' } });
     fireEvent.change(screen.getByLabelText('Edit summary'), { target: { value: 'orphan-safe edit' } });
     const changed = new MessageEvent('message', { data: { type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, source: window.parent });
-    Object.defineProperty(changed, 'origin', { value: 'https://courseweave.test' });
+    Object.defineProperty(changed, 'origin', { value: 'https://lab.test' });
     act(() => window.dispatchEvent(changed));
     await screen.findByRole('heading', { name: 'Reconnect to CourseWeave' });
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
@@ -234,7 +234,7 @@ describe('learner shell header', () => {
     dispatchRuntime();
     await screen.findByText('Teacher status unknown');
     const changed = new MessageEvent('message', { data: { type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, source: window.parent });
-    Object.defineProperty(changed, 'origin', { value: 'https://courseweave.test' });
+    Object.defineProperty(changed, 'origin', { value: 'https://lab.test' });
     act(() => window.dispatchEvent(changed));
     await screen.findByRole('heading', { name: 'Reconnect to CourseWeave' });
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));

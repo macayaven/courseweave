@@ -41,6 +41,44 @@ function boundedNonBlank(value: unknown, maxLength: number): value is string {
     && value.trim() === value;
 }
 
+export interface OpenSurfaceRequest {
+  type: 'courseweave.open-surface.v1';
+  moduleId: string;
+  phaseId: string;
+  surfaceId: string;
+}
+
+export type CaptureKind = 'selection' | 'cell' | 'output';
+
+export interface CaptureRequest {
+  type: 'courseweave.share.capture.request.v1';
+  requestId: string;
+  kind: CaptureKind;
+  maxChars: number;
+}
+
+export function parseOpenSurfaceRequest(value: unknown): OpenSurfaceRequest | null {
+  if (!exactObject(value, ['moduleId', 'phaseId', 'surfaceId', 'type'])) return null;
+  if (value.type !== 'courseweave.open-surface.v1') return null;
+  for (const key of ['moduleId', 'phaseId', 'surfaceId'] as const) {
+    if (!boundedNonBlank(value[key], 240)) return null;
+  }
+  return value as unknown as OpenSurfaceRequest;
+}
+
+export function parseCaptureRequest(value: unknown): CaptureRequest | null {
+  if (!exactObject(value, ['kind', 'maxChars', 'requestId', 'type'])) return null;
+  if (
+    value.type !== 'courseweave.share.capture.request.v1'
+    || !boundedNonBlank(value.requestId, 240)
+    || (value.kind !== 'selection' && value.kind !== 'cell' && value.kind !== 'output')
+    || !Number.isInteger(value.maxChars)
+    || (value.maxChars as number) < 1
+    || (value.maxChars as number) > 131072
+  ) return null;
+  return value as unknown as CaptureRequest;
+}
+
 export function parseRuntimeRequest(value: unknown): { type: 'courseweave.runtime.request.v1' } | null {
   return exactObject(value, ['type']) && value.type === 'courseweave.runtime.request.v1'
     ? { type: 'courseweave.runtime.request.v1' }

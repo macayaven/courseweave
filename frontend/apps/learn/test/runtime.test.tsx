@@ -2,7 +2,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { expectedParentOrigin } from '@courseweave/ui/parent-origin';
-import { useRuntimeBootstrap } from '../src/runtime';
+import { ParentCaptureRequester, useRuntimeBootstrap } from '../src/runtime';
 
 const VALID_RUNTIME = {
   type: 'courseweave.runtime.v1',
@@ -117,5 +117,60 @@ describe('Learn parent-origin trust bootstrap', () => {
     expect(JSON.stringify(history.state)).not.toContain(VALID_RUNTIME.capabilityToken);
     expect(localStorage.getItem('capabilityToken')).toBeNull();
     expect(sessionStorage.getItem('capabilityToken')).toBeNull();
+  });
+
+  it('accepts metadata-free context invalidation only from the exact Jupyter parent', () => {
+    setReferrer('https://lab.test/');
+    const view = renderHook(() => useRuntimeBootstrap());
+    dispatchRuntime(VALID_RUNTIME);
+    dispatchRuntime({ type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, 'https://courseweave.test');
+    dispatchRuntime({ type: 'courseweave.context.changed.v1', sourceId: 'notebook-a', active_path: 'secret.py' }, 'https://lab.test');
+    dispatchRuntime({ type: 'courseweave.context.changed.v1', sourceId: 'wrong-source' }, 'https://lab.test');
+    dispatchRuntime({ type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, 'https://lab.test', {} as MessageEventSource);
+    expect(view.result.current.contextVersion).toBe(0);
+    dispatchRuntime({ type: 'courseweave.context.changed.v1', sourceId: 'notebook-a' }, 'https://lab.test');
+    expect(view.result.current.contextVersion).toBe(1);
+  });
+});
+
+describe('ParentCaptureRequester', () => {
+  it('posts one exact capture request to Jupyter and accepts only its matching result', async () => {
+    const parent = { postMessage: vi.fn() } as unknown as Window;
+    const requester = new ParentCaptureRequester({
+      runtime: { serviceOrigin: 'https://courseweave.test', capabilityToken: 'token', sourceId: 'source-a', expectedParentOrigin: 'https://lab.test' },
+      hostWindow: window,
+      parentWindow: parent,
+      requestId: () => 'request-a'
+    });
+    const captured = requester.request('selection', 4);
+    expect(parent.postMessage).toHaveBeenCalledWith({ type: 'courseweave.share.capture.request.v1', requestId: 'request-a', kind: 'selection', maxChars: 4 }, 'https://lab.test');
+    dispatchRuntime({ type: 'courseweave.share.capture.result.v1', requestId: 'request-a', kind: 'selection', label: 'file.py', content: 'safe' }, 'https://courseweave.test', parent);
+    dispatchRuntime({ type: 'courseweave.share.capture.result.v1', requestId: 'wrong', kind: 'selection', label: 'file.py', content: 'safe' }, 'https://lab.test', parent);
+    dispatchRuntime({ type: 'courseweave.share.capture.result.v1', requestId: 'request-a', kind: 'cell', label: 'file.py', content: 'safe' }, 'https://lab.test', parent);
+    let settled = false;
+    void captured.finally(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    dispatchRuntime({ type: 'courseweave.share.capture.result.v1', requestId: 'request-a', kind: 'selection', label: 'file.py', content: 'safe' }, 'https://lab.test', parent);
+    await expect(captured).resolves.toEqual({ kind: 'selection', label: 'file.py', content: 'safe' });
+    requester.dispose();
+  });
+
+  it('clears rejected, cancelled, duplicate, and disposed requests without retaining content', async () => {
+    const parent = { postMessage: vi.fn() } as unknown as Window;
+    let id = 0;
+    const requester = new ParentCaptureRequester({ runtime: { serviceOrigin: 'https://courseweave.test', capabilityToken: 'token', sourceId: 'source-a', expectedParentOrigin: 'https://lab.test' }, hostWindow: window, parentWindow: parent, requestId: () => `request-${++id}` });
+    const rejected = requester.request('cell', 4);
+    dispatchRuntime({ type: 'courseweave.share.capture.rejected.v1', requestId: 'request-1', code: 'too_large' }, 'https://lab.test', parent);
+    await expect(rejected).rejects.toThrow('too_large');
+    dispatchRuntime({ type: 'courseweave.share.capture.result.v1', requestId: 'request-1', kind: 'cell', label: 'x', content: 'late-secret' }, 'https://lab.test', parent);
+
+    const cancelled = requester.request('output', 4);
+    requester.cancel();
+    await expect(cancelled).rejects.toThrow('cancelled');
+    const disposed = requester.request('selection', 4);
+    requester.dispose();
+    await expect(disposed).rejects.toThrow('disposed');
+    expect(JSON.stringify(requester)).not.toContain('late-secret');
   });
 });

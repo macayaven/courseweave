@@ -92,13 +92,13 @@ describe('TeacherThread', () => {
   it('shares only after explicit confirmation and clears the dialog on a failed guide without reflecting content', async () => {
     const share = vi.fn().mockResolvedValue(undefined);
     const postGuide = vi.fn().mockRejectedValue({ code: 'provider_error' });
-    render(<TeacherThread client={{ postGuide, share, createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['selection']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    render(<TeacherThread client={{ postGuide, share, createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['text']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'ask safely' } });
     const trigger = screen.getByRole('button', { name: 'Share before asking' });
     fireEvent.click(trigger);
     fireEvent.change(screen.getByLabelText('Share content'), { target: { value: 'private excerpt' } });
     fireEvent.click(screen.getByRole('button', { name: 'Share and ask' }));
-    await vi.waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({ run_id: expect.any(String), kind: 'selection', content: 'private excerpt', source_id: 'source-a' }), expect.any(AbortSignal)));
+    await vi.waitFor(() => expect(share).toHaveBeenCalledWith(expect.objectContaining({ run_id: expect.any(String), kind: 'text', content: 'private excerpt', source_id: 'source-a' }), expect.any(AbortSignal)));
     expect(await screen.findByText('Teacher unavailable')).toBeInTheDocument();
     expect(screen.queryByLabelText('Share content')).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
@@ -127,7 +127,7 @@ describe('TeacherThread', () => {
   it('restores focus to the enabled composer immediately after a successful Share and guide settlement', async () => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('00000000-0000-4000-8000-000000000001').mockReturnValueOnce('00000000-0000-4000-8000-000000000002').mockReturnValueOnce('00000000-0000-4000-8000-000000000003');
     const wire = 'data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\ndata: {"type":"RUN_FINISHED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\n';
-    render(<TeacherThread client={{ share: vi.fn().mockResolvedValue(undefined), postGuide: vi.fn().mockResolvedValue(new Response(wire)), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['selection']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    render(<TeacherThread client={{ share: vi.fn().mockResolvedValue(undefined), postGuide: vi.fn().mockResolvedValue(new Response(wire)), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['text']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'ask safely' } });
     const trigger = screen.getByRole('button', { name: 'Share before asking' });
     fireEvent.click(trigger);
@@ -145,7 +145,7 @@ describe('TeacherThread', () => {
   it('keeps composer focus through the next message after a successful Share settles', async () => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce('00000000-0000-4000-8000-000000000001').mockReturnValueOnce('00000000-0000-4000-8000-000000000002').mockReturnValueOnce('00000000-0000-4000-8000-000000000003');
     const wire = 'data: {"type":"RUN_STARTED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\ndata: {"type":"RUN_FINISHED","threadId":"00000000-0000-4000-8000-000000000001","runId":"00000000-0000-4000-8000-000000000002"}\n\n';
-    render(<TeacherThread client={{ share: vi.fn().mockResolvedValue(undefined), postGuide: vi.fn().mockResolvedValue(new Response(wire)), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['selection']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    render(<TeacherThread client={{ share: vi.fn().mockResolvedValue(undefined), postGuide: vi.fn().mockResolvedValue(new Response(wire)), createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['text']} maxShareChars={20} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'ask safely' } });
     fireEvent.click(screen.getByRole('button', { name: 'Share before asking' }));
     fireEvent.change(screen.getByLabelText('Share content'), { target: { value: 'excerpt' } });
@@ -161,7 +161,7 @@ describe('TeacherThread', () => {
   it('clears deferred Share restoration while recovering', async () => {
     let resolveGuide: ((response: Response) => void) | undefined;
     const postGuide = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => { resolveGuide = resolve; }));
-    const common = { client: { share: vi.fn().mockResolvedValue(undefined), postGuide, createProposal: vi.fn() }, sourceId: 'source-a', allowedShareKinds: ['selection'] as Array<'selection'>, maxShareChars: 20, onProvider: vi.fn(), onProposal: vi.fn(), onRefresh: vi.fn() };
+    const common = { client: { share: vi.fn().mockResolvedValue(undefined), postGuide, createProposal: vi.fn() }, sourceId: 'source-a', allowedShareKinds: ['text'] as Array<'text'>, maxShareChars: 20, onProvider: vi.fn(), onProposal: vi.fn(), onRefresh: vi.fn() };
     const { rerender } = render(<TeacherThread {...common} />);
     fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'ask safely' } });
     const trigger = screen.getByRole('button', { name: 'Share before asking' });
@@ -176,6 +176,45 @@ describe('TeacherThread', () => {
     await vi.waitFor(() => expect(composer).toHaveFocus());
     expect(trigger).not.toHaveFocus();
     await act(async () => resolveGuide?.(new Response('')));
+  });
+
+  it('captures only after disclosure confirmation and binds one excerpt to one Share then Guide run ID', async () => {
+    const order: string[] = [];
+    const captureShare = vi.fn().mockResolvedValue({ kind: 'selection' as const, content: 'safe', label: 'main.py' });
+    const share = vi.fn().mockImplementation(async () => { order.push('share'); });
+    const postGuide = vi.fn().mockImplementation(async (body: { threadId: string; runId: string }) => {
+      order.push('guide');
+      return new Response(`data: {"type":"RUN_STARTED","threadId":"${body.threadId}","runId":"${body.runId}"}\n\ndata: {"type":"RUN_FINISHED","threadId":"${body.threadId}","runId":"${body.runId}"}\n\n`);
+    });
+    render(<TeacherThread client={{ share, postGuide, createProposal: vi.fn() }} sourceId="source-a" allowedShareKinds={['selection']} maxShareChars={4} captureShare={captureShare} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'use excerpt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Share before asking' }));
+    expect(captureShare).not.toHaveBeenCalled();
+    expect(screen.getByText(/one run only/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Share and ask' }));
+    await vi.waitFor(() => expect(postGuide).toHaveBeenCalledOnce());
+    expect(order).toEqual(['share', 'guide']);
+    expect(share.mock.calls[0]![0].run_id).toBe(postGuide.mock.calls[0]![0].runId);
+    expect(share).toHaveBeenCalledWith(expect.objectContaining({ kind: 'selection', content: 'safe', label: 'main.py', source_id: 'source-a' }), expect.any(AbortSignal));
+  });
+
+  it('never calls Share or Guide after capture rejection and never calls Guide after Share API failure', async () => {
+    const captureShare = vi.fn().mockRejectedValue(new Error('too_large'));
+    const share = vi.fn().mockRejectedValue(new Error('offline'));
+    const postGuide = vi.fn();
+    const common = { client: { share, postGuide, createProposal: vi.fn() }, sourceId: 'source-a', allowedShareKinds: ['selection'] as Array<'selection'>, maxShareChars: 4, onProvider: vi.fn(), onProposal: vi.fn(), onRefresh: vi.fn() };
+    const view = render(<TeacherThread {...common} captureShare={captureShare} />);
+    fireEvent.change(screen.getByLabelText('Ask the teacher'), { target: { value: 'ask' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Share before asking' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Share and ask' }));
+    expect(await screen.findByText('Could not capture that content. Nothing was shared.')).toBeInTheDocument();
+    expect(share).not.toHaveBeenCalled();
+    expect(postGuide).not.toHaveBeenCalled();
+
+    view.rerender(<TeacherThread {...common} captureShare={vi.fn().mockResolvedValue({ kind: 'selection' as const, content: 'safe' })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Share and ask' }));
+    await vi.waitFor(() => expect(share).toHaveBeenCalledOnce());
+    expect(postGuide).not.toHaveBeenCalled();
   });
 
   it('renders each assistant delta before the terminal event and retains it after RUN_ERROR', async () => {
