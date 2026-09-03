@@ -83,6 +83,13 @@ export declare const COURSEWEAVE_COMMANDS: {
     readonly shareCell: "courseweave:share-cell";
     readonly shareOutput: "courseweave:share-output";
 };
+export declare const COURSEWEAVE_PALETTE_CATEGORY = "CourseWeave";
+export declare function registerCoursePalette(palette: {
+    addItem(options: {
+        command: string;
+        category: string;
+    }): unknown;
+}): void;
 export declare function registerCourseCommands(commands: {
     addCommand(id: string, options: {
         label: string;

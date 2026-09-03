@@ -71,6 +71,15 @@ test('owned detached process-group cleanup waits for its supervisor and descenda
   }
 });
 
+test('owned workspace cleanup still runs after browser cleanup fails and reports both failures', async () => {
+  const events: string[] = [];
+  await expect(installedWheelTestOnly.closeBrowserAndWorkspace(
+    async () => { events.push('browser'); throw new Error('browser fault'); },
+    async () => { events.push('workspace'); throw new Error('workspace fault'); },
+  )).rejects.toThrow('Browser and owned workspace cleanup failed.');
+  expect(events).toEqual(['browser', 'workspace']);
+});
+
 test('fresh installed wheel opens an authenticated Learn workspace without Node in its runtime PATH', async ({ browser, request }) => {
   const workspace = await launchInstalledWorkspace('learn');
   const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
@@ -220,8 +229,10 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     const unexpectedConsoleErrors = consoleErrors.filter((message) => !expectedConsoleErrors(message));
     expect(unexpectedConsoleErrors).toEqual([]);
   } finally {
-    await context.close();
-    await workspace.close();
+    await installedWheelTestOnly.closeBrowserAndWorkspace(
+      () => context.close(),
+      () => workspace.close(),
+    );
   }
 });
 
@@ -243,7 +254,9 @@ test('fresh installed wheel opens Author without materializing an empty course b
       'courseweave.json',
     ]);
   } finally {
-    await page.close();
-    await workspace.close();
+    await installedWheelTestOnly.closeBrowserAndWorkspace(
+      () => page.close(),
+      () => workspace.close(),
+    );
   }
 });

@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@jupyterlab/application": "~4.6.3",
+    "@jupyterlab/apputils": "~4.6.3",
     "@jupyterlab/coreutils": "~6.6.3",
     "@jupyterlab/docmanager": "~4.6.3",
     "@jupyterlab/fileeditor": "~4.6.3",
@@ -40,7 +41,7 @@
     "webpackConfig": "webpack.config.cjs",
     "outputDir": "../../../src/courseweave/labextension",
     "_build": {
-      "load": "static/remoteEntry.e339005fd991b255.js",
+      "load": "static/remoteEntry.2be78dd72912862a.js",
       "extension": "./extension"
     }
   }

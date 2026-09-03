@@ -239,8 +239,23 @@ async function cleanupAfterFailure(
   throw failure;
 }
 
+async function closeBrowserAndWorkspace(
+  closeBrowser: () => Promise<void>,
+  closeWorkspace: () => Promise<void>,
+): Promise<void> {
+  let browserFailed = false;
+  let workspaceFailed = false;
+  try { await closeBrowser(); } catch { browserFailed = true; }
+  try { await closeWorkspace(); } catch { workspaceFailed = true; }
+  if (browserFailed && workspaceFailed) {
+    throw new Error('Browser and owned workspace cleanup failed.');
+  }
+  if (workspaceFailed) throw new Error('Owned workspace cleanup failed.');
+  if (browserFailed) throw new Error('Browser cleanup failed.');
+}
+
 /** Focused failure-path probes use the production cleanup sequence. */
-export const installedWheelTestOnly = { cleanupAfterFailure, cleanupOwned, stop };
+export const installedWheelTestOnly = { cleanupAfterFailure, cleanupOwned, closeBrowserAndWorkspace, stop };
 
 export async function launchInstalledWorkspace(mode: LaunchMode, options: { emptyCourse?: boolean } = {}) {
   const owned = await mkdtemp(join(tmpdir(), 'courseweave-installed-wheel-'));
