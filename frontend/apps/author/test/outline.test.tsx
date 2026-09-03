@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useReducer } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AuthorManifest } from '@courseweave/ui';
-import { createDraft, draftReducer, type AuthorDocumentState } from '../src/draft';
+import { createDraft, draftReducer, projectDraft, type AuthorDocumentState } from '../src/draft';
+import { Inspector } from '../src/inspector';
 import { Outline } from '../src/outline';
 
 const manifest: AuthorManifest = {
@@ -17,6 +18,11 @@ const manifest: AuthorManifest = {
 function Harness({ course = manifest }: { course?: AuthorManifest }) {
   const [state, dispatch] = useReducer(draftReducer, { draft: createDraft(course), selection: { type: 'course' }, validation: 'valid', saved: course } satisfies AuthorDocumentState);
   return <><Outline state={state} dispatch={dispatch} /><output>{state.draft.modules.map((module) => module.id).join(',')}</output></>;
+}
+
+function EditorHarness() {
+  const [state, dispatch] = useReducer(draftReducer, { draft: createDraft(manifest), selection: { type: 'course' }, validation: 'valid', saved: manifest } satisfies AuthorDocumentState);
+  return <><Outline state={state} dispatch={dispatch} /><Inspector state={state} dispatch={dispatch} /><output>{JSON.stringify(projectDraft(state.draft))}</output></>;
 }
 
 describe('Outline', () => {
@@ -66,6 +72,30 @@ describe('Outline', () => {
     expect(screen.getByRole('button', { name: 'Select module First' })).toHaveFocus();
     expect(screen.getByRole('button', { name: 'Add phase' })).toBeInTheDocument();
   });
+
+  it('returns from an unsaved entity edit to the Course inspector through an accessible local selection', () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    render(<EditorHarness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Select phase Read' }));
+    fireEvent.change(screen.getByLabelText('Phase title'), { target: { value: 'Edited read' } });
+    const course = screen.getByRole('button', { name: 'Select course Course' });
+    course.focus();
+    expect(course).toHaveFocus();
+    expect(course).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(course);
+    expect(course).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.change(screen.getByLabelText('Course title'), { target: { value: 'Edited course' } });
+    fireEvent.change(screen.getByLabelText('Max shared characters'), { target: { value: '200' } });
+    const draft = JSON.parse(document.querySelector('output')?.textContent ?? '') as AuthorManifest;
+    expect(draft.title).toBe('Edited course');
+    expect(draft.policies.max_shared_chars).toBe(200);
+    expect(draft.modules[0]!.phases[0]!.title).toBe('Edited read');
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});

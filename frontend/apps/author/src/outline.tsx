@@ -23,7 +23,8 @@ function ModuleStartWizard({ dispatch, close }: { dispatch: Dispatch<DraftAction
 }
 
 function selected(selection: DraftSelection, key: string): boolean {
-  return (selection.type === 'module' && selection.moduleKey === key)
+  return (key === 'course' && selection.type === 'course')
+    || (selection.type === 'module' && selection.moduleKey === key)
     || (selection.type === 'phase' && selection.phaseKey === key)
     || (selection.type === 'surface' && selection.surfaceKey === key);
 }
@@ -86,6 +87,7 @@ export function Outline({ state, dispatch }: OutlineProps) {
   }, [state.focusKey]);
   return <section aria-label="Outline" data-outline>
     <h2>Outline</h2>
+    <SelectButton label={`Select course ${state.draft.title || 'unnamed'}`} itemKey="course" itemKind="course" selection={state.selection} dispatch={() => dispatch({ type: 'select', selection: { type: 'course' } })} />
     <Button type="button" onClick={() => setCreating(true)}>Add module</Button>
     {creating ? <ModuleStartWizard dispatch={dispatch} close={() => setCreating(false)} /> : null}
     <ol>{state.draft.modules.map((module) => <ModuleRow key={module.clientKey} module={module} state={state} dispatch={dispatch} />)}</ol>
