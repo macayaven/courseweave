@@ -88,6 +88,9 @@ importers:
       '@jupyterlab/application':
         specifier: ~4.6.3
         version: 4.6.3(react@18.3.1)
+      '@jupyterlab/apputils':
+        specifier: ~4.6.3
+        version: 4.6.10
       '@jupyterlab/coreutils':
         specifier: ~6.6.3
         version: 6.6.3
@@ -308,6 +311,9 @@ packages:
 
   '@jupyterlab/application@4.6.3':
     resolution: {integrity: sha512-/udXVkl7mL6k2IO+NmF5nbdEyKBmWlWad7kBvbR66l8xcr10cVLU1yRwngpdIHrGKlDFfV4p6BNUVDY0KZWCAQ==}
+
+  '@jupyterlab/apputils@4.6.10':
+    resolution: {integrity: sha512-CSU2SHr++/vx6HLlMVmyxxDQiVMBTnE3s0jbpCLcpQZx8QAzaA5yEtgs5qu8cnE0l9iL582nTFj4SJGtP9GUvg==}
 
   '@jupyterlab/apputils@4.7.3':
     resolution: {integrity: sha512-ezgIa7xE7PsPi5s3xhOY2QsfGyDcn/0KBHBm2M+jKKs79eh6Au9CEyfJ+vmZoquroEn2JVSNI9k/5LE8sK0wpA==}
@@ -2756,6 +2762,33 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - react
+      - utf-8-validate
+
+  '@jupyterlab/apputils@4.6.10':
+    dependencies:
+      '@jupyterlab/coreutils': 6.6.3
+      '@jupyterlab/observables': 5.6.3
+      '@jupyterlab/rendermime-interfaces': 3.14.3
+      '@jupyterlab/services': 7.6.3(react@18.3.1)
+      '@jupyterlab/settingregistry': 4.6.3(react@18.3.1)
+      '@jupyterlab/statedb': 4.6.3
+      '@jupyterlab/statusbar': 4.6.3
+      '@jupyterlab/translation': 4.6.3(react@18.3.1)
+      '@jupyterlab/ui-components': 4.6.3(react@18.3.1)
+      '@lumino/algorithm': 2.0.5
+      '@lumino/commands': 2.3.4
+      '@lumino/coreutils': 2.2.3
+      '@lumino/disposable': 2.1.6
+      '@lumino/domutils': 2.0.5
+      '@lumino/messaging': 2.0.5
+      '@lumino/signaling': 2.1.6
+      '@lumino/virtualdom': 2.0.5
+      '@lumino/widgets': 2.8.0
+      '@types/react': 18.3.31
+      react: 18.3.1
+      sanitize-html: 2.12.1
+    transitivePeerDependencies:
+      - bufferutil
       - utf-8-validate
 
   '@jupyterlab/apputils@4.7.3':

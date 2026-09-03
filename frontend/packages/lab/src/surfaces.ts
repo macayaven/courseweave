@@ -273,6 +273,19 @@ export const COURSEWEAVE_COMMANDS = {
   shareOutput: 'courseweave:share-output'
 } as const;
 
+export const COURSEWEAVE_PALETTE_CATEGORY = 'CourseWeave';
+
+export function registerCoursePalette(
+  palette: { addItem(options: { command: string; category: string }): unknown }
+): void {
+  const registered = new Set<string>();
+  for (const command of Object.values(COURSEWEAVE_COMMANDS)) {
+    if (registered.has(command)) continue;
+    registered.add(command);
+    palette.addItem({ command, category: COURSEWEAVE_PALETTE_CATEGORY });
+  }
+}
+
 export function registerCourseCommands(
   commands: { addCommand(id: string, options: { label: string; execute(): unknown }): void },
   actions: { openGuide(): unknown; openDashboard(): unknown; openAuthor(): unknown; requestShare(kind: 'selection' | 'cell' | 'output'): unknown }

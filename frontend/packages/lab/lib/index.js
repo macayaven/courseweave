@@ -9,6 +9,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
  * native Jupyter APIs, and ignores untrusted child messages (design spec §12).
  */
 const application_1 = require("@jupyterlab/application");
+const apputils_1 = require("@jupyterlab/apputils");
 const coreutils_1 = require("@jupyterlab/coreutils");
 const docmanager_1 = require("@jupyterlab/docmanager");
 const fileeditor_1 = require("@jupyterlab/fileeditor");
@@ -115,9 +116,9 @@ const plugin = {
     id: PLUGIN_ID,
     description: 'CourseWeave guide, dashboard, native course surfaces, context, and explicit Share bridge.',
     autoStart: true,
-    requires: [application_1.ILabShell, docmanager_1.IDocumentManager, fileeditor_1.IEditorTracker, notebook_1.INotebookTracker, terminal_1.ITerminalTracker],
+    requires: [application_1.ILabShell, apputils_1.ICommandPalette, docmanager_1.IDocumentManager, fileeditor_1.IEditorTracker, notebook_1.INotebookTracker, terminal_1.ITerminalTracker],
     optional: [settingregistry_1.ISettingRegistry],
-    activate: async (app, shell, documents, editor, notebook, terminal, registry) => {
+    activate: async (app, shell, palette, documents, editor, notebook, terminal, registry) => {
         // Resolve the service origin BEFORE anything can create a guide: there
         // must be no window in which the command would open a default-origin
         // guide while a custom origin is still resolving.
@@ -290,6 +291,7 @@ const plugin = {
             openAuthor,
             requestShare: () => openGuide()
         });
+        (0, surfaces_1.registerCoursePalette)(palette);
         installOriginGuard(serviceOrigin);
         try {
             await refreshCourse();

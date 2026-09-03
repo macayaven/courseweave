@@ -1,10 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SurfaceRequestBroker = exports.CourseSurfaceFactory = exports.COURSEWEAVE_COMMANDS = void 0;
+exports.SurfaceRequestBroker = exports.CourseSurfaceFactory = exports.COURSEWEAVE_PALETTE_CATEGORY = exports.COURSEWEAVE_COMMANDS = void 0;
 exports.parseCourseSnapshot = parseCourseSnapshot;
 exports.localReaderUrl = localReaderUrl;
 exports.canonicalJupyterBaseUrl = canonicalJupyterBaseUrl;
 exports.coordinateForCoursePath = coordinateForCoursePath;
+exports.registerCoursePalette = registerCoursePalette;
 exports.registerCourseCommands = registerCourseCommands;
 const widgets_1 = require("@lumino/widgets");
 const protocol_1 = require("./protocol");
@@ -200,6 +201,16 @@ exports.COURSEWEAVE_COMMANDS = {
     shareCell: 'courseweave:share-cell',
     shareOutput: 'courseweave:share-output'
 };
+exports.COURSEWEAVE_PALETTE_CATEGORY = 'CourseWeave';
+function registerCoursePalette(palette) {
+    const registered = new Set();
+    for (const command of Object.values(exports.COURSEWEAVE_COMMANDS)) {
+        if (registered.has(command))
+            continue;
+        registered.add(command);
+        palette.addItem({ command, category: exports.COURSEWEAVE_PALETTE_CATEGORY });
+    }
+}
 function registerCourseCommands(commands, actions) {
     commands.addCommand(exports.COURSEWEAVE_COMMANDS.openGuide, { label: 'Open CourseWeave Guide', execute: actions.openGuide });
     commands.addCommand(exports.COURSEWEAVE_COMMANDS.openDashboard, { label: 'Open CourseWeave Dashboard', execute: actions.openDashboard });
