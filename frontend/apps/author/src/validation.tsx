@@ -30,9 +30,11 @@ function controlFor(pointer: string): HTMLElement | null {
 export function ValidationSummary({
   issues,
   onFocusIssues,
+  linkVersion,
 }: {
   issues: readonly ValidationIssue[];
   onFocusIssues?(issues: readonly ValidationIssue[]): boolean;
+  linkVersion?: unknown;
 }) {
   const summary = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -47,7 +49,7 @@ export function ValidationSummary({
     }
     return () =>
       touched.forEach((control) => control.removeAttribute("aria-describedby"));
-  }, [issues]);
+  }, [issues, linkVersion]);
   if (issues.length === 0) return null;
   const focusFirst = () => {
     if (onFocusIssues?.(issues)) return;

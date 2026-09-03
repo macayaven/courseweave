@@ -255,6 +255,8 @@ function AuthorEditor({
   const epoch = `${draftGeneration}:${connectionEpoch}`;
   const latestEpoch = useRef(epoch);
   latestEpoch.current = epoch;
+  const currentState = useRef(state);
+  currentState.current = state;
   const dirty = isDraftDirty(state.draft, state.saved);
   useBeforeUnload(dirty);
   useEffect(() => {
@@ -286,10 +288,10 @@ function AuthorEditor({
   }, []);
   const focusIssues = useCallback((all: readonly ValidationIssue[]) => {
     const issue = all.find(
-      (candidate) => selectionForPointer(state, candidate.path) !== null,
+      (candidate) => selectionForPointer(currentState.current, candidate.path) !== null,
     );
     if (!issue) return false;
-    const selection = selectionForPointer(state, issue.path);
+    const selection = selectionForPointer(currentState.current, issue.path);
     if (selection === null) return false;
     setState((current) => {
       const next = selectionForPointer(current, issue.path);
@@ -414,6 +416,7 @@ function AuthorEditor({
         <ValidationSummary
           issues={structural.issues}
           onFocusIssues={focusIssues}
+          linkVersion={state.selection}
         />
       </section>
       <AuthorPreview
