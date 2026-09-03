@@ -34,6 +34,7 @@ JUPYTER_AUTH_SENTINEL = "jupyter-auth-contract-sentinel"
 COURSEWEAVE_SENTINEL = "courseweave-capability-sentinel"
 RUNTIME_ID = "runtime-contract-id"
 SERVICE_URL = "http://127.0.0.1:8765"
+VALID_COURSE_ETAG = f'"{"a" * 64}"'
 
 
 def valid_environment() -> dict[str, str]:
@@ -249,7 +250,9 @@ class _FakeFetcher:
     ) -> None:
         self.status = status
         self.body = body
-        self.headers = HTTPHeaders(headers or {"Content-Type": "application/json"})
+        self.headers = HTTPHeaders(
+            headers if headers is not None else {"Content-Type": "application/json"}
+        )
         self.error = None
 
     async def fetch(
@@ -344,14 +347,14 @@ class TestCourseWeaveJupyterHandlers(AsyncHTTPTestCase):
         self.fetcher.respond(
             200,
             json.dumps(course).encode(),
-            {"Content-Type": "application/json", "ETag": '"course-etag"'},
+            {"Content-Type": "application/json", "ETag": VALID_COURSE_ETAG},
         )
         response = self.fetch(
             "/base/courseweave/course", headers=self.auth_headers
         )
         assert response.code == 200
         assert json.loads(response.body) == course
-        assert response.headers["ETag"] == '"course-etag"'
+        assert response.headers["ETag"] == VALID_COURSE_ETAG
         assert response.headers["Cache-Control"] == "no-store"
         assert "Access-Control-Allow-Origin" not in response.headers
         assert len(self.fetcher.requests) == 1
@@ -365,6 +368,126 @@ class TestCourseWeaveJupyterHandlers(AsyncHTTPTestCase):
         assert self.fetch(
             "/base/courseweave/course", method="POST", headers=self.auth_headers, body="{}"
         ).code == 405
+
+    def test_course_relay_accepts_empty_draft_etag(self) -> None:
+        self.fetcher.respond(
+            200,
+            b'{"schema_version":1,"modules":[]}',
+            {"Content-Type": "application/json", "ETag": '""'},
+        )
+        response = self.fetch("/base/courseweave/course", headers=self.auth_headers)
+        assert response.code == 200
+        assert response.headers["ETag"] == '""'
+
+    def test_upstream_json_media_type_accepts_case_and_utf8_charset(self) -> None:
+        for content_type in (
+            "application/json",
+            "Application/JSON; Charset=UTF-8",
+            'application/json; charset="utf-8"',
+        ):
+            with self.subTest(content_type=content_type):
+                self.fetcher.respond(
+                    200,
+                    b'{"schema_version":1,"modules":[]}',
+                    {"Content-Type": content_type, "ETag": VALID_COURSE_ETAG},
+                )
+                response = self.fetch(
+                    "/base/courseweave/course", headers=self.auth_headers
+                )
+                assert response.code == 200
+                assert response.headers["ETag"] == VALID_COURSE_ETAG
+
+    def test_valid_json_with_html_media_type_is_rejected_without_passthrough(
+        self,
+    ) -> None:
+        upstream_marker = "upstream-html-json-marker"
+        self.fetcher.respond(
+            200,
+            json.dumps({"message": upstream_marker}).encode(),
+            {
+                "Content-Type": "text/html",
+                "ETag": VALID_COURSE_ETAG,
+                "X-Upstream-Response": upstream_marker,
+            },
+        )
+        response = self.fetch("/base/courseweave/course", headers=self.auth_headers)
+        assert response.code == 502
+        assert json.loads(response.body) == {
+            "code": "invalid_relay_response",
+            "message": "CourseWeave returned an invalid response.",
+            "details": {},
+        }
+        assert upstream_marker not in response.body.decode()
+        assert response.headers.get("ETag") is None
+        assert response.headers.get("X-Upstream-Response") is None
+
+    def test_upstream_json_media_type_rejects_missing_suffix_and_malformed_types(
+        self,
+    ) -> None:
+        for content_type in (
+            None,
+            "application/problem+json",
+            "application/jsonp",
+            "application/jſon",
+            "application/json; charset",
+            "application/json; boundary=something",
+        ):
+            with self.subTest(content_type=content_type):
+                headers = {"ETag": VALID_COURSE_ETAG}
+                if content_type is not None:
+                    headers["Content-Type"] = content_type
+                self.fetcher.respond(200, b'{"safe":true}', headers)
+                response = self.fetch(
+                    "/base/courseweave/course", headers=self.auth_headers
+                )
+                assert response.code == 502
+                assert response.headers.get("ETag") is None
+                assert json.loads(response.body)["code"] == "invalid_relay_response"
+
+    def test_successful_course_relay_fails_closed_for_invalid_etag(self) -> None:
+        digest = "a" * 64
+        for label, etag in (
+            ("missing", None),
+            ("malformed", '"course-etag"'),
+            ("unquoted", digest),
+            ("weak", f'W/"{digest}"'),
+            ("newline", f'"{digest}\n"'),
+            ("uppercase", f'"{"A" * 64}"'),
+            ("capability", f'"{COURSEWEAVE_SENTINEL}"'),
+        ):
+            with self.subTest(label=label):
+                headers = {"Content-Type": "application/json"}
+                if etag is not None:
+                    headers["ETag"] = etag
+                self.fetcher.respond(200, b'{"safe":true}', headers)
+                response = self.fetch(
+                    "/base/courseweave/course", headers=self.auth_headers
+                )
+                assert response.code == 502
+                assert response.headers.get("ETag") is None
+                assert COURSEWEAVE_SENTINEL not in response.body.decode()
+                assert json.loads(response.body)["code"] == "invalid_relay_response"
+
+    def test_course_relay_never_copies_etag_from_error_response(self) -> None:
+        conflict = {
+            "code": "not_configured",
+            "message": "No course root is configured.",
+            "details": {},
+        }
+        for etag in (VALID_COURSE_ETAG, f'"{COURSEWEAVE_SENTINEL}"'):
+            with self.subTest(etag=etag):
+                self.fetcher.respond(
+                    409,
+                    json.dumps(conflict).encode(),
+                    {"Content-Type": "application/json", "ETag": etag},
+                )
+                response = self.fetch(
+                    "/base/courseweave/course", headers=self.auth_headers
+                )
+                assert response.code == 409
+                assert json.loads(response.body) == conflict
+                assert response.headers.get("ETag") is None
+                assert COURSEWEAVE_SENTINEL not in response.body.decode()
 
     def test_context_relay_validates_exact_schema_and_preserves_safe_409(self) -> None:
         conflict = {

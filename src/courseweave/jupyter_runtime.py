@@ -6,6 +6,7 @@ import hmac
 import ipaddress
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 from urllib.parse import urlsplit
@@ -27,6 +28,11 @@ _PAGE_CONFIG_KEYS = (
     "courseweaveRuntimeId",
     "courseweaveLaunchMode",
 )
+_JSON_CONTENT_TYPE = re.compile(
+    r'application/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?[ \t]*',
+    re.IGNORECASE | re.ASCII,
+)
+_COURSE_ETAG = re.compile(r'(?:""|"[0-9a-f]{64}")')
 
 
 def _bounded_nonblank(value: str | None, maximum: int) -> bool:
@@ -127,6 +133,18 @@ def _contains_secret(value: Any, secret: str) -> bool:
     return False
 
 
+def _is_json_content_type(value: str | None) -> bool:
+    return value is not None and _JSON_CONTENT_TYPE.fullmatch(value) is not None
+
+
+def _is_safe_course_etag(value: str | None, capability_token: str) -> bool:
+    return (
+        value is not None
+        and not _contains_secret(value, capability_token)
+        and _COURSE_ETAG.fullmatch(value) is not None
+    )
+
+
 class _CourseWeaveRelayHandler(APIHandler):
     """Common same-origin handler behavior without browser CORS."""
 
@@ -199,6 +217,9 @@ class _CourseWeaveRelayHandler(APIHandler):
         if settings is None:
             self._fail(503, "runtime_unavailable", "CourseWeave runtime is unavailable.")
             return
+        if not _is_json_content_type(response.headers.get("Content-Type")):
+            self._fail(502, "invalid_relay_response", "CourseWeave returned an invalid response.")
+            return
         try:
             payload = json.loads(response.body)
         except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
@@ -207,11 +228,16 @@ class _CourseWeaveRelayHandler(APIHandler):
         if _contains_secret(payload, settings.capability_token):
             self._fail(502, "invalid_relay_response", "CourseWeave returned an invalid response.")
             return
+        etag: str | None = None
+        if copy_etag and 200 <= response.code < 300:
+            candidate = response.headers.get("ETag")
+            if not _is_safe_course_etag(candidate, settings.capability_token):
+                self._fail(502, "invalid_relay_response", "CourseWeave returned an invalid response.")
+                return
+            etag = candidate
         self.set_status(response.code)
-        if copy_etag:
-            etag = response.headers.get("ETag")
-            if etag is not None and "\r" not in etag and "\n" not in etag:
-                self.set_header("ETag", etag)
+        if etag is not None:
+            self.set_header("ETag", etag)
         self.finish(payload)
 
 
