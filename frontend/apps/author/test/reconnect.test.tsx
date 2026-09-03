@@ -130,6 +130,128 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("Author reconnect and unload recovery", () => {
+  it("restarts reconnect conflict canonicalization for a newer dirty draft and rejects stale bytes", async () => {
+    const firstLocalRaw = '{\n  "title": "Dirty first"\n}\n';
+    const secondLocalRaw = '{\n  "title": "Dirty second café"\n}\n';
+    const remoteRaw = '{\n  "title": "Remote"\n}\n';
+    const resolutions: Array<
+      (value: { manifest: unknown; formatted_json: string }) => void
+    > = [];
+    appMocks.getCourse
+      .mockResolvedValueOnce({ manifest: course, raw: "{}", etag: '"old"' })
+      .mockResolvedValueOnce({
+        manifest: { ...course, title: "Remote" },
+        raw: remoteRaw,
+        etag: '"remote"',
+      });
+    appMocks.validateCourse.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolutions.push(resolve);
+        }),
+    );
+    const create = vi.fn<(blob: Blob) => string>(() => "blob:new-draft");
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL: create, revokeObjectURL: revoke });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      () => undefined,
+    );
+
+    const view = render(<AuthorApp />);
+    fireEvent.change(await screen.findByLabelText("Course title"), {
+      target: { value: "Dirty first" },
+    });
+    appMocks.runtime.mockReturnValue({
+      status: "disconnected",
+      runtime: null,
+      retry: appMocks.retry,
+    });
+    view.rerender(<AuthorApp />);
+    appMocks.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "fresh-generation",
+        sourceId: "author-generation",
+      },
+      retry: appMocks.retry,
+    });
+    view.rerender(<AuthorApp />);
+
+    await screen.findByText(/remote version changed/i);
+    await waitFor(() => expect(appMocks.validateCourse).toHaveBeenCalledOnce());
+    const firstSignal = appMocks.validateCourse.mock.calls[0]?.[2] as AbortSignal;
+    expect(appMocks.validateCourse.mock.calls[0]?.[0]).toMatchObject({
+      title: "Dirty first",
+    });
+    expect(appMocks.validateCourse).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      "structural",
+      firstSignal,
+    );
+    const exportButton = screen.getByRole("button", {
+      name: "Export local courseweave.json",
+    });
+    expect(exportButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Course title"), {
+      target: { value: "Dirty second café" },
+    });
+    await waitFor(() =>
+      expect(appMocks.validateCourse).toHaveBeenCalledTimes(2),
+    );
+    const secondSignal = appMocks.validateCourse.mock.calls[1]?.[2] as AbortSignal;
+    expect(firstSignal.aborted).toBe(true);
+    expect(secondSignal).not.toBe(firstSignal);
+    expect(secondSignal.aborted).toBe(false);
+    expect(appMocks.validateCourse.mock.calls[1]?.[0]).toMatchObject({
+      title: "Dirty second café",
+    });
+    expect(appMocks.validateCourse).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      "structural",
+      secondSignal,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select surface surface" }),
+    );
+    view.rerender(<AuthorApp />);
+    await Promise.resolve();
+    expect(appMocks.validateCourse).toHaveBeenCalledTimes(2);
+
+    resolutions[0]?.({
+      manifest: { ...course, title: "Dirty first" },
+      formatted_json: firstLocalRaw,
+    });
+    await Promise.resolve();
+    expect(exportButton).toBeDisabled();
+    expect(create).not.toHaveBeenCalled();
+
+    resolutions[1]?.({
+      manifest: { ...course, title: "Dirty second café" },
+      formatted_json: secondLocalRaw,
+    });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+    const blob = create.mock.calls[0]?.[0] as Blob;
+    const bytes = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(blob);
+    });
+
+    expect(bytes).toBe(secondLocalRaw);
+    expect(bytes).not.toBe(firstLocalRaw);
+    expect(bytes).not.toBe(remoteRaw);
+    expect(revoke).toHaveBeenCalledWith("blob:new-draft");
+    expect(appMocks.getCourse).toHaveBeenCalledTimes(2);
+    expect(appMocks.validateCourse).toHaveBeenCalledTimes(2);
+    expect(appMocks.putCourse).not.toHaveBeenCalled();
+  });
   it("exports current local canonical bytes from a reconnect conflict without PUT", async () => {
     const localRaw = '{\n  "title": "Dirty café"\n}\n';
     const oldRaw = '{\n  "title": "Course"\n}\n';

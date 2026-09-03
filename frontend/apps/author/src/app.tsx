@@ -297,7 +297,7 @@ function AuthorEditor({
       setStructural({ status: "not_requested", issues: [] });
       setRunnable({ status: "not_requested", issues: [] });
     }
-  }, [baseline.etag, course, dirty]);
+  }, [baseline.etag, course, dirty, draftGeneration]);
   const dispatch = useCallback((action: DraftAction) => {
     if (action.type !== "select") {
       setFormatted(null);
