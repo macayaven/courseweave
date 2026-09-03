@@ -10,6 +10,7 @@ import {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  document.cookie = '_xsrf=; Max-Age=0';
 });
 
 async function settle(): Promise<void> {
@@ -22,34 +23,19 @@ function iframeWithWindow(childWindow: Window): HTMLIFrameElement {
 }
 
 describe('CourseWeave same-origin relay client', () => {
-  it('uses exact same-origin fetch for the runtime relay without a cache-busting query', async () => {
-    const fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        serviceOrigin: 'https://courseweave.test',
-        capabilityToken: 'runtime-token'
-      }), { status: 200 })
-    );
-    vi.stubGlobal('fetch', fetch);
-    vi.spyOn(ServerConnection, 'makeRequest').mockResolvedValue(new Response('{}', { status: 500 }));
-    const settings = ServerConnection.makeSettings({ baseUrl: 'https://lab.test/base/' });
-    const client = new CourseWeaveRelayClient('https://courseweave.test', settings);
-
-    await expect(client.getRuntime('runtime-123')).resolves.toEqual({
-      serviceOrigin: 'https://courseweave.test',
-      capabilityToken: 'runtime-token'
+  it('uses the authenticated Jupyter transport for exact no-query runtime, course, and context relays', async () => {
+    document.cookie = '_xsrf=xsrf-test-token';
+    const transport = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-token'
+      }), { status: 200, headers: { 'Cache-Control': 'no-store' } }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'Cache-Control': 'no-store' } }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200, headers: { 'Cache-Control': 'no-store' } }));
+    const settings = ServerConnection.makeSettings({
+      baseUrl: 'https://lab.test/base/',
+      token: 'jupyter-test-token',
+      fetch: transport as unknown as typeof fetch
     });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    const [url, init] = fetch.mock.calls[0]!;
-    expect(url).toBe('https://lab.test/base/courseweave/runtime');
-    expect(new Headers(init.headers).get('X-CourseWeave-Runtime-ID')).toBe('runtime-123');
-    expect(init).toMatchObject({ method: 'GET', cache: 'no-store', credentials: 'same-origin' });
-  });
-
-  it('uses only same-origin Jupyter course and context relay URLs', async () => {
-    const makeRequest = vi.spyOn(ServerConnection, 'makeRequest')
-      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
-      .mockResolvedValueOnce(new Response('{}', { status: 409 }));
-    const settings = ServerConnection.makeSettings({ baseUrl: 'https://lab.test/base/' });
     const client = new CourseWeaveRelayClient('https://courseweave.test', settings);
     const context = {
       source_id: 'source-1', sequence: 0, active_path: null,
@@ -58,31 +44,47 @@ describe('CourseWeave same-origin relay client', () => {
       video_seconds: null, terminal_surface_id: null
     } as const;
 
+    await expect(client.getRuntime('runtime-123')).resolves.toEqual({
+      serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-token'
+    });
     await client.getCourse();
     await client.postContext(context);
 
-    expect(makeRequest.mock.calls.map(([url]) => url)).toEqual([
+    expect(transport).toHaveBeenCalledTimes(3);
+    const requests = transport.mock.calls.map(([request]) => request as Request);
+    expect(requests.map((request) => request.url)).toEqual([
+      'https://lab.test/base/courseweave/runtime',
       'https://lab.test/base/courseweave/course',
       'https://lab.test/base/courseweave/context'
     ]);
-    expect(makeRequest.mock.calls[1]![1]).toMatchObject({
-      method: 'POST',
-      body: JSON.stringify(context)
-    });
-    expect(JSON.stringify(makeRequest.mock.calls)).not.toContain('https://courseweave.test/api/');
+    expect(requests.every((request) => new URL(request.url).search === '')).toBe(true);
+    expect(requests.map((request) => request.credentials)).toEqual(['same-origin', 'same-origin', 'same-origin']);
+    expect(requests.map((request) => request.headers.get('Authorization'))).toEqual([
+      'token jupyter-test-token', 'token jupyter-test-token', 'token jupyter-test-token'
+    ]);
+    expect(requests.map((request) => request.headers.get('X-XSRFToken'))).toEqual([
+      'xsrf-test-token', 'xsrf-test-token', 'xsrf-test-token'
+    ]);
+    expect(requests[0]!.headers.get('X-CourseWeave-Runtime-ID')).toBe('runtime-123');
+    expect(requests[2]!.method).toBe('POST');
+    await expect(requests[2]!.text()).resolves.toBe(JSON.stringify(context));
   });
 
-  it('returns one generic runtime error without retaining or exposing response secrets', async () => {
+  it('returns one generic runtime error without retaining or exposing a secret-bearing transport response', async () => {
     const capability = 'upstream-secret-capability';
-    vi.spyOn(ServerConnection, 'makeRequest').mockResolvedValue(
+    const transport = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ code: 'broken', message: capability }), { status: 500 })
     );
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const settings = ServerConnection.makeSettings({ baseUrl: 'https://lab.test/' });
+    const settings = ServerConnection.makeSettings({
+      baseUrl: 'https://lab.test/', fetch: transport as unknown as typeof fetch
+    });
     const client = new CourseWeaveRelayClient('https://courseweave.test', settings);
 
     await expect(client.getRuntime('runtime-123')).rejects.toThrow('CourseWeave runtime unavailable.');
     expect(consoleError).not.toHaveBeenCalled();
+    expect(transport).toHaveBeenCalledOnce();
+    expect((transport.mock.calls[0]![0] as Request).url).toBe('https://lab.test/courseweave/runtime');
   });
 });
 

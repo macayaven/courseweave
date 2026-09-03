@@ -28,17 +28,7 @@ export class CourseWeaveRelayClient {
 
   private request(path: string, init: RequestInit): Promise<Response> {
     const url = URLExt.join(this.serverSettings.baseUrl, 'courseweave', path);
-    return ServerConnection.makeRequest(url, init, this.serverSettings);
-  }
-
-  private runtimeRequest(runtimeId: string): Promise<Response> {
-    const url = URLExt.join(this.serverSettings.baseUrl, 'courseweave', 'runtime');
-    return fetch(url, {
-      method: 'GET',
-      headers: { 'X-CourseWeave-Runtime-ID': runtimeId },
-      cache: 'no-store',
-      credentials: 'same-origin'
-    });
+    return ServerConnection.makeRequest(url, { ...init, cache: 'default' }, this.serverSettings);
   }
 
   async getRuntime(runtimeId: string): Promise<RuntimeRelayPayload> {
@@ -46,7 +36,10 @@ export class CourseWeaveRelayClient {
       if (runtimeId.length === 0 || runtimeId.length > 240 || runtimeId.trim() !== runtimeId) {
         throw new Error('invalid runtime ID');
       }
-      const response = await this.runtimeRequest(runtimeId);
+      const response = await this.request('runtime', {
+        method: 'GET',
+        headers: { 'X-CourseWeave-Runtime-ID': runtimeId }
+      });
       if (!response.ok) throw new Error('runtime relay failed');
       const payload = parseRuntimeRelayPayload(await response.json(), this.serviceOrigin);
       if (payload === null) throw new Error('invalid runtime relay payload');
@@ -57,15 +50,14 @@ export class CourseWeaveRelayClient {
   }
 
   async getCourse(): Promise<Response> {
-    return this.request('course', { method: 'GET', cache: 'no-store' });
+    return this.request('course', { method: 'GET' });
   }
 
   async postContext(context: WorkspaceContext): Promise<Response> {
     return this.request('context', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(context),
-      cache: 'no-store'
+      body: JSON.stringify(context)
     });
   }
 }
