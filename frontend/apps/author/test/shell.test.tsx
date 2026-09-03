@@ -47,7 +47,7 @@ describe('Author shell', () => {
     expect(screen.getAllByText(/provider unavailable/i)).not.toHaveLength(0);
   });
 
-  it('hydrates the local draft editor from the read-only course response without rendering a save action', async () => {
+  it('hydrates the local draft editor from the read-only course response with an explicit Save action', async () => {
     mocks.useAuthorRuntime.mockReturnValue({ status: 'ready', runtime: readyRuntime, retry: mocks.retry });
     mocks.getCourse.mockResolvedValue({ manifest: {
       schema_version: 1, id: 'course', title: 'Course', description: '', entry_module_id: 'module',
@@ -57,7 +57,7 @@ describe('Author shell', () => {
     render(<AuthorApp />);
     expect(await screen.findByRole('button', { name: 'Select module Module' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add module' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save course' })).toBeInTheDocument();
   });
 
   it('hydrates each canonical example as a clean local draft', async () => {
