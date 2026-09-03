@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 
 const MAX_IMPORT_BYTES = 1024 * 1024;
 
@@ -34,29 +34,38 @@ function download(formattedJson: string) {
   URL.revokeObjectURL(href);
 }
 
-export function ImportExport({ manifest: _manifest, formattedJson, validate, onImport, disabled = false }: {
+export function ImportExport({ manifest: _manifest, formattedJson, validate, onImport, disabled = false, operationEpoch = '0' }: {
   manifest: unknown;
   formattedJson: string | null;
-  validate(manifest: unknown): Promise<{ manifest: unknown; formatted_json: string }>;
+  validate(manifest: unknown, signal?: AbortSignal): Promise<{ manifest: unknown; formatted_json: string }>;
   onImport(manifest: unknown, formattedJson: string): void;
   disabled?: boolean;
+  operationEpoch?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const epoch = useRef(operationEpoch);
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => { controller.current?.abort(); epoch.current = operationEpoch; }, [operationEpoch]);
+  useEffect(() => () => controller.current?.abort(), []);
   const change = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = '';
     if (file === undefined) return;
+    controller.current?.abort();
+    const current = new AbortController(); controller.current = current;
+    const started = epoch.current;
     setBusy(true);
     try {
       const imported = await readImportFile(file);
-      const result = await validate(imported);
+      const result = await validate(imported, current.signal);
+      if (current.signal.aborted || started !== epoch.current) return;
       onImport(result.manifest, result.formatted_json);
       setNotice('Imported into the local draft. Save explicitly to write it.');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Import failed.');
-    } finally { setBusy(false); }
+      if (!current.signal.aborted && started === epoch.current) setNotice(error instanceof Error ? error.message : 'Import failed.');
+    } finally { if (!current.signal.aborted && started === epoch.current) setBusy(false); }
   };
   return <section aria-label="Import and export">
     <h2>Import and export</h2>

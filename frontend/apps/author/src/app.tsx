@@ -12,114 +12,25 @@ import { ValidationSummary, type ValidationIssue } from './validation';
 import { useAuthorRuntime } from './runtime';
 
 type Client = ReturnType<typeof createAuthorClient>;
-
-export function AuthorShell({ state, provider = 'unknown', children }: { state: string; provider?: 'unknown' | 'not_configured'; children?: ReactNode }) {
-  return <main aria-label="CourseWeave Author">
-    <header><p>CourseWeave</p><h1>Author</h1><p aria-live="polite">{state}</p></header>
-    {children ?? <>
-      <section aria-label="Outline"><h2>Outline</h2><p>Course structure will appear here.</p></section>
-      <section aria-label="Inspector"><h2>Inspector</h2><p>Select an item to edit its details.</p></section>
-      <section aria-label="Preview"><h2>Preview</h2><p>Preview is inert until a draft is selected.</p></section>
-      <section aria-label="Curriculum teacher"><h2>Curriculum teacher</h2><p>{provider === 'not_configured' ? 'Teacher provider unavailable. Editing and preview remain available.' : 'Teacher suggestions are unavailable until a provider is configured.'}</p></section>
-    </>}
-  </main>;
-}
-
+type CheckState = { status: 'not_requested' | 'checking' | 'passed' | 'issues'; issues: ValidationIssue[] };
+export function AuthorShell({ state, provider = 'unknown', children }: { state: string; provider?: 'unknown' | 'not_configured'; children?: ReactNode }) { return <main aria-label="CourseWeave Author"><header><p>CourseWeave</p><h1>Author</h1><p aria-live="polite">{state}</p></header>{children ?? <><section aria-label="Outline"><h2>Outline</h2><p>Course structure will appear here.</p></section><section aria-label="Inspector"><h2>Inspector</h2><p>Select an item to edit its details.</p></section><section aria-label="Preview"><h2>Preview</h2><p>Preview is inert until a draft is selected.</p></section><section aria-label="Curriculum teacher"><h2>Curriculum teacher</h2><p>{provider === 'not_configured' ? 'Teacher provider unavailable. Editing and preview remain available.' : 'Teacher suggestions are unavailable until a provider is configured.'}</p></section></>}</main>; }
 function documentState(manifest: AuthorManifest): AuthorDocumentState { return { draft: createDraft(manifest), saved: manifest, selection: { type: 'course' }, validation: 'idle' }; }
-function selectedPhase(state: AuthorDocumentState) {
-  const selection = state.selection;
-  if (selection.type !== 'phase' && selection.type !== 'surface') return null;
-  const module = state.draft.modules.find((candidate) => candidate.clientKey === selection.moduleKey);
-  return module?.phases.find((candidate) => candidate.clientKey === selection.phaseKey) ?? null;
-}
 function isAuthorManifest(value: unknown): value is AuthorManifest { return typeof value === 'object' && value !== null && (value as { schema_version?: unknown }).schema_version === 1 && Array.isArray((value as { modules?: unknown }).modules); }
-function validationIssues(error: unknown): ValidationIssue[] {
-  if (!(error instanceof AuthorApiError) || !Array.isArray(error.details.issues)) return [];
-  return error.details.issues.flatMap((issue): ValidationIssue[] => typeof issue === 'object' && issue !== null && typeof (issue as Record<string, unknown>).path === 'string' && typeof (issue as Record<string, unknown>).code === 'string' && typeof (issue as Record<string, unknown>).message === 'string' ? [issue as ValidationIssue] : []);
-}
-function asSaved(course: CourseResponse): SavedCourse { return { manifest: course.manifest, raw: course.raw, etag: course.etag }; }
+function selectedPhase(state: AuthorDocumentState) { const s = state.selection; if (s.type !== 'phase' && s.type !== 'surface') return null; return state.draft.modules.find((m) => m.clientKey === s.moduleKey)?.phases.find((p) => p.clientKey === s.phaseKey) ?? null; }
+function issues(error: unknown): ValidationIssue[] { return error instanceof AuthorApiError && Array.isArray(error.details.issues) ? error.details.issues.flatMap((i): ValidationIssue[] => typeof i === 'object' && i !== null && typeof (i as Record<string, unknown>).path === 'string' && typeof (i as Record<string, unknown>).code === 'string' && typeof (i as Record<string, unknown>).message === 'string' ? [i as ValidationIssue] : []) : []; }
+function savedCourse(course: CourseResponse): SavedCourse { return { manifest: course.manifest, raw: course.raw, etag: course.etag }; }
+function preserveSelection(manifest: AuthorManifest, previous: AuthorDocumentState): AuthorDocumentState { const next = documentState(manifest); const s = previous.selection; if (s.type === 'course') return next; const om = previous.draft.modules.find((m) => m.clientKey === s.moduleKey); const m = next.draft.modules.find((x) => x.id === om?.id); if (!m) return next; if (s.type === 'module') return { ...next, selection: { type: 'module', moduleKey: m.clientKey } }; const op = om?.phases.find((p) => p.clientKey === s.phaseKey); const p = m.phases.find((x) => x.id === op?.id); if (!p) return { ...next, selection: { type: 'module', moduleKey: m.clientKey } }; if (s.type === 'phase') return { ...next, selection: { type: 'phase', moduleKey: m.clientKey, phaseKey: p.clientKey } }; const os = op?.surfaces.find((x) => x.clientKey === s.surfaceKey); const surface = p.surfaces.find((x) => x.id === os?.id); return surface ? { ...next, selection: { type: 'surface', moduleKey: m.clientKey, phaseKey: p.clientKey, surfaceKey: surface.clientKey } } : { ...next, selection: { type: 'phase', moduleKey: m.clientKey, phaseKey: p.clientKey } }; }
 
-function AuthorEditor({ course, client, connected }: { course: CourseResponse; client: Client; connected: boolean }) {
-  const [state, setState] = useState<AuthorDocumentState>(() => documentState(course.manifest as AuthorManifest));
-  const [baseline, setBaseline] = useState(course);
-  const [formattedJson, setFormattedJson] = useState<string | null>(null);
-  const [issues, setIssues] = useState<ValidationIssue[]>([]);
-  const [runnableIssues, setRunnableIssues] = useState<ValidationIssue[]>([]);
-  const [notice, setNotice] = useState('');
-  const [remoteConflict, setRemoteConflict] = useState<SavedCourse | null>(null);
-  const [draftGeneration, setDraftGeneration] = useState(0);
-  const dirty = isDraftDirty(state.draft, state.saved);
-  useBeforeUnload(dirty);
-  useEffect(() => {
-    if (course.etag === baseline.etag) return;
-    if (dirty) { setRemoteConflict(asSaved(course)); return; }
-    if (!isAuthorManifest(course.manifest)) return;
-    setBaseline(course); setState(documentState(course.manifest)); setFormattedJson(null); setIssues([]); setRunnableIssues([]);
-  }, [baseline.etag, course, dirty]);
-  const dispatch = useCallback((action: DraftAction) => {
-    if (action.type !== 'select') { setFormattedJson(null); setIssues([]); setRunnableIssues([]); setDraftGeneration((current) => current + 1); }
-    setState((current) => draftReducer(current, action));
-  }, []);
-  const validate = useCallback(async (manifest: unknown, mode: 'structural' | 'runnable', signal?: AbortSignal) => {
-    try {
-      const result = await client.validateCourse(manifest, mode, signal);
-      if (mode === 'structural') { setIssues([]); setFormattedJson(result.formatted_json); } else setRunnableIssues([]);
-      return result;
-    } catch (error) {
-      const next = validationIssues(error);
-      if (mode === 'structural') setIssues(next); else setRunnableIssues(next);
-      throw error;
-    }
-  }, [client]);
-  const runValidation = async (mode: 'structural' | 'runnable') => {
-    setNotice('Checking draft…');
-    try { await validate(projectDraft(state.draft), mode); setNotice(mode === 'structural' ? 'Structural validation passed.' : 'Runnable diagnostics passed.'); }
-    catch { setNotice(mode === 'structural' ? 'Structural validation found issues.' : 'Runnable diagnostics found issues.'); }
-  };
-  const importDraft = (manifest: unknown, canonical: string) => {
-    if (!isAuthorManifest(manifest)) return;
-    setState((current) => ({ ...current, draft: createDraft(manifest), validation: 'valid' }));
-    setFormattedJson(canonical); setIssues([]); setRunnableIssues([]); setDraftGeneration((current) => current + 1); setNotice('Imported local draft is ready to review.');
-  };
-  const saved = (next: SavedCourse) => {
-    if (!isAuthorManifest(next.manifest)) return;
-    setBaseline({ manifest: next.manifest, raw: next.raw, etag: next.etag });
-    setState(documentState(next.manifest)); setFormattedJson(next.raw); setIssues([]); setRunnableIssues([]); setRemoteConflict(null); setNotice('Saved exact canonical course bytes.');
-  };
-  const phase = selectedPhase(state);
-  return <>
-    <Outline state={state} dispatch={dispatch} />
-    <Inspector state={state} dispatch={dispatch} />
-    <ImportExport manifest={projectDraft(state.draft)} formattedJson={formattedJson} validate={(manifest) => validate(manifest, 'structural')} onImport={importDraft} disabled={!connected} />
-    <section aria-label="Validation"><h2>Validation</h2>
-      <button type="button" disabled={!connected} onClick={() => void runValidation('structural')}>Validate structure</button>
-      <button type="button" disabled={!connected} onClick={() => void runValidation('runnable')}>Check runnable diagnostics</button>
-      <p role="status">{notice}</p><ValidationSummary issues={issues} />
-    </section>
-    <AuthorPreview phase={phase} issues={runnableIssues} />
-    <SaveConflict manifest={projectDraft(state.draft)} etag={baseline.etag} exists={baseline.etag !== ''} dirty={dirty}
-      validate={(manifest, signal) => validate(manifest, 'structural', signal)} put={(raw, etag, signal) => client.putCourse(raw, etag, signal).then(asSaved)} getLatest={(signal) => client.getCourse(signal).then(asSaved)} onSaved={saved} onCanonical={setFormattedJson}
-      onReviewed={(etag) => { setBaseline((current) => ({ ...current, etag })); setRemoteConflict(null); }} remote={remoteConflict} disabled={!connected} requestGeneration={draftGeneration} onRemoteSaved={setRemoteConflict} />
-    <section aria-label="Curriculum teacher"><h2>Curriculum teacher</h2><p>Teacher provider unavailable. Editing and preview remain available.</p><p role="status">{dirty ? 'Unsaved local draft.' : 'Draft matches the loaded course.'}</p></section>
-  </>;
+function AuthorEditor({ course, client, connected, connectionEpoch }: { course: CourseResponse; client: Client; connected: boolean; connectionEpoch: number }) {
+  const [state, setState] = useState<AuthorDocumentState>(() => documentState(course.manifest as AuthorManifest)); const [baseline, setBaseline] = useState(course); const [formatted, setFormatted] = useState<string | null>(null); const [structural, setStructural] = useState<CheckState>({ status: 'not_requested', issues: [] }); const [runnable, setRunnable] = useState<CheckState>({ status: 'not_requested', issues: [] }); const [notice, setNotice] = useState(''); const [remote, setRemote] = useState<SavedCourse | null>(null); const [draftGeneration, setDraftGeneration] = useState(0);
+  const checks = useRef<{ structural: AbortController | null; runnable: AbortController | null }>({ structural: null, runnable: null }); const epoch = `${draftGeneration}:${connectionEpoch}`; const latestEpoch = useRef(epoch); latestEpoch.current = epoch; const dirty = isDraftDirty(state.draft, state.saved); useBeforeUnload(dirty);
+  useEffect(() => { checks.current.structural?.abort(); checks.current.runnable?.abort(); }, [epoch]);
+  useEffect(() => { if (course.etag === baseline.etag) return; if (dirty) { setRemote(savedCourse(course)); return; } if (isAuthorManifest(course.manifest)) { setBaseline(course); setState(documentState(course.manifest)); setFormatted(null); setStructural({ status: 'not_requested', issues: [] }); setRunnable({ status: 'not_requested', issues: [] }); } }, [baseline.etag, course, dirty]);
+  const dispatch = useCallback((action: DraftAction) => { if (action.type !== 'select') { setFormatted(null); setStructural({ status: 'not_requested', issues: [] }); setRunnable({ status: 'not_requested', issues: [] }); setDraftGeneration((x) => x + 1); } setState((current) => draftReducer(current, action)); }, []);
+  const validate = useCallback((manifest: unknown, mode: 'structural' | 'runnable', signal?: AbortSignal) => client.validateCourse(manifest, mode, signal), [client]);
+  const check = async (mode: 'structural' | 'runnable') => { checks.current[mode]?.abort(); const controller = new AbortController(); checks.current[mode] = controller; const started = latestEpoch.current; mode === 'structural' ? setStructural({ status: 'checking', issues: [] }) : setRunnable({ status: 'checking', issues: [] }); setNotice('Checking draft…'); try { const result = await validate(projectDraft(state.draft), mode, controller.signal); if (controller.signal.aborted || started !== latestEpoch.current) return; if (mode === 'structural') { setStructural({ status: 'passed', issues: [] }); setFormatted(result.formatted_json); } else setRunnable({ status: 'passed', issues: [] }); setNotice(mode === 'structural' ? 'Structural validation passed.' : 'Runnable diagnostics passed.'); } catch (error) { if (controller.signal.aborted || started !== latestEpoch.current) return; const next = issues(error); mode === 'structural' ? setStructural({ status: 'issues', issues: next }) : setRunnable({ status: 'issues', issues: next }); setNotice(mode === 'structural' ? 'Structural validation found issues.' : 'Runnable diagnostics found issues.'); } };
+  const imported = (manifest: unknown, canonical: string) => { if (!isAuthorManifest(manifest)) return; setState((current) => ({ ...current, draft: createDraft(manifest), validation: 'valid' })); setFormatted(canonical); setStructural({ status: 'passed', issues: [] }); setRunnable({ status: 'not_requested', issues: [] }); setDraftGeneration((x) => x + 1); setNotice('Imported local draft is ready to review.'); };
+  const saved = (next: SavedCourse) => { if (!isAuthorManifest(next.manifest)) return; setBaseline({ manifest: next.manifest, raw: next.raw, etag: next.etag }); setState((current) => preserveSelection(next.manifest as AuthorManifest, current)); setFormatted(next.raw); setStructural({ status: 'passed', issues: [] }); setRunnable({ status: 'not_requested', issues: [] }); setRemote(null); setNotice('Saved exact canonical course bytes.'); };
+  const phase = selectedPhase(state); return <><Outline state={state} dispatch={dispatch} /><Inspector state={state} dispatch={dispatch} /><ImportExport manifest={projectDraft(state.draft)} formattedJson={formatted} validate={(m, signal) => validate(m, 'structural', signal)} onImport={imported} disabled={!connected} operationEpoch={epoch} /><section aria-label="Validation"><h2>Validation</h2><button type="button" disabled={!connected} onClick={() => void check('structural')}>Validate structure</button><button type="button" disabled={!connected} onClick={() => void check('runnable')}>Check runnable diagnostics</button><p role="status">{notice}</p><ValidationSummary issues={structural.issues} /></section><AuthorPreview phase={phase} structural={structural} runnable={runnable} /><SaveConflict manifest={projectDraft(state.draft)} etag={baseline.etag} exists={baseline.etag !== ''} dirty={dirty} validate={(m, signal) => validate(m, 'structural', signal)} put={(raw, tag, signal) => client.putCourse(raw, tag, signal).then(savedCourse)} getLatest={(signal) => client.getCourse(signal).then(savedCourse)} onSaved={saved} onCanonical={setFormatted} onReviewed={(tag) => { setBaseline((x) => ({ ...x, etag: tag })); setRemote(null); }} remote={remote} disabled={!connected} requestGeneration={draftGeneration} connectionEpoch={connectionEpoch} onRemoteSaved={setRemote} /><section aria-label="Curriculum teacher"><h2>Curriculum teacher</h2><p>Teacher provider unavailable. Editing and preview remain available.</p><p role="status">{dirty ? 'Unsaved local draft.' : 'Draft matches the loaded course.'}</p></section></>;
 }
-
-export function AuthorApp() {
-  const runtime = useAuthorRuntime();
-  const [load, setLoad] = useState<'loading' | 'ready' | 'disconnected'>('loading');
-  const [course, setCourse] = useState<CourseResponse | null>(null);
-  const client = useRef<Client | null>(null);
-  if (runtime.status === 'ready') client.current = createAuthorClient(runtime.runtime);
-  useEffect(() => {
-    if (runtime.status !== 'ready') { if (course !== null) setLoad('disconnected'); return; }
-    const controller = new AbortController(); setLoad(course === null ? 'loading' : 'ready');
-    void client.current!.getCourse(controller.signal).then((next) => { if (!controller.signal.aborted) { setCourse(next); setLoad('ready'); } }).catch(() => { if (!controller.signal.aborted) setLoad('disconnected'); });
-    return () => controller.abort();
-  }, [runtime.status, runtime.runtime]);
-  if (runtime.status === 'connecting' && course === null) return <><AuthorShell state="Connecting to the trusted CourseWeave bridge." /><button type="button" onClick={runtime.retry}>Retry connection</button></>;
-  if ((runtime.status !== 'ready' || load === 'disconnected') && course === null) return <><AuthorShell state="Disconnected from CourseWeave. Your unsaved work is not stored here." /><button type="button" onClick={runtime.retry}>Reconnect</button></>;
-  if (load === 'loading' || course === null || client.current === null) return <AuthorShell state="Loading saved course…" />;
-  const connected = runtime.status === 'ready' && load === 'ready';
-  if (!isAuthorManifest(course.manifest)) return <AuthorShell state="Ready. Curriculum teacher provider unavailable." provider="not_configured" />;
-  return <AuthorShell state={connected ? 'Ready. Curriculum teacher provider unavailable.' : 'Disconnected from CourseWeave. Your unsaved work remains in this tab.'} provider="not_configured"><AuthorEditor course={course} client={client.current} connected={connected} />{!connected ? <button type="button" onClick={runtime.retry}>Reconnect</button> : null}</AuthorShell>;
-}
+export function AuthorApp() { const runtime = useAuthorRuntime(); const [load, setLoad] = useState<'loading' | 'ready' | 'disconnected'>('loading'); const [course, setCourse] = useState<CourseResponse | null>(null); const [connectionEpoch, setConnectionEpoch] = useState(0); const client = useRef<Client | null>(null); if (runtime.status === 'ready') client.current = createAuthorClient(runtime.runtime); useEffect(() => { setConnectionEpoch((x) => x + 1); }, [runtime.status, runtime.runtime]); useEffect(() => { if (runtime.status !== 'ready') { if (course) setLoad('disconnected'); return; } const controller = new AbortController(); setLoad(course ? 'ready' : 'loading'); void client.current!.getCourse(controller.signal).then((next) => { if (!controller.signal.aborted) { setCourse(next); setLoad('ready'); } }).catch(() => { if (!controller.signal.aborted) setLoad('disconnected'); }); return () => controller.abort(); }, [runtime.status, runtime.runtime]); if (runtime.status === 'connecting' && !course) return <><AuthorShell state="Connecting to the trusted CourseWeave bridge." /><button type="button" onClick={runtime.retry}>Retry connection</button></>; if ((runtime.status !== 'ready' || load === 'disconnected') && !course) return <><AuthorShell state="Disconnected from CourseWeave. Your unsaved work is not stored here." /><button type="button" onClick={runtime.retry}>Reconnect</button></>; if (load === 'loading' || !course || !client.current) return <AuthorShell state="Loading saved course…" />; const connected = runtime.status === 'ready' && load === 'ready'; if (!isAuthorManifest(course.manifest)) return <AuthorShell state="Ready. Curriculum teacher provider unavailable." provider="not_configured" />; return <AuthorShell state={connected ? 'Ready. Curriculum teacher provider unavailable.' : 'Disconnected from CourseWeave. Your unsaved work remains in this tab.'} provider="not_configured"><AuthorEditor course={course} client={client.current} connected={connected} connectionEpoch={connectionEpoch} />{!connected ? <button type="button" onClick={runtime.retry}>Reconnect</button> : null}</AuthorShell>; }

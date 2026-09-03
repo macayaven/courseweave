@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 export interface ValidationIssue { path: string; code: string; message: string; }
 
@@ -18,6 +18,7 @@ function controlFor(pointer: string): HTMLElement | null {
 
 /** Adds accessible issue references only to controls registered with their JSON Pointer. */
 export function ValidationSummary({ issues }: { issues: readonly ValidationIssue[] }) {
+  const summary = useRef<HTMLElement>(null);
   useEffect(() => {
     const touched: HTMLElement[] = [];
     for (const issue of issues) {
@@ -31,9 +32,8 @@ export function ValidationSummary({ issues }: { issues: readonly ValidationIssue
     return () => touched.forEach((control) => control.removeAttribute('aria-describedby'));
   }, [issues]);
   if (issues.length === 0) return null;
-  const first = issues[0]!;
-  const focusFirst = () => controlFor(first.path)?.focus();
-  return <section aria-label="Validation issues" role="alert">
+  const focusFirst = () => { const first = issues.find((issue) => controlFor(issue.path) !== null); const control = first === undefined ? null : controlFor(first.path); if (control === null) summary.current?.focus(); else control.focus(); };
+  return <section ref={summary} tabIndex={-1} aria-label="Validation issues" role="alert">
     <h2>Validation issues</h2>
     <button type="button" onClick={focusFirst}>Focus first issue</button>
     <ul>{issues.map((issue, index) => <li key={`${issue.path}:${issue.code}:${index}`} id={pointerToControlId(issue.path, 'issue')}>

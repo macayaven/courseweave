@@ -26,4 +26,17 @@ describe('inert Author preview', () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
   });
+
+  it('distinguishes structural and runnable checking, passed, and issue states without probing HTTPS media', () => {
+    const view = render(<AuthorPreview phase={phase('watch')} structural={{ status: 'checking', issues: [] }} runnable={{ status: 'not_requested', issues: [] }} />);
+    expect(screen.getByText('Structural validation: checking.')).toBeInTheDocument();
+    expect(screen.getByText('Runnable diagnostics: not requested.')).toBeInTheDocument();
+    view.rerender(<AuthorPreview phase={phase('watch')} structural={{ status: 'passed', issues: [] }} runnable={{ status: 'issues', issues: [
+      { path: '/p', code: 'missing_artifact', message: 'Missing local artifact.' },
+      { path: '/c', code: 'invalid_terminal_cwd', message: 'Invalid terminal directory.' },
+      { path: '/v', code: 'lfs_pointer', message: 'LFS pointer video.' },
+    ] }} />);
+    expect(screen.getByText('Structural validation: passed.')).toBeInTheDocument();
+    for (const message of ['Missing local artifact.', 'Invalid terminal directory.', 'LFS pointer video.']) expect(screen.getByText(message)).toBeInTheDocument();
+  });
 });

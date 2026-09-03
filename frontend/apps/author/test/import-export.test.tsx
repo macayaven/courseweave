@@ -31,6 +31,19 @@ describe('Author import and export', () => {
     await waitFor(() => expect(imported).toHaveBeenCalledTimes(2));
   });
 
+  it('does not replace a newer draft when import validation completes after its operation epoch changes', async () => {
+    let complete: ((value: { manifest: unknown; formatted_json: string }) => void) | undefined;
+    const validate = vi.fn(() => new Promise<{ manifest: unknown; formatted_json: string }>((resolve) => { complete = resolve; }));
+    const imported = vi.fn();
+    const view = render(<ImportExport manifest={{ title: 'old' }} formattedJson={null} validate={validate} onImport={imported} operationEpoch="0:0" />);
+    fireEvent.change(screen.getByLabelText('Import course file'), { target: { files: [new File([JSON.stringify(valid)], 'courseweave.json')] } });
+    await waitFor(() => expect(validate).toHaveBeenCalledOnce());
+    view.rerender(<ImportExport manifest={{ title: 'edited' }} formattedJson={null} validate={validate} onImport={imported} operationEpoch="1:0" />);
+    complete?.({ manifest: valid, formatted_json: '{}\n' });
+    await Promise.resolve();
+    expect(imported).not.toHaveBeenCalled();
+  });
+
   it('exports exactly server canonical bytes using a fixed safe filename and revokes its blob URL', () => {
     const create = vi.fn<(blob: Blob) => string>(() => 'blob:course');
     const revoke = vi.fn();

@@ -41,4 +41,20 @@ describe('Author Save and stale recovery', () => {
     expect(put).not.toHaveBeenCalled();
     expect(saved).not.toHaveBeenCalled();
   });
+
+  it('pairs local and remote canonical JSON, exports local bytes, and clears conflict after confirmed Use latest', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const saved = vi.fn();
+    const validate = vi.fn().mockResolvedValue({ manifest: { schema_version: 1 }, formatted_json: '{\n  "title": "Local"\n}\n' });
+    const put = vi.fn().mockRejectedValue(Object.assign(new Error('stale'), { status: 409 }));
+    const getLatest = vi.fn().mockResolvedValue({ manifest: { schema_version: 1 }, raw: '{\n  "title": "Remote"\n}\n', etag: '"remote"' });
+    render(<SaveConflict manifest={{ schema_version: 1 }} etag={'"old"'} exists dirty validate={validate} put={put} getLatest={getLatest} onSaved={saved} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save course' }));
+    expect(await screen.findByText('Local canonical JSON')).toBeInTheDocument();
+    expect(screen.getByText('Remote canonical JSON')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Use latest' }));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(saved).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('region', { name: 'Remote conflict' })).not.toBeInTheDocument();
+  });
 });
