@@ -13,7 +13,7 @@ export type ReaderNavigationOutcome = {
   htmlSource: string | null;
 };
 
-export type ReaderRoute = { surface: CourseSurface; htmlSource: string | null };
+export type ReaderRoute = { surface: CourseSurface; htmlSource: string | null; parentOpened: boolean };
 export type ReaderCoordinate = { moduleId: string; phaseId: string; surface: CourseSurface };
 export type ReaderIntent = ReaderCoordinate & { sourceId: string; clickContextVersion: number; runtimeIdentity: string | null; status: 'pending' | 'context-confirmed' };
 export type StoredReaderOutcome = { outcome: ReaderNavigationOutcome; coordinate: ReaderCoordinate; status: 'provisional' | 'confirmed'; contextVersion: number; runtimeIdentity: string | null };
@@ -70,7 +70,7 @@ export function selectReaderRoute(course: CourseManifest, sourceId: string, outc
     if (surface.type === 'html' && (outcome.htmlSource === null || !isLocalHtmlSource(outcome.htmlSource, outcome.jupyterBaseUrl, expectedParentOrigin))) return null;
     if (surface.type === 'video' && (typeof surface.url !== 'string' || !isCanonicalHttpsUrl(surface.url) || outcome.htmlSource !== surface.url)) return null;
   }
-  return { surface, htmlSource: surface.type === 'html' ? outcome.htmlSource : null };
+  return { surface, htmlSource: surface.type === 'html' ? outcome.htmlSource : null, parentOpened: true };
 }
 
 function sameCoordinate(left: ReaderCoordinate, right: ReaderCoordinate): boolean {
@@ -116,7 +116,7 @@ export function parseReaderNavigation(value: unknown, expectedParentOrigin: stri
 }
 
 function readerSurface(surface: CourseSurface | null): ReaderRoute | null {
-  return surface !== null && (surface.type === 'html' || surface.type === 'video') ? { surface, htmlSource: null } : null;
+  return surface !== null && (surface.type === 'html' || surface.type === 'video') ? { surface, htmlSource: null, parentOpened: false } : null;
 }
 
 export function useReaderRoute(course: CourseManifest, runtime: TrustedRuntimeConfiguration, active: ReaderCoordinate | null, contextVersion: number): ReaderRouteController {

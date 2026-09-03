@@ -636,6 +636,7 @@ def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_ch
     assert "--ServerApp.allow_remote_access=False" in argv
     assert "--ServerApp.use_redirect_file=False" in argv
     assert "--ServerApp.jpserver_extensions=courseweave.jupyter_runtime=True" in argv
+    assert "--ServerApp.reraise_server_extension_failures=True" in argv
     assert not any("owned-" in item or "token=" in item for item in argv)
     assert kwargs["shell"] is False
     assert kwargs["cwd"] == state["course"].resolve()

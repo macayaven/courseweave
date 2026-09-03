@@ -293,7 +293,7 @@ class ReaderWidget extends Widget {
     const iframe = document.createElement('iframe');
     iframe.title = 'CourseWeave reader';
     iframe.referrerPolicy = 'no-referrer';
-    iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-presentation');
+    iframe.setAttribute('sandbox', '');
     node.appendChild(iframe);
     super({ node });
     this.iframe = iframe;
@@ -303,16 +303,15 @@ class ReaderWidget extends Widget {
   }
 
   navigate(source: string, localHtml: boolean): void {
-    // Jupyter rejects an opaque-origin navigation to its authenticated /files
-    // handler. Local course HTML therefore keeps its Jupyter origin but cannot
-    // execute script; remote video remains an opaque scripted media document.
+    // Jupyter rejects an opaque-origin or referrer-free navigation to its
+    // authenticated /files handler. Local course HTML therefore keeps its
+    // Jupyter origin and same-origin referrer while scripts/forms remain off;
+    // cross-origin subresources receive no referrer. Remote media is opaque.
     this.iframe.setAttribute(
       'sandbox',
-      localHtml
-        ? 'allow-same-origin allow-forms allow-presentation'
-        : 'allow-scripts allow-forms allow-presentation'
+      localHtml ? 'allow-same-origin' : ''
     );
-    this.iframe.referrerPolicy = localHtml ? 'origin' : 'no-referrer';
+    this.iframe.referrerPolicy = localHtml ? 'same-origin' : 'no-referrer';
     this.iframe.src = source;
   }
 }
@@ -414,9 +413,9 @@ export class CourseSurfaceFactory {
 
   private createTerminal(key: string, coordinate: SurfaceCoordinate, surface: CourseSurface): Promise<SurfaceMainAreaWidget> {
     const instructions = terminalInstructions(surface, this.options.writeClipboard ?? writeBrowserClipboard);
-    const creation = this.options.commands.execute('terminal:create-new', {
-      name: `courseweave-${coordinate.moduleId}-${coordinate.phaseId}-${surface.id}`
-    }).then((created) => {
+    // Let Jupyter Server choose its constrained terminal-session name. The
+    // course coordinate is tracked only in this factory and is never routed.
+    const creation = this.options.commands.execute('terminal:create-new').then((created) => {
       const widget = mainAreaWidget(created);
       widget.contentHeader.addWidget(instructions);
       this.terminals.set(key, widget);

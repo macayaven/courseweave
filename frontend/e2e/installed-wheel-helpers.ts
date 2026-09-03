@@ -56,15 +56,38 @@ export async function makeRichCourse(root: string): Promise<void> {
   }, null, 2)}\n`, 'utf8');
 }
 
+const OUTPUT_LIMIT = 1_000_000;
+const SETUP_TIMEOUT_MS = 180_000;
+
 async function run(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
   let output = '';
-  await new Promise<void>((resolveRun, rejectRun) => {
-    const child = spawn(command, args, { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
-    child.stdout?.on('data', (chunk) => { output += chunk.toString(); });
-    child.stderr?.on('data', (chunk) => { output += chunk.toString(); });
-    child.once('error', () => rejectRun(new Error(`Installed-wheel setup command could not start: ${command}`)));
-    child.once('exit', (code) => code === 0 ? resolveRun() : rejectRun(new Error(`Installed-wheel setup command failed: ${command}`)));
+  const child = spawn(command, args, {
+    cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'], detached: true
   });
+  const capture = (chunk: Buffer) => {
+    if (output.length < OUTPUT_LIMIT) output += chunk.toString().slice(0, OUTPUT_LIMIT - output.length);
+  };
+  child.stdout?.on('data', capture);
+  child.stderr?.on('data', capture);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await new Promise<void>((resolveRun, rejectRun) => {
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        if (error === undefined) resolveRun(); else rejectRun(error);
+      };
+      timer = setTimeout(() => finish(new Error(`Installed-wheel setup command timed out: ${command}`)), SETUP_TIMEOUT_MS);
+      child.once('error', () => finish(new Error(`Installed-wheel setup command could not start: ${command}`)));
+      child.once('exit', (code) => finish(code === 0 ? undefined : new Error(`Installed-wheel setup command failed: ${command}`)));
+    });
+  } catch (error) {
+    await stop(child);
+    throw error;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
   return output;
 }
 
@@ -132,6 +155,7 @@ async function tokenlessBootstrap(secret: Promise<string>): Promise<{ url: strin
   let used = false;
   let closePromise: Promise<void> | null = null;
   const sockets = new Set<Socket>();
+  const fetches = new Set<AbortController>();
   const port = await availablePort();
   const url = `http://127.0.0.1:${port}/bootstrap`;
   server = createHttpServer((request, response) => {
@@ -139,6 +163,8 @@ async function tokenlessBootstrap(secret: Promise<string>): Promise<{ url: strin
     used = true;
     void (async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let fetchTimer: ReturnType<typeof setTimeout> | undefined;
+      let controller: AbortController | undefined;
       try {
         const target = await Promise.race([
           secret,
@@ -147,14 +173,20 @@ async function tokenlessBootstrap(secret: Promise<string>): Promise<{ url: strin
         if (timer !== undefined) clearTimeout(timer);
         const targetUrl = new URL(target);
         jupyterToken = targetUrl.searchParams.get('token');
-        const upstream = await fetch(target, { redirect: 'manual' });
+        controller = new AbortController();
+        fetches.add(controller);
+        fetchTimer = setTimeout(() => controller?.abort(), 10_000);
+        const upstream = await fetch(target, { redirect: 'manual', signal: controller.signal });
         const destination = new URL(target); destination.search = ''; destination.hash = '';
         const cookies = typeof upstream.headers.getSetCookie === 'function' ? upstream.headers.getSetCookie() : [];
         await upstream.body?.cancel();
         response.writeHead(302, { Location: destination.href, ...(cookies.length > 0 ? { 'Set-Cookie': cookies } : {}) }).end();
       } catch {
-        if (timer !== undefined) clearTimeout(timer);
         response.writeHead(502).end();
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        if (fetchTimer !== undefined) clearTimeout(fetchTimer);
+        if (controller !== undefined) fetches.delete(controller);
       }
     })();
   });
@@ -168,6 +200,7 @@ async function tokenlessBootstrap(secret: Promise<string>): Promise<{ url: strin
     jupyterToken: () => jupyterToken,
     close: () => {
       closePromise ??= (async () => {
+        for (const controller of fetches) controller.abort();
         for (const socket of sockets) socket.destroy();
         await new Promise<void>((resolveClose) => server!.close(() => resolveClose()));
       })();
@@ -225,6 +258,56 @@ function processGroupAlive(processGroup: number): boolean {
   }
 }
 
+type OwnedProcess = { pid: number; parentPid: number; processGroup: number };
+
+function processAlive(pid: number): boolean {
+  try { signalProcess(pid, 0); return true; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw new Error(`Owned CourseWeave process check failed (${(error as NodeJS.ErrnoException).code ?? 'unknown'}).`);
+  }
+}
+
+function ownedProcessTree(rootPid: number): OwnedProcess[] {
+  const result = spawnSync('ps', ['-axo', 'pid=,ppid=,pgid='], { encoding: 'utf8' });
+  if (result.status !== 0 || result.error !== undefined) throw new Error('Could not inspect the owned CourseWeave process tree.');
+  const rows = result.stdout.split('\n').flatMap((line) => {
+    const fields = line.trim().split(/\s+/).map(Number);
+    return fields.length === 3 && fields.every(Number.isSafeInteger)
+      ? [{ pid: fields[0]!, parentPid: fields[1]!, processGroup: fields[2]! }]
+      : [];
+  });
+  const selected = new Set([rootPid]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      if (!selected.has(row.pid) && selected.has(row.parentPid)) {
+        selected.add(row.pid);
+        changed = true;
+      }
+    }
+  }
+  return rows.filter((row) => selected.has(row.pid));
+}
+
+async function waitForProcessExit(processIds: readonly number[], timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (processIds.some(processAlive) && Date.now() < deadline) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  return !processIds.some(processAlive);
+}
+
+function signalOwnedProcesses(processes: readonly OwnedProcess[], signal: NodeJS.Signals): void {
+  for (const { pid } of processes) {
+    try { signalProcess(pid, signal); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error('Owned CourseWeave process signal failed.');
+    }
+  }
+}
+
 async function waitForProcessGroupExit(processGroup: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (processGroupAlive(processGroup) && Date.now() < deadline) {
@@ -233,21 +316,29 @@ async function waitForProcessGroupExit(processGroup: number, timeoutMs: number):
   return !processGroupAlive(processGroup);
 }
 
-async function stop(child: ChildProcess): Promise<void> {
-  if (child.pid === undefined) return;
+async function stop(child: ChildProcess): Promise<number[]> {
+  if (child.pid === undefined) return [];
   const processGroup = child.pid;
+  const ownedProcesses = ownedProcessTree(child.pid);
+  const ownedProcessIds = ownedProcesses.map(({ pid }) => pid);
   const signalOwnedGroup = (signal: NodeJS.Signals) => {
     try { signalProcess(-processGroup, signal); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error('Owned CourseWeave supervisor signal failed.');
     }
   };
-  if (!processGroupAlive(processGroup)) return;
-  signalOwnedGroup('SIGTERM');
-  if (!(await waitForProcessGroupExit(processGroup, 10_000))) {
-    signalOwnedGroup('SIGKILL');
-    if (!(await waitForProcessGroupExit(processGroup, 15_000))) throw new Error('Owned CourseWeave process group survived bounded cleanup.');
+  if (!processAlive(child.pid)) return ownedProcessIds;
+  child.kill('SIGTERM');
+  if (!(await waitForProcessExit(ownedProcessIds, 10_000))) {
+    signalOwnedProcesses(ownedProcesses, 'SIGTERM');
   }
+  if (!(await waitForProcessExit(ownedProcessIds, 5_000))) {
+    signalOwnedGroup('SIGKILL');
+    signalOwnedProcesses(ownedProcesses, 'SIGKILL');
+    if (!(await waitForProcessExit(ownedProcessIds, 10_000))) throw new Error('Owned CourseWeave process tree survived bounded cleanup.');
+  }
+  if (processGroupAlive(processGroup) && !(await waitForProcessGroupExit(processGroup, 1_000))) throw new Error('Owned CourseWeave process group survived bounded cleanup.');
+  return ownedProcessIds;
 }
 
 export async function launchInstalledWorkspace(mode: LaunchMode, options: { emptyCourse?: boolean } = {}) {
@@ -257,11 +348,13 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
   const venv = join(owned, 'venv');
   const socketPath = join(owned, 'bootstrap.sock');
   const browserHelper = join(owned, 'browser-handoff.py');
+  const constraints = join(owned, 'constraints.txt');
   let launchProcess: ChildProcess | null = null;
   let handoff: Awaited<ReturnType<typeof bootstrapSocket>> | null = null;
   let bootstrapProxy: Awaited<ReturnType<typeof tokenlessBootstrap>> | null = null;
   let setupOutput = '';
   let launchOutput = '';
+  let ownedProcessIds: number[] = [];
   try {
     await mkdir(courseRoot, { recursive: true });
     await mkdir(join(owned, 'home'));
@@ -272,13 +365,16 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
     const wheelName = (await readdir(wheelRoot)).find((entry) => entry.endsWith('.whl'));
     if (wheelName === undefined) throw new Error('Fresh wheel build produced no wheel.');
     setupOutput += await run('uv', ['venv', '--python', '3.11', venv]);
-    setupOutput += await run('uv', ['pip', 'install', '--python', join(venv, 'bin', 'python'), join(wheelRoot, wheelName), 'jupyterlab==4.6.3']);
+    setupOutput += await run('uv', ['export', '--frozen', '--all-groups', '--no-emit-project', '--no-hashes', '--output-file', constraints], { cwd: repoRoot });
+    setupOutput += await run('uv', ['pip', 'install', '--python', join(venv, 'bin', 'python'), '--constraint', constraints, join(wheelRoot, wheelName), 'jupyterlab==4.6.3', 'jupyter-server==2.21.0']);
     assertNoNode(venv);
     const environment = runtimeEnvironment(owned, venv, browserHelper, socketPath);
     const installedPathOutput = await run(join(venv, 'bin', 'python'), ['-c', 'import courseweave; print(courseweave.__file__)'], { env: environment });
     setupOutput += installedPathOutput;
     const installedPath = installedPathOutput.trim();
     if (!installedPath.startsWith(join(venv, 'lib'))) throw new Error('CourseWeave was not imported from the fresh venv.');
+    const installedVersions = JSON.parse(await run(join(venv, 'bin', 'python'), ['-c', "import json; from importlib.metadata import version; print(json.dumps({'jupyterlab': version('jupyterlab'), 'jupyter-server': version('jupyter-server')}))"], { env: environment })) as Record<string, string>;
+    if (installedVersions.jupyterlab !== '4.6.3' || installedVersions['jupyter-server'] !== '2.21.0') throw new Error('Installed Jupyter versions do not match the tested runtime contract.');
     const discovery = await run(join(venv, 'bin', 'jupyter'), ['labextension', 'list'], { env: environment });
     setupOutput += discovery;
     if (!/@courseweave\/lab/.test(discovery)) throw new Error('Installed JupyterLab did not discover @courseweave/lab.');
@@ -289,7 +385,7 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
     launchProcess = spawn(join(venv, 'bin', 'courseweave'), [mode === 'learn' ? 'launch' : 'author', '--course-root', courseRoot, '--port', String(port)], { env: environment, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     const child = launchProcess;
     const capture = (chunk: Buffer) => {
-      if (launchOutput.length < 1_000_000) launchOutput += chunk.toString().slice(0, 1_000_000 - launchOutput.length);
+      if (launchOutput.length < OUTPUT_LIMIT) launchOutput += chunk.toString().slice(0, OUTPUT_LIMIT - launchOutput.length);
     };
     child.stdout?.on('data', capture);
     child.stderr?.on('data', capture);
@@ -299,7 +395,8 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
     let closePromise: Promise<void> | null = null;
     const close = () => {
       closePromise ??= (async () => {
-        const results = await Promise.allSettled([stop(child), handoff?.close(), bootstrapProxy?.close()]);
+        const stopPromise = stop(child).then((processIds) => { ownedProcessIds = processIds; });
+        const results = await Promise.allSettled([stopPromise, handoff?.close(), bootstrapProxy?.close()]);
         const stopResult = results[0];
         if (stopResult.status === 'rejected') {
           throw new Error(stopResult.reason instanceof Error ? stopResult.reason.message : 'Owned CourseWeave supervisor cleanup failed.');
@@ -317,13 +414,13 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
         safe.search = ''; safe.hash = '';
         return new URL('.', safe).href;
       },
-      auditCredentials: async (input: { capabilityToken: string; pageConfig: Record<string, unknown>; storage: string; locations: string[]; artifactRoots?: string[] }) => {
+      auditCredentials: async (input: { capabilityToken: string; pageConfig: Record<string, unknown>; storage: string; browserOutput: string; locations: string[]; artifactRoots?: string[] }) => {
         const jupyterToken = bootstrapProxy!.jupyterToken();
         if (jupyterToken === null || jupyterToken.length === 0 || input.capabilityToken.length === 0) throw new Error('Installed-wheel credential audit could not obtain both credentials.');
         if (input.pageConfig.token !== jupyterToken) throw new Error('Installed-wheel PageConfig did not contain the expected standard Jupyter token.');
         if (JSON.stringify(input.pageConfig).includes(input.capabilityToken)) throw new Error('CourseWeave capability entered PageConfig.');
         const forbidden = [jupyterToken, input.capabilityToken];
-        if ([input.storage, ...input.locations, setupOutput, launchOutput].some((value) => forbidden.some((credential) => value.includes(credential)))) {
+        if ([input.storage, input.browserOutput, ...input.locations, setupOutput, launchOutput].some((value) => forbidden.some((credential) => value.includes(credential)))) {
           throw new Error('Installed-wheel credential entered storage, URL, or captured output.');
         }
         let filesScanned = await scanFiles(owned, forbidden);
@@ -342,6 +439,7 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
       },
       cleanupState: async () => ({
         processGroupAlive: child.pid === undefined ? false : processGroupAlive(child.pid),
+        ownedProcessesAlive: ownedProcessIds.some(processAlive),
         ownedRootExists: await access(owned).then(() => true, () => false)
       }),
       close,

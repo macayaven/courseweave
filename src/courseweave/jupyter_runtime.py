@@ -29,6 +29,12 @@ _PAGE_CONFIG_KEYS = (
     "courseweaveLaunchMode",
 )
 _SERVER_INFO_GUARD = "_courseweave_server_info_guard_installed"
+_SUPERVISED_ENVIRONMENT_KEYS = (
+    "COURSEWEAVE_URL",
+    "COURSEWEAVE_CAPABILITY_TOKEN",
+    "COURSEWEAVE_RUNTIME_ID",
+    "COURSEWEAVE_LAUNCH_MODE",
+)
 _JSON_CONTENT_TYPE = re.compile(
     r'application/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?[ \t]*',
     re.IGNORECASE | re.ASCII,
@@ -318,9 +324,11 @@ def _guard_jupyter_runtime_files(serverapp: Any) -> None:
 def _load_jupyter_server_extension(serverapp: Any) -> None:
     """Load using only public Jupyter Server 2.21 extension contracts."""
 
-    settings = RuntimeSettings.from_environ(os.environ)
-    if settings is not None:
+    # A partial supervised environment must fail without first persisting the
+    # standard Jupyter token. Generic, non-CourseWeave Jupyter use is unchanged.
+    if any(key in os.environ for key in _SUPERVISED_ENVIRONMENT_KEYS):
         _guard_jupyter_runtime_files(serverapp)
+    settings = RuntimeSettings.from_environ(os.environ)
     web_app = serverapp.web_app
     web_app.settings[_SETTINGS_KEY] = settings
     page_config = web_app.settings.setdefault("page_config_data", {})

@@ -17,15 +17,23 @@ async function bootstrap(page: Page, tokenlessUrl: string): Promise<void> {
 }
 
 async function credentialSnapshot(page: Page, runtimeId: string) {
-  return page.evaluate(async (id) => {
+  const credential = await page.evaluate(async (id) => {
     const pageConfig = JSON.parse(document.querySelector('#jupyter-config-data')?.textContent ?? '{}') as Record<string, unknown>;
     const runtime = await (await fetch('courseweave/runtime', { headers: { 'X-CourseWeave-Runtime-ID': id } })).json() as { capabilityToken: string };
-    return {
-      capabilityToken: runtime.capabilityToken,
-      pageConfig,
-      storage: JSON.stringify({ local: Object.entries(localStorage), session: Object.entries(sessionStorage) }),
-    };
+    return { capabilityToken: runtime.capabilityToken, pageConfig };
   }, runtimeId);
+  const storage = await Promise.all(page.frames().map(async (frame) => {
+    try {
+      return await frame.evaluate(() => ({
+        url: location.href,
+        local: Object.entries(localStorage),
+        session: Object.entries(sessionStorage)
+      }));
+    } catch {
+      return { url: frame.url(), inaccessible: true };
+    }
+  }));
+  return { ...credential, storage: JSON.stringify(storage) };
 }
 
 test.describe.configure({ timeout: 300_000, mode: 'serial' });
@@ -47,10 +55,10 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
   const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();
   const pageErrors: string[] = [];
-  const consoleErrors: Array<{ text: string; url: string }> = [];
+  const consoleMessages: Array<{ type: string; text: string; url: string }> = [];
   const publishedContexts: Array<Record<string, unknown>> = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
-  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push({ text: message.text(), url: message.location().url }); });
+  page.on('console', (message) => consoleMessages.push({ type: message.type(), text: message.text(), url: message.location().url }));
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().endsWith('/courseweave/context')) {
       try { publishedContexts.push(request.postDataJSON() as Record<string, unknown>); } catch { /* asserted by the missing-XSRF probe */ }
@@ -132,13 +140,18 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     expect(await invalidationPromise).toBe(true);
     await expect(page.locator('.lm-TabBar-tabLabel', { hasText: 'lesson.md' })).toBeVisible();
     await guide.getByRole('button', { name: 'Open html' }).click();
-    await expect(page.locator('iframe[title="CourseWeave reader"]')).toHaveAttribute('src', /\/courseweave\/files\/lessons\/reader\.html$/);
+    const reader = page.locator('iframe[title="CourseWeave reader"]');
+    await expect(reader).toHaveAttribute('src', /\/courseweave\/files\/lessons\/reader\.html$/);
+    await expect(reader).toHaveAttribute('sandbox', 'allow-same-origin');
+    await expect(reader).toHaveAttribute('referrerpolicy', 'same-origin');
     await expect.poll(() => page.frames().some((frame) => /\/courseweave\/files\/lessons\/reader\.html$/.test(frame.url()))).toBe(true);
     const htmlFrame = page.frames().find((frame) => /\/courseweave\/files\/lessons\/reader\.html$/.test(frame.url()));
     await htmlFrame!.evaluate(() => document.body.removeAttribute('data-jupyter-api-token'));
     expect((await htmlFrame!.locator('body').innerText()).includes('Reader fixture')).toBe(true);
     await guide.getByRole('button', { name: 'Open video' }).click();
-    await expect(page.locator('iframe[title="CourseWeave reader"]')).toHaveAttribute('src', 'https://video.example.test/video.mp4');
+    await expect(reader).toHaveAttribute('src', 'https://video.example.test/video.mp4');
+    await expect(reader).toHaveAttribute('sandbox', '');
+    await expect(reader).toHaveAttribute('referrerpolicy', 'no-referrer');
     const video = page.frameLocator('iframe[title="CourseWeave reader"]').locator('video');
     await expect(video).toHaveCount(1);
     await expect.poll(() => video.evaluate((element) => ({ readyState: element.readyState, error: element.error?.code ?? null }))).toMatchObject({ readyState: expect.any(Number), error: null });
@@ -162,32 +175,40 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     await page.waitForTimeout(250);
     await expect(workspace.terminalSentinelExists()).resolves.toBe(false);
     expect(pageErrors).toEqual([]);
-    const expectedConsoleError = (message: { text: string; url: string }) => {
+    const expectedConsoleError = (message: { type: string; text: string; url: string }) => {
+      if (message.type !== 'error') return false;
       const path = (() => { try { return new URL(message.url).pathname; } catch { return ''; } })();
-      return ((/status of (400|403)/.test(message.text) && message.url.startsWith(baseUrl))
-        || (/status of 404/.test(message.text) && (path === '/api/context' || path.endsWith('/favicon.ico')))
-        || (/Content Security Policy/.test(message.text) && message.url.startsWith(baseUrl))
-        || (/WebSocket connection/.test(message.text) && message.url.startsWith(baseUrl))
-        || (/Connection lost, reconnecting/.test(message.text) && message.url.startsWith(baseUrl)));
+      return ((/status of (400|403)/.test(message.text) && [
+        '/courseweave/courseweave/runtime', '/courseweave/courseweave/course',
+        '/courseweave/courseweave/context'
+      ].includes(path))
+        || (/status of 404/.test(message.text) && path.endsWith('/favicon.ico')));
     };
-    const unexpectedConsoleErrors = consoleErrors.filter((message) => !expectedConsoleError(message));
+    const unexpectedConsoleErrors = consoleMessages.filter((message) => message.type === 'error' && !expectedConsoleError(message));
     expect(unexpectedConsoleErrors).toEqual([]);
     const credential = await credentialSnapshot(page, config.courseweaveRuntimeId as string);
-    await expect(workspace.auditCredentials({
+    const audit = await workspace.auditCredentials({
       ...credential,
+      browserOutput: JSON.stringify({ consoleMessages, pageErrors }),
       locations: page.frames().map((frame) => frame.url()),
       artifactRoots: [testInfo.outputDir]
-    })).resolves.toMatchObject({ retainedCredentials: 0 });
+    });
+    expect(audit.retainedCredentials).toBe(0);
+    expect(audit.filesScanned).toBeGreaterThan(0);
   } finally {
     const cleanup = await Promise.allSettled([context.close(), workspace.close()]);
     if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;
-    await expect(workspace.cleanupState()).resolves.toEqual({ processGroupAlive: false, ownedRootExists: false });
+    await expect(workspace.cleanupState()).resolves.toEqual({ processGroupAlive: false, ownedProcessesAlive: false, ownedRootExists: false });
   }
 });
 
 test('fresh installed wheel opens Author without materializing an empty course before Save', async ({ browser }, testInfo) => {
   const workspace = await launchInstalledWorkspace('author', { emptyCourse: true });
   const page = await browser.newPage();
+  const pageErrors: string[] = [];
+  const consoleMessages: Array<{ type: string; text: string; url: string }> = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('console', (message) => consoleMessages.push({ type: message.type(), text: message.text(), url: message.location().url }));
   try {
     await bootstrap(page, await workspace.bootstrapUrl());
     const config = await page.locator('#jupyter-config-data').evaluate((node) => JSON.parse(node.textContent ?? '{}')) as Record<string, unknown>;
@@ -207,14 +228,17 @@ test('fresh installed wheel opens Author without materializing an empty course b
       'courseweave.json',
     ]);
     const credential = await credentialSnapshot(page, config.courseweaveRuntimeId as string);
-    await expect(workspace.auditCredentials({
+    const audit = await workspace.auditCredentials({
       ...credential,
+      browserOutput: JSON.stringify({ consoleMessages, pageErrors }),
       locations: page.frames().map((frame) => frame.url()),
       artifactRoots: [testInfo.outputDir]
-    })).resolves.toMatchObject({ retainedCredentials: 0 });
+    });
+    expect(audit.retainedCredentials).toBe(0);
+    expect(audit.filesScanned).toBeGreaterThan(0);
   } finally {
     const cleanup = await Promise.allSettled([page.close(), workspace.close()]);
     if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;
-    await expect(workspace.cleanupState()).resolves.toEqual({ processGroupAlive: false, ownedRootExists: false });
+    await expect(workspace.cleanupState()).resolves.toEqual({ processGroupAlive: false, ownedProcessesAlive: false, ownedRootExists: false });
   }
 });

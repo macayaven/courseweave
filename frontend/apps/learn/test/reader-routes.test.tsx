@@ -13,7 +13,7 @@ describe('reader parent contract', () => {
   ])('accepts local HTML only beneath the exact Jupyter base %s', (jupyterBaseUrl, htmlSource) => {
     const message = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'source-a', moduleId: 'm01', phaseId: 'p01', surfaceId: 'lesson', jupyterBaseUrl, htmlSource };
     expect(parseReaderNavigation(message, 'https://lab.test')).toEqual(message);
-    expect(selectReaderRoute(course, 'source-a', message, undefined, 'https://lab.test')).toEqual({ surface: html, htmlSource });
+    expect(selectReaderRoute(course, 'source-a', message, undefined, 'https://lab.test')).toEqual({ surface: html, htmlSource, parentOpened: true });
   });
 
   it('rejects paths outside the declared base and noncanonical files segments', () => {
@@ -46,7 +46,7 @@ describe('reader parent contract', () => {
 
   it('requires an exact validated HTTPS video outcome matching the manifest URL', () => {
     const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'source-a', moduleId: 'm01', phaseId: 'p01', surfaceId: 'video', jupyterBaseUrl: 'https://lab.test/base/', htmlSource: 'https://video.test/a.mp4' };
-    expect(selectReaderRoute(course, 'source-a', outcome, undefined, 'https://lab.test')).toEqual({ surface: video, htmlSource: null });
+    expect(selectReaderRoute(course, 'source-a', outcome, undefined, 'https://lab.test')).toEqual({ surface: video, htmlSource: null, parentOpened: true });
     expect(selectReaderRoute(course, 'source-a', { ...outcome, htmlSource: 'https://other.test/a.mp4' }, undefined, 'https://lab.test')).toBeNull();
     expect(selectReaderRoute(course, 'source-a', { ...outcome, htmlSource: 'http://video.test/a.mp4' }, undefined, 'https://lab.test')).toBeNull();
     expect(selectReaderRoute(course, 'source-a', { ...outcome, jupyterBaseUrl: 'https://attacker.test/' }, undefined, 'https://lab.test')).toBeNull();

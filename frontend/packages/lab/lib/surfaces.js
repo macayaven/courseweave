@@ -214,7 +214,7 @@ class ReaderWidget extends widgets_1.Widget {
         const iframe = document.createElement('iframe');
         iframe.title = 'CourseWeave reader';
         iframe.referrerPolicy = 'no-referrer';
-        iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-presentation');
+        iframe.setAttribute('sandbox', '');
         node.appendChild(iframe);
         super({ node });
         this.iframe = iframe;
@@ -223,13 +223,12 @@ class ReaderWidget extends widgets_1.Widget {
         this.title.closable = true;
     }
     navigate(source, localHtml) {
-        // Jupyter rejects an opaque-origin navigation to its authenticated /files
-        // handler. Local course HTML therefore keeps its Jupyter origin but cannot
-        // execute script; remote video remains an opaque scripted media document.
-        this.iframe.setAttribute('sandbox', localHtml
-            ? 'allow-same-origin allow-forms allow-presentation'
-            : 'allow-scripts allow-forms allow-presentation');
-        this.iframe.referrerPolicy = localHtml ? 'origin' : 'no-referrer';
+        // Jupyter rejects an opaque-origin or referrer-free navigation to its
+        // authenticated /files handler. Local course HTML therefore keeps its
+        // Jupyter origin and same-origin referrer while scripts/forms remain off;
+        // cross-origin subresources receive no referrer. Remote media is opaque.
+        this.iframe.setAttribute('sandbox', localHtml ? 'allow-same-origin' : '');
+        this.iframe.referrerPolicy = localHtml ? 'same-origin' : 'no-referrer';
         this.iframe.src = source;
     }
 }
@@ -324,9 +323,9 @@ class CourseSurfaceFactory {
     }
     createTerminal(key, coordinate, surface) {
         const instructions = terminalInstructions(surface, this.options.writeClipboard ?? writeBrowserClipboard);
-        const creation = this.options.commands.execute('terminal:create-new', {
-            name: `courseweave-${coordinate.moduleId}-${coordinate.phaseId}-${surface.id}`
-        }).then((created) => {
+        // Let Jupyter Server choose its constrained terminal-session name. The
+        // course coordinate is tracked only in this factory and is never routed.
+        const creation = this.options.commands.execute('terminal:create-new').then((created) => {
             const widget = mainAreaWidget(created);
             widget.contentHeader.addWidget(instructions);
             this.terminals.set(key, widget);

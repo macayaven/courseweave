@@ -67,7 +67,7 @@ function UnsentDrafts({ composer, onComposer, proposalDrafts, onProposalDraft }:
 
 function ReaderNavigation({ course, runtime, moduleId, phaseId, activeSurface, contextVersion }: { course: CourseManifest; runtime: TrustedRuntimeConfiguration; moduleId: string | null; phaseId: string | null; activeSurface: ReturnType<typeof findSurface>; contextVersion: number }) {
   const { route, requestNavigation } = useReaderRoute(course, runtime, moduleId !== null && phaseId !== null && activeSurface !== null ? { moduleId, phaseId, surface: activeSurface } : null, contextVersion);
-  return <>{route === null ? null : <section className="cw-surface-reader" aria-label="Course reader"><SurfaceReader surface={route.surface} htmlSource={route.htmlSource} serviceOrigin={runtime.expectedParentOrigin} parentOwnsReader /></section>}<Dashboard course={course} expectedParentOrigin={runtime.expectedParentOrigin} onOpenSurface={requestNavigation} /></>;
+  return <>{route === null ? null : <section className="cw-surface-reader" aria-label="Course reader"><SurfaceReader surface={route.surface} htmlSource={route.htmlSource} serviceOrigin={runtime.expectedParentOrigin} parentOwnsReader={route.parentOpened} /></section>}<Dashboard course={course} expectedParentOrigin={runtime.expectedParentOrigin} onOpenSurface={requestNavigation} /></>;
 }
 
 export function LearnApp() {

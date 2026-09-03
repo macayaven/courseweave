@@ -183,6 +183,21 @@ def test_invalid_environment_registers_fail_closed_handlers_without_page_values(
     assert serverapp.server_info()["token"] == JUPYTER_AUTH_SENTINEL
 
 
+def test_partial_supervised_environment_redacts_runtime_files_before_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in valid_environment():
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("COURSEWEAVE_RUNTIME_ID", "partial-supervised-launch")
+    serverapp = _FakeServerApp()
+
+    _load_jupyter_server_extension(serverapp)
+
+    assert serverapp.web_app.settings["courseweave_runtime_settings"] is None
+    assert serverapp.no_browser_open_file is True
+    assert serverapp.server_info()["token"] == ""
+
+
 def test_jupyter_server_221_selects_exact_jupyter_token_identity_contract(
     tmp_path: Path,
 ) -> None:

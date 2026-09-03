@@ -159,9 +159,7 @@ describe('CourseSurfaceFactory', () => {
     const first = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
     const second = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
     expect(commands.execute).toHaveBeenCalledOnce();
-    expect(commands.execute).toHaveBeenCalledWith('terminal:create-new', {
-      name: 'courseweave-m01-p01-terminal'
-    });
+    expect(commands.execute).toHaveBeenCalledWith('terminal:create-new');
     expect(JSON.stringify(commands.execute.mock.calls)).not.toContain('labs');
     expect(JSON.stringify(commands.execute.mock.calls)).not.toContain('python');
     expect(nativeTerminal.contentHeader.addWidget).toHaveBeenCalledOnce();
@@ -242,9 +240,7 @@ describe('CourseSurfaceFactory', () => {
       'Copy failed. Select the instructions and copy them manually.'
     ));
     expect(commands.execute).toHaveBeenCalledOnce();
-    expect(commands.execute).toHaveBeenCalledWith('terminal:create-new', {
-      name: 'courseweave-m01-p01-terminal'
-    });
+    expect(commands.execute).toHaveBeenCalledWith('terminal:create-new');
   });
 
   it('rejects an unsafe terminal cwd before creating UI or a terminal', async () => {
@@ -267,16 +263,18 @@ describe('CourseSurfaceFactory', () => {
     expect(html.htmlSource).toBe('https://lab.test/base/files/lessons/a%20b.html');
     expect(html.jupyterBaseUrl).toBe('https://lab.test/base/');
     expect(iframe.src).toBe(html.htmlSource);
-    expect(iframe.referrerPolicy).toBe('origin');
-    expect(iframe.getAttribute('sandbox')).toBe('allow-same-origin allow-forms allow-presentation');
+    expect(iframe.referrerPolicy).toBe('same-origin');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-same-origin');
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-scripts');
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-forms');
 
     const video = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'video' });
     expect(video.htmlSource).toBe('https://video.test/watch?v=1');
     expect(video.jupyterBaseUrl).toBe('https://lab.test/base/');
     expect(iframe.src).toBe(video.htmlSource);
     expect(iframe.referrerPolicy).toBe('no-referrer');
-    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-presentation');
+    expect(iframe.getAttribute('sandbox')).toBe('');
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-scripts');
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin');
     expect(shell.add).toHaveBeenCalledOnce();
   });

@@ -41,7 +41,7 @@ describe('SurfaceReader', () => {
     };
     const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-a', surfaceId: 'lesson-html', htmlSource: 'https://courseweave.test/content/lesson-html' };
 
-    expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface })).toEqual({ surface: htmlSurface, htmlSource: 'https://courseweave.test/content/lesson-html' });
+    expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface })).toEqual({ surface: htmlSurface, htmlSource: 'https://courseweave.test/content/lesson-html', parentOpened: true });
     expect(selectReaderRoute(course, 'other-source', outcome)).toBeNull();
     expect(selectReaderRoute(course, 'notebook-a', { ...outcome, surfaceId: 'missing' })).toBeNull();
     expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'other-module', phaseId: 'other-phase', surface: htmlSurface })).toBeNull();
@@ -61,7 +61,7 @@ describe('SurfaceReader', () => {
     const outcome = { type: 'courseweave.reader.opened.v1' as const, sourceId: 'notebook-a', moduleId: 'module-a', phaseId: 'read-a', surfaceId: 'lesson-html', htmlSource: 'https://courseweave.test/content/lesson-html' };
 
     expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-b', surface: duplicateSurface })).toBeNull();
-    expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface })).toEqual({ surface: htmlSurface, htmlSource: outcome.htmlSource });
+    expect(selectReaderRoute(course, 'notebook-a', outcome, { moduleId: 'module-a', phaseId: 'read-a', surface: htmlSurface })).toEqual({ surface: htmlSurface, htmlSource: outcome.htmlSource, parentOpened: true });
   });
 
   it('renders a pending destination outcome before context catches up and retains it after confirmation', () => {
@@ -74,7 +74,7 @@ describe('SurfaceReader', () => {
 
     const accepted = acceptReaderOutcome(course, createReaderIntent('notebook-a', destination, 4), outcome, destination, 4);
     expect(accepted).toMatchObject({ outcome, status: 'provisional', contextVersion: 4 });
-    expect(selectReaderRoute(course, 'notebook-a', accepted!.outcome)).toEqual({ surface: videoSurface, htmlSource: null });
+    expect(selectReaderRoute(course, 'notebook-a', accepted!.outcome)).toEqual({ surface: videoSurface, htmlSource: null, parentOpened: true });
     expect(reconcileReaderOutcome(accepted!, 'notebook-a', destination, 5)).toMatchObject({ status: 'confirmed' });
   });
 
@@ -131,25 +131,17 @@ describe('SurfaceReader', () => {
     expect(acceptReaderOutcome(course, confirmed, outcome, destination, 5, 'runtime-a')).toMatchObject({ status: 'confirmed' });
   });
 
-  it('renders a selected local HTML surface in a minimal sandbox titled from manifest metadata', () => {
+  it('does not create a second local HTML reader before parent confirmation', () => {
     render(<SurfaceReader surface={htmlSurface} htmlSource="https://courseweave.test/content/lesson-html" serviceOrigin="https://courseweave.test" />);
 
-    const reader = screen.getByTitle('Introduction lesson');
-    expect(reader).toHaveAttribute('src', 'https://courseweave.test/content/lesson-html');
-    expect(reader).toHaveAttribute('sandbox', 'allow-scripts');
-    expect(reader).toHaveAttribute('referrerpolicy', 'no-referrer');
-    expect(reader.getAttribute('sandbox')).not.toContain('allow-same-origin');
-    expect(reader.getAttribute('sandbox')).not.toContain('allow-forms');
-    expect(reader.getAttribute('sandbox')).not.toContain('allow-popups');
-    expect(reader.getAttribute('sandbox')).not.toContain('allow-downloads');
-    expect(reader.getAttribute('sandbox')).not.toContain('allow-modals');
-    expect(reader.getAttribute('sandbox')).not.toContain('allow-top-navigation');
+    expect(screen.getByRole('status')).toHaveTextContent('This course surface is unavailable.');
+    expect(document.querySelector('iframe')).toBeNull();
   });
 
   it('does not duplicate a surface already owned by the trusted parent reader', () => {
     render(<SurfaceReader surface={htmlSurface} htmlSource="https://lab.test/files/lesson.html" serviceOrigin="https://lab.test" parentOwnsReader />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Opened in the CourseWeave main-area reader.');
+    expect(screen.getByRole('status')).toHaveTextContent('Opened Introduction lesson in the CourseWeave main-area reader.');
     expect(document.querySelector('iframe')).toBeNull();
   });
 
@@ -174,12 +166,11 @@ describe('SurfaceReader', () => {
     expect(document.querySelector('iframe')).toBeNull();
   });
 
-  it('renders an absolute credential-free HTTPS video with native controls and its manifest title', () => {
+  it('does not create a second video reader before parent confirmation', () => {
     render(<SurfaceReader surface={videoSurface} serviceOrigin="https://courseweave.test" />);
 
-    const video = screen.getByTitle('Introduction video');
-    expect(video).toHaveAttribute('src', 'https://video.example.test/intro.mp4');
-    expect(video).toHaveAttribute('controls');
+    expect(screen.getByRole('status')).toHaveTextContent('This course surface is unavailable.');
+    expect(document.querySelector('video')).toBeNull();
   });
 
   it.each([

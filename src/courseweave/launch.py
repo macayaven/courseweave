@@ -569,6 +569,7 @@ class LaunchSupervisor:
             "--ServerApp.allow_remote_access=False",
             "--ServerApp.use_redirect_file=False",
             "--ServerApp.jpserver_extensions=courseweave.jupyter_runtime=True",
+            "--ServerApp.reraise_server_extension_failures=True",
         ]
 
     def _install_signal_handlers(self) -> None:
