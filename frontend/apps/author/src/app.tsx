@@ -223,11 +223,13 @@ function AuthorEditor({
   client,
   connected,
   connectionEpoch,
+  onCourseSaved,
 }: {
   course: CourseResponse;
   client: Client;
   connected: boolean;
   connectionEpoch: number;
+  onCourseSaved(course: CourseResponse): void;
 }) {
   const [state, setState] = useState<AuthorDocumentState>(() =>
     documentState(course.manifest as AuthorManifest),
@@ -376,6 +378,7 @@ function AuthorEditor({
     setStructural({ status: "passed", issues: [] });
     setRunnable({ status: "not_requested", issues: [] });
     setRemote(null);
+    onCourseSaved(next);
     setNotice("Saved exact canonical course bytes.");
   };
   const phase = selectedPhase(state);
@@ -533,6 +536,7 @@ export function AuthorApp() {
         client={client.current}
         connected={connected}
         connectionEpoch={connectionEpoch.current}
+        onCourseSaved={setCourse}
       />
       {!connected ? (
         <button type="button" onClick={runtime.retry}>
