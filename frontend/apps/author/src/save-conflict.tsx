@@ -33,6 +33,7 @@ export function SaveConflict({
   requestGeneration = 0,
   connectionEpoch = 0,
   onRemoteSaved,
+  canonicalFromDraft = null,
 }: {
   manifest: unknown;
   etag: string;
@@ -52,6 +53,7 @@ export function SaveConflict({
   requestGeneration?: number;
   connectionEpoch?: number;
   onRemoteSaved?(course: SavedCourse): void;
+  canonicalFromDraft?: { generation: number; raw: string } | null;
 }) {
   const [status, setStatus] = useState<SaveStatus>("idle");
   const [latest, setLatest] = useState<SavedCourse | null>(null);
@@ -140,7 +142,9 @@ export function SaveConflict({
   const localRaw =
     localCanonical?.generation === requestGeneration
       ? localCanonical.raw
-      : null;
+      : canonicalFromDraft?.generation === requestGeneration
+        ? canonicalFromDraft.raw
+        : null;
   const downloadLocal = () => {
     if (localRaw === null) return;
     const href = URL.createObjectURL(

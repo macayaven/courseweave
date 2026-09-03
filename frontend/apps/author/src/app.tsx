@@ -246,6 +246,10 @@ function AuthorEditor({
   });
   const [notice, setNotice] = useState("");
   const [remote, setRemote] = useState<SavedCourse | null>(null);
+  const [reconnectCanonical, setReconnectCanonical] = useState<{
+    generation: number;
+    raw: string;
+  } | null>(null);
   const [draftGeneration, setDraftGeneration] = useState(0);
   const [focusPath, setFocusPath] = useState<string | null>(null);
   const checks = useRef<{
@@ -266,8 +270,25 @@ function AuthorEditor({
   useEffect(() => {
     if (course.etag === baseline.etag) return;
     if (dirty) {
+      const controller = new AbortController();
+      const started = latestEpoch.current;
       setRemote(savedCourse(course));
-      return;
+      void client
+        .validateCourse(
+          projectDraft(state.draft),
+          "structural",
+          controller.signal,
+        )
+        .then((result) => {
+          if (controller.signal.aborted || started !== latestEpoch.current)
+            return;
+          setReconnectCanonical({
+            generation: draftGeneration,
+            raw: result.formatted_json,
+          });
+        })
+        .catch(() => undefined);
+      return () => controller.abort();
     }
     if (isAuthorManifest(course.manifest)) {
       setBaseline(course);
@@ -288,7 +309,8 @@ function AuthorEditor({
   }, []);
   const focusIssues = useCallback((all: readonly ValidationIssue[]) => {
     const issue = all.find(
-      (candidate) => selectionForPointer(currentState.current, candidate.path) !== null,
+      (candidate) =>
+        selectionForPointer(currentState.current, candidate.path) !== null,
     );
     if (!issue) return false;
     const selection = selectionForPointer(currentState.current, issue.path);
@@ -442,6 +464,7 @@ function AuthorEditor({
           setRemote(null);
         }}
         remote={remote}
+        canonicalFromDraft={reconnectCanonical}
         disabled={!connected}
         requestGeneration={draftGeneration}
         connectionEpoch={connectionEpoch}
