@@ -31,16 +31,22 @@ export class CourseWeaveRelayClient {
     return ServerConnection.makeRequest(url, init, this.serverSettings);
   }
 
+  private runtimeRequest(runtimeId: string): Promise<Response> {
+    const url = URLExt.join(this.serverSettings.baseUrl, 'courseweave', 'runtime');
+    return fetch(url, {
+      method: 'GET',
+      headers: { 'X-CourseWeave-Runtime-ID': runtimeId },
+      cache: 'no-store',
+      credentials: 'same-origin'
+    });
+  }
+
   async getRuntime(runtimeId: string): Promise<RuntimeRelayPayload> {
     try {
       if (runtimeId.length === 0 || runtimeId.length > 240 || runtimeId.trim() !== runtimeId) {
         throw new Error('invalid runtime ID');
       }
-      const response = await this.request('runtime', {
-        method: 'GET',
-        headers: { 'X-CourseWeave-Runtime-ID': runtimeId },
-        cache: 'no-store'
-      });
+      const response = await this.runtimeRequest(runtimeId);
       if (!response.ok) throw new Error('runtime relay failed');
       const payload = parseRuntimeRelayPayload(await response.json(), this.serviceOrigin);
       if (payload === null) throw new Error('invalid runtime relay payload');
@@ -66,11 +72,12 @@ export class CourseWeaveRelayClient {
 
 interface RuntimeBrokerOptions {
   hostWindow: Window;
-  childWindow: Window;
+  iframe: HTMLIFrameElement;
   serviceOrigin: string;
   runtimeId: string;
   sourceId: string;
   relay: Pick<CourseWeaveRelayClient, 'getRuntime'>;
+  beforeReply?: (childWindow: Window) => void;
 }
 
 export class RuntimeBroker {
@@ -80,24 +87,32 @@ export class RuntimeBroker {
   constructor(private readonly options: RuntimeBrokerOptions) {}
 
   private readonly listener = (event: MessageEvent<unknown>): void => {
+    const childWindow = this.options.iframe.contentWindow;
     if (
       !this.listening
       || this.inFlight
-      || event.source !== this.options.childWindow
+      || childWindow === null
+      || event.source !== childWindow
       || event.origin !== this.options.serviceOrigin
       || parseRuntimeRequest(event.data) === null
     ) return;
     this.inFlight = true;
-    void this.reply().finally(() => {
+    void this.reply(childWindow).finally(() => {
       this.inFlight = false;
     });
   };
 
-  private async reply(): Promise<void> {
+  private async reply(childWindow: Window): Promise<void> {
     try {
       const runtime = await this.options.relay.getRuntime(this.options.runtimeId);
-      if (!this.listening || runtime.serviceOrigin !== this.options.serviceOrigin) return;
-      this.options.childWindow.postMessage({
+      if (
+        !this.listening
+        || this.options.iframe.contentWindow !== childWindow
+        || runtime.serviceOrigin !== this.options.serviceOrigin
+      ) return;
+      this.options.beforeReply?.(childWindow);
+      if (!this.listening || this.options.iframe.contentWindow !== childWindow) return;
+      childWindow.postMessage({
         type: 'courseweave.runtime.v1',
         serviceOrigin: runtime.serviceOrigin,
         capabilityToken: runtime.capabilityToken,

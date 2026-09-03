@@ -160,6 +160,7 @@ interface CourseSurfaceFactoryOptions {
   serviceOrigin: string;
   jupyterOrigin: string;
   baseUrl: string;
+  beforeAuthorAttach?: (widget: Widget, iframe: HTMLIFrameElement) => void;
 }
 
 export interface SurfaceOpenResult {
@@ -382,6 +383,7 @@ export class CourseSurfaceFactory {
   openAuthor(): Widget {
     if (this.author === null || this.author.isDisposed) {
       this.author = new IframeWidget('courseweave-author', 'CourseWeave author', `${this.options.serviceOrigin}/author/`);
+      this.options.beforeAuthorAttach?.(this.author, this.author.iframe);
       this.options.shell.add(this.author, 'main', { type: 'CourseWeave' });
     }
     this.activate(this.author);

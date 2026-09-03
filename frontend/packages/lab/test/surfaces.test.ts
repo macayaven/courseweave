@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { Widget } from '@lumino/widgets';
 
 vi.mock('@lumino/widgets', () => ({
   Widget: class {
@@ -66,7 +67,7 @@ function widget(id: string) {
   };
 }
 
-function harness() {
+function harness(beforeAuthorAttach?: (widget: Widget, iframe: HTMLIFrameElement) => void) {
   const shell = { add: vi.fn(), activateById: vi.fn(), currentWidget: null };
   const documents = { openOrReveal: vi.fn((path: string, factory: string) => widget(`${factory}:${path}`)) };
   const commands = { execute: vi.fn().mockResolvedValue(widget('terminal-native')) };
@@ -76,7 +77,8 @@ function harness() {
     commands,
     serviceOrigin: 'https://courseweave.test',
     jupyterOrigin: 'https://lab.test',
-    baseUrl: '/base/'
+    baseUrl: '/base/',
+    beforeAuthorAttach
   });
   factory.setCourse(course);
   return { factory, shell, documents, commands };
@@ -206,6 +208,23 @@ describe('CourseSurfaceFactory', () => {
     dashboard.dispose();
     expect(factory.openDashboard()).not.toBe(dashboard);
     expect(shell.add).toHaveBeenCalledTimes(3);
+  });
+
+  it('registers the Author iframe before its first shell add and only once', () => {
+    const beforeAuthorAttach = vi.fn(() => {
+      expect(shell.add).not.toHaveBeenCalled();
+    });
+    const { factory, shell } = harness(beforeAuthorAttach);
+
+    const author = factory.openAuthor();
+    expect(factory.openAuthor()).toBe(author);
+
+    expect(beforeAuthorAttach).toHaveBeenCalledOnce();
+    expect(beforeAuthorAttach).toHaveBeenCalledWith(
+      author,
+      author.node.querySelector('iframe')
+    );
+    expect(shell.add).toHaveBeenCalledOnce();
   });
 
   it('rerenders one existing dashboard from the latest authenticated course snapshot', async () => {

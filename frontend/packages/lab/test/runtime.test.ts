@@ -9,6 +9,7 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 async function settle(): Promise<void> {
@@ -16,14 +17,20 @@ async function settle(): Promise<void> {
   await Promise.resolve();
 }
 
+function iframeWithWindow(childWindow: Window): HTMLIFrameElement {
+  return { get contentWindow() { return childWindow; } } as unknown as HTMLIFrameElement;
+}
+
 describe('CourseWeave same-origin relay client', () => {
-  it('uses ServerConnection.makeRequest against the Jupyter base URL with the exact runtime ID header', async () => {
-    const makeRequest = vi.spyOn(ServerConnection, 'makeRequest').mockResolvedValue(
+  it('uses exact same-origin fetch for the runtime relay without a cache-busting query', async () => {
+    const fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         serviceOrigin: 'https://courseweave.test',
         capabilityToken: 'runtime-token'
       }), { status: 200 })
     );
+    vi.stubGlobal('fetch', fetch);
+    vi.spyOn(ServerConnection, 'makeRequest').mockResolvedValue(new Response('{}', { status: 500 }));
     const settings = ServerConnection.makeSettings({ baseUrl: 'https://lab.test/base/' });
     const client = new CourseWeaveRelayClient('https://courseweave.test', settings);
 
@@ -31,11 +38,11 @@ describe('CourseWeave same-origin relay client', () => {
       serviceOrigin: 'https://courseweave.test',
       capabilityToken: 'runtime-token'
     });
-    expect(makeRequest).toHaveBeenCalledTimes(1);
-    const [url, init, usedSettings] = makeRequest.mock.calls[0]!;
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = fetch.mock.calls[0]!;
     expect(url).toBe('https://lab.test/base/courseweave/runtime');
     expect(new Headers(init.headers).get('X-CourseWeave-Runtime-ID')).toBe('runtime-123');
-    expect(usedSettings).toBe(settings);
+    expect(init).toMatchObject({ method: 'GET', cache: 'no-store', credentials: 'same-origin' });
   });
 
   it('uses only same-origin Jupyter course and context relay URLs', async () => {
@@ -80,6 +87,75 @@ describe('CourseWeave same-origin relay client', () => {
 });
 
 describe('RuntimeBroker', () => {
+  it('starts while detached and binds the later current iframe window before replying', async () => {
+    const child = { postMessage: vi.fn() } as unknown as Window;
+    let current: Window | null = null;
+    const getRuntime = vi.fn().mockResolvedValue({
+      serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-token'
+    });
+    const beforeReply = vi.fn(() => {
+      expect(child.postMessage).not.toHaveBeenCalled();
+    });
+    const broker = new RuntimeBroker({
+      hostWindow: window,
+      iframe: { get contentWindow() { return current; } } as unknown as HTMLIFrameElement,
+      serviceOrigin: 'https://courseweave.test',
+      runtimeId: 'runtime-123',
+      sourceId: 'source-123',
+      relay: { getRuntime },
+      beforeReply
+    });
+    broker.start();
+    const request = { type: 'courseweave.runtime.request.v1' };
+
+    window.dispatchEvent(new MessageEvent('message', { data: request, origin: 'https://courseweave.test', source: child }));
+    expect(getRuntime).not.toHaveBeenCalled();
+
+    current = child;
+    window.dispatchEvent(new MessageEvent('message', { data: request, origin: 'https://courseweave.test', source: child }));
+    await settle();
+
+    expect(beforeReply).toHaveBeenCalledOnce();
+    expect(beforeReply).toHaveBeenCalledWith(child);
+    expect(getRuntime).toHaveBeenCalledWith('runtime-123');
+    expect(child.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'courseweave.runtime.v1' }), 'https://courseweave.test');
+    broker.dispose();
+  });
+
+  it('rejects stale windows and suppresses the reply if navigation replaces the verified iframe window', async () => {
+    const stale = { postMessage: vi.fn() } as unknown as Window;
+    const child = { postMessage: vi.fn() } as unknown as Window;
+    const replacement = { postMessage: vi.fn() } as unknown as Window;
+    let current: Window | null = child;
+    let resolveRuntime!: (value: { serviceOrigin: string; capabilityToken: string }) => void;
+    const beforeReply = vi.fn();
+    const getRuntime = vi.fn().mockReturnValue(new Promise((resolve) => { resolveRuntime = resolve; }));
+    const broker = new RuntimeBroker({
+      hostWindow: window,
+      iframe: { get contentWindow() { return current; } } as unknown as HTMLIFrameElement,
+      serviceOrigin: 'https://courseweave.test',
+      runtimeId: 'runtime-123',
+      sourceId: 'source-123',
+      relay: { getRuntime },
+      beforeReply
+    });
+    broker.start();
+    const request = { type: 'courseweave.runtime.request.v1' };
+
+    window.dispatchEvent(new MessageEvent('message', { data: request, origin: 'https://courseweave.test', source: stale }));
+    expect(getRuntime).not.toHaveBeenCalled();
+    current = child;
+    window.dispatchEvent(new MessageEvent('message', { data: request, origin: 'https://courseweave.test', source: child }));
+    current = replacement;
+    resolveRuntime({ serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-token' });
+    await settle();
+
+    expect(beforeReply).not.toHaveBeenCalled();
+    expect(child.postMessage).not.toHaveBeenCalled();
+    expect(replacement.postMessage).not.toHaveBeenCalled();
+    broker.dispose();
+  });
+
   it('accepts only the owned child window at the CourseWeave origin and replies to that exact target', async () => {
     const child = { postMessage: vi.fn() } as unknown as Window;
     const getRuntime = vi.fn().mockResolvedValue({
@@ -88,7 +164,7 @@ describe('RuntimeBroker', () => {
     });
     const broker = new RuntimeBroker({
       hostWindow: window,
-      childWindow: child,
+      iframe: iframeWithWindow(child),
       serviceOrigin: 'https://courseweave.test',
       runtimeId: 'runtime-123',
       sourceId: 'source-123',
@@ -120,7 +196,7 @@ describe('RuntimeBroker', () => {
     const getRuntime = vi.fn().mockReturnValue(new Promise((resolve) => { resolveRuntime = resolve; }));
     const broker = new RuntimeBroker({
       hostWindow: window,
-      childWindow: child,
+      iframe: iframeWithWindow(child),
       serviceOrigin: 'https://courseweave.test',
       runtimeId: 'runtime-123',
       sourceId: 'source-123',
@@ -150,7 +226,7 @@ describe('RuntimeBroker', () => {
     window.addEventListener('error', errorEvent);
     const broker = new RuntimeBroker({
       hostWindow: window,
-      childWindow: child,
+      iframe: iframeWithWindow(child),
       serviceOrigin: 'https://courseweave.test',
       runtimeId: 'runtime-123',
       sourceId: 'source-123',

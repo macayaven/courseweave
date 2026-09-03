@@ -163,13 +163,19 @@ const plugin: JupyterFrontEndPlugin<void> = {
     const launchMode = launch?.launchMode ?? 'learn';
     const relay = launch === null ? null : new CourseWeaveRelayClient(serviceOrigin);
     const sourceId = crypto.randomUUID();
+    let attachRuntime: (
+      widget: Widget,
+      iframe: HTMLIFrameElement,
+      beforeReply?: (childWindow: Window) => void
+    ) => void = () => undefined;
     const factory = new CourseSurfaceFactory({
       shell,
       documents,
       commands: app.commands,
       serviceOrigin,
       jupyterOrigin: window.location.origin,
-      baseUrl: PageConfig.getBaseUrl()
+      baseUrl: PageConfig.getBaseUrl(),
+      beforeAuthorAttach: (widget, iframe) => attachRuntime(widget, iframe)
     });
     let course: CourseSnapshot | null = null;
     let guide: CourseWeaveGuide | null = null;
@@ -207,15 +213,20 @@ const plugin: JupyterFrontEndPlugin<void> = {
       return next;
     };
 
-    const attachRuntime = (widget: Widget, childWindow: Window): void => {
+    attachRuntime = (
+      widget: Widget,
+      iframe: HTMLIFrameElement,
+      beforeReply?: (childWindow: Window) => void
+    ): void => {
       if (launch === null || relay === null || runtimeBrokers.has(widget)) return;
       const runtimeBroker = new RuntimeBroker({
         hostWindow: window,
-        childWindow,
+        iframe,
         serviceOrigin,
         runtimeId: launch.runtimeId,
         sourceId,
-        relay
+        relay,
+        beforeReply
       });
       runtimeBroker.start();
       runtimeBrokers.set(widget, runtimeBroker);
@@ -245,6 +256,43 @@ const plugin: JupyterFrontEndPlugin<void> = {
       observer.start();
     };
 
+    const attachGuideBridges = (
+      widget: CourseWeaveGuide,
+      iframe: HTMLIFrameElement
+    ): ((childWindow: Window) => void) => {
+      let attached = false;
+      return (childWindow: Window): void => {
+        if (
+          attached
+          || widget.isDisposed
+          || guide !== widget
+          || iframe.contentWindow !== childWindow
+        ) return;
+        attached = true;
+        surfaceBroker = new SurfaceRequestBroker({
+          hostWindow: window,
+          childWindow,
+          serviceOrigin,
+          sourceId,
+          factory
+        });
+        surfaceBroker.start();
+        captureProvider = new LabCaptureProvider({
+          hostWindow: window,
+          childWindow,
+          serviceOrigin,
+          course: () => course,
+          activeCoordinate: () => publisher?.acceptedCoordinate() ?? null,
+          activeWidget: () => shell.currentWidget,
+          notebook,
+          editor,
+          terminal
+        });
+        captureProvider.start();
+        observeContext(childWindow);
+      };
+    };
+
     const openGuide = (): void => {
       let current = guide;
       if (current === null || current.isDisposed) {
@@ -266,26 +314,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
         });
         guide = current;
         current.title.closable = true;
+        attachRuntime(widget, current.iframe, attachGuideBridges(widget, current.iframe));
         shell.add(current, 'right', { rank: 900 });
-        const childWindow = current.iframe.contentWindow;
-        if (childWindow !== null) {
-          attachRuntime(widget, childWindow);
-          surfaceBroker = new SurfaceRequestBroker({ hostWindow: window, childWindow, serviceOrigin, sourceId, factory });
-          surfaceBroker.start();
-          captureProvider = new LabCaptureProvider({
-            hostWindow: window,
-            childWindow,
-            serviceOrigin,
-            course: () => course,
-            activeCoordinate: () => publisher?.acceptedCoordinate() ?? null,
-            activeWidget: () => shell.currentWidget,
-            notebook,
-            editor,
-            terminal
-          });
-          captureProvider.start();
-          observeContext(childWindow);
-        }
       }
       shell.activateById(current.id);
     };
@@ -300,9 +330,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     };
 
     const openAuthor = (): void => {
-      const author = factory.openAuthor();
-      const childWindow = author.node.querySelector<HTMLIFrameElement>('iframe')?.contentWindow;
-      if (childWindow !== null && childWindow !== undefined) attachRuntime(author, childWindow);
+      factory.openAuthor();
     };
 
     registerCourseCommands({
