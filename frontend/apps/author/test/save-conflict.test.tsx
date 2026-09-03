@@ -32,7 +32,11 @@ vi.mock("../src/api", () => ({
 vi.mock("../src/runtime", () => ({ useAuthorRuntime: app.runtime }));
 import { AuthorApp } from "../src/app";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 describe("Author Save and stale recovery", () => {
   it("saves current canonical bytes, updates the baseline, and preserves a newer semantic selection", async () => {
     const manifest = {
@@ -292,9 +296,108 @@ describe("Author Save and stale recovery", () => {
     expect(revoke).toHaveBeenCalledWith("blob:local");
     fireEvent.click(screen.getByRole("button", { name: "Use latest" }));
     expect(confirm).toHaveBeenCalledOnce();
-    expect(screen.queryByText("Local canonical JSON")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Local canonical JSON")).not.toBeInTheDocument());
     expect(screen.getByLabelText("Course title")).toHaveValue("Remote");
     expect(app.putCourse).toHaveBeenCalledOnce();
+  });
+  it("keeps the local draft after review and uses the reviewed ETag only on a later explicit Save", async () => {
+    app.getCourse.mockReset();
+    app.validateCourse.mockReset();
+    app.putCourse.mockReset();
+    const manifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Local",
+      description: "",
+      entry_module_id: "module",
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [
+        {
+          id: "module",
+          title: "Module",
+          description: "",
+          phases: [
+            {
+              id: "phase",
+              title: "Phase",
+              kind: "read",
+              teacher_mode: "reading_companion",
+              completion: { type: "manual" },
+              capabilities: {
+                chat: false,
+                hint_level: "none",
+                share_selection: false,
+                share_cell: false,
+                share_output: false,
+                create_profile_proposal: false,
+                create_course_proposal: false,
+                create_workspace_proposal: false,
+              },
+              surfaces: [
+                {
+                  id: "surface",
+                  type: "markdown",
+                  role: "primary",
+                  path: "local.md",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const canonical = '{\n  "title": "Local"\n}\n';
+    const remote = { ...manifest, title: "Remote" };
+    app.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: app.retry,
+    });
+    app.getCourse
+      .mockResolvedValueOnce({ manifest, raw: canonical, etag: '"old"' })
+      .mockResolvedValueOnce({
+        manifest: remote,
+        raw: '{\n  "title": "Remote"\n}\n',
+        etag: '"reviewed"',
+      });
+    app.validateCourse.mockResolvedValue({
+      manifest,
+      formatted_json: canonical,
+    });
+    app.putCourse
+      .mockRejectedValueOnce(Object.assign(new Error("stale"), { status: 409 }))
+      .mockResolvedValueOnce({ manifest, raw: canonical, etag: '"saved"' });
+    render(<AuthorApp />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select surface surface" }),
+    );
+    fireEvent.change(screen.getByLabelText("Path"), {
+      target: { value: "current.md" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save course" }));
+    await screen.findByText("Keep my draft after review");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Keep my draft after review" }),
+    );
+    await waitFor(() => expect(screen.queryByText("Local canonical JSON")).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Path")).toHaveValue("current.md");
+    expect(screen.getByText("Unsaved local draft.")).toBeInTheDocument();
+    expect(app.putCourse).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Save course" }));
+    await waitFor(() => expect(app.putCourse).toHaveBeenCalledTimes(2));
+    expect(app.putCourse.mock.calls[1]?.[1]).toBe('"reviewed"');
+    expect(app.putCourse.mock.calls[1]?.[0]).toBe(canonical);
   });
   it("validates before one exact save and leaves a stale draft for an explicit later decision", async () => {
     const validate = vi.fn().mockResolvedValue({

@@ -433,8 +433,9 @@ function AuthorEditor({
         getLatest={(signal) => client.getCourse(signal).then(savedCourse)}
         onSaved={saved}
         onCanonical={setFormatted}
-        onReviewed={(tag) => {
-          setBaseline((x) => ({ ...x, etag: tag }));
+        onReviewed={(reviewed) => {
+          setBaseline((x) => ({ ...x, etag: reviewed.etag }));
+          onCourseSaved(reviewed);
           setRemote(null);
         }}
         remote={remote}

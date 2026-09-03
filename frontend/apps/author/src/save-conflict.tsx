@@ -45,7 +45,7 @@ export function SaveConflict({
   put(raw: string, etag: string, signal: AbortSignal): Promise<SavedCourse>;
   getLatest(signal: AbortSignal): Promise<SavedCourse>;
   onSaved(course: SavedCourse): void;
-  onReviewed?(etag: string): void;
+  onReviewed?(course: SavedCourse): void;
   onCanonical?(formattedJson: string): void;
   remote?: SavedCourse | null;
   disabled?: boolean;
@@ -195,7 +195,7 @@ export function SaveConflict({
             type="button"
             onClick={() => {
               clearConflict();
-              onReviewed?.(latest.etag);
+              onReviewed?.(latest);
             }}
           >
             Keep my draft after review
