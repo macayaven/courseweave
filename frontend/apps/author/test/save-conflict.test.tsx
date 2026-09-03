@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { SaveConflict } from "../src/save-conflict";
 
 const app = vi.hoisted(() => ({
@@ -38,6 +39,70 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("Author Save and stale recovery", () => {
+  it("does not duplicate a deferred explicit Save under StrictMode rerenders", async () => {
+    app.getCourse.mockReset();
+    app.validateCourse.mockReset();
+    app.putCourse.mockReset();
+    const manifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Saved",
+      description: "",
+      entry_module_id: null,
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [],
+    };
+    const canonical = '{\n  "title": "Saved"\n}\n';
+    let resolvePut: ((value: unknown) => void) | undefined;
+    app.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: app.retry,
+    });
+    app.getCourse.mockResolvedValue({
+      manifest,
+      raw: canonical,
+      etag: '"old"',
+    });
+    app.validateCourse.mockResolvedValue({
+      manifest,
+      formatted_json: canonical,
+    });
+    app.putCourse.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePut = resolve;
+        }),
+    );
+    const view = render(
+      <StrictMode>
+        <AuthorApp />
+      </StrictMode>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Save course" }));
+    await waitFor(() => expect(app.putCourse).toHaveBeenCalledOnce());
+    view.rerender(
+      <StrictMode>
+        <AuthorApp />
+      </StrictMode>,
+    );
+    expect(app.validateCourse).toHaveBeenCalledOnce();
+    expect(app.putCourse).toHaveBeenCalledOnce();
+    resolvePut?.({ manifest, raw: canonical, etag: '"next"' });
+    await Promise.resolve();
+    expect(app.putCourse).toHaveBeenCalledOnce();
+  });
   it("saves current canonical bytes, updates the baseline, and preserves a newer semantic selection", async () => {
     const manifest = {
       schema_version: 1,
@@ -296,7 +361,11 @@ describe("Author Save and stale recovery", () => {
     expect(revoke).toHaveBeenCalledWith("blob:local");
     fireEvent.click(screen.getByRole("button", { name: "Use latest" }));
     expect(confirm).toHaveBeenCalledOnce();
-    await waitFor(() => expect(screen.queryByText("Local canonical JSON")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Local canonical JSON"),
+      ).not.toBeInTheDocument(),
+    );
     expect(screen.getByLabelText("Course title")).toHaveValue("Remote");
     expect(app.putCourse).toHaveBeenCalledOnce();
   });
@@ -390,7 +459,11 @@ describe("Author Save and stale recovery", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Keep my draft after review" }),
     );
-    await waitFor(() => expect(screen.queryByText("Local canonical JSON")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Local canonical JSON"),
+      ).not.toBeInTheDocument(),
+    );
     expect(screen.getByLabelText("Path")).toHaveValue("current.md");
     expect(screen.getByText("Unsaved local draft.")).toBeInTheDocument();
     expect(app.putCourse).toHaveBeenCalledOnce();
