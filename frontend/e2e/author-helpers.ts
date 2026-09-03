@@ -41,6 +41,7 @@ export type AuthorApiFixture = {
   candidates: Map<string, JsonObject>;
   validationRequests: ValidationRequest[];
   validationExpectations: ValidationRequest[];
+  validationRoutesInFlight: number;
   guideRequests: GuideRequest[];
   guideExpectations: GuideExpectation[];
   guideThreadId: string | null;
@@ -165,6 +166,7 @@ export function createAuthorApi(
     candidates: new Map(),
     validationRequests: [],
     validationExpectations: [],
+    validationRoutesInFlight: 0,
     guideRequests: [],
     guideExpectations: [],
     guideThreadId: null,
@@ -323,34 +325,39 @@ async function handleApi(route: Route, api: AuthorApiFixture): Promise<void> {
     return;
   }
   if (method === "POST" && url.pathname === "/api/author/validate" && url.search === "") {
-    const body = exactJson(request);
-    const expected = api.validationExpectations[0];
-    if (
-      request.headers()["content-type"] !== "application/json" ||
-      body === null ||
-      Object.keys(body).sort().join(",") !== "manifest,mode" ||
-      (body.mode !== "structural" && body.mode !== "runnable") ||
-      typeof body.manifest !== "object" || body.manifest === null || Array.isArray(body.manifest) ||
-      expected === undefined ||
-      body.mode !== expected.mode ||
-      semanticJson(body.manifest) !== semanticJson(expected.manifest)
-    ) {
-      api.violations.push(`validate-contract:${request.postData() ?? ""}`);
-      await route.abort();
+    api.validationRoutesInFlight += 1;
+    try {
+      const body = exactJson(request);
+      const expected = api.validationExpectations[0];
+      if (
+        request.headers()["content-type"] !== "application/json" ||
+        body === null ||
+        Object.keys(body).sort().join(",") !== "manifest,mode" ||
+        (body.mode !== "structural" && body.mode !== "runnable") ||
+        typeof body.manifest !== "object" || body.manifest === null || Array.isArray(body.manifest) ||
+        expected === undefined ||
+        body.mode !== expected.mode ||
+        semanticJson(body.manifest) !== semanticJson(expected.manifest)
+      ) {
+        api.violations.push(`validate-contract:${request.postData() ?? ""}`);
+        await route.abort();
+        return;
+      }
+      api.validationExpectations.shift();
+      const mode = body.mode;
+      api.counts[mode === "structural" ? "structuralValidations" : "runnableValidations"] += 1;
+      const manifest = body.manifest as JsonObject;
+      api.validationRequests.push({ mode, manifest: structuredClone(manifest) });
+      const issues = api.validationIssue(manifest, mode);
+      if (issues.length > 0) {
+        await json(route, { code: "validation_error", message: "Course validation failed.", details: { issues } }, 422);
+        return;
+      }
+      await json(route, { manifest, formatted_json: canonical(manifest) });
       return;
+    } finally {
+      api.validationRoutesInFlight -= 1;
     }
-    api.validationExpectations.shift();
-    const mode = body.mode;
-    api.counts[mode === "structural" ? "structuralValidations" : "runnableValidations"] += 1;
-    const manifest = body.manifest as JsonObject;
-    api.validationRequests.push({ mode, manifest: structuredClone(manifest) });
-    const issues = api.validationIssue(manifest, mode);
-    if (issues.length > 0) {
-      await json(route, { code: "validation_error", message: "Course validation failed.", details: { issues } }, 422);
-      return;
-    }
-    await json(route, { manifest, formatted_json: canonical(manifest) });
-    return;
   }
   if (method === "PUT" && url.pathname === "/api/course" && url.search === "") {
     api.counts.puts += 1;
@@ -589,9 +596,19 @@ export async function reloadAuthor(page: Page, author: FrameLocator, api: Author
   api.runtimeHandshakeCount = expectedHandshakeCount;
 }
 
+export async function expectValidationCompletion(api: AuthorApiFixture): Promise<void> {
+  await expect.poll(() => ({
+    queued: api.validationExpectations.length,
+    inFlight: api.validationRoutesInFlight,
+  }), { message: "all ordered validation routes must arrive and settle" }).toEqual({
+    queued: 0,
+    inFlight: 0,
+  });
+}
+
 export async function expectNoBoundaryViolations(page: Page, api: AuthorApiFixture): Promise<void> {
+  await expectValidationCompletion(api);
   expect(api.violations).toEqual([]);
-  expect(api.validationExpectations, "all ordered validation expectations must be consumed").toEqual([]);
   expect(api.guideExpectations, "all ordered guide expectations must be consumed").toEqual([]);
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.unexpectedAuthorMessages)).toBe("0");
   await expect.poll(() => page.evaluate(() => Number(document.documentElement.dataset.runtimeRequests))).toBe(api.runtimeHandshakeCount);

@@ -7,6 +7,7 @@ import {
   emptyManifest,
   expectGuideRequest,
   expectNoBoundaryViolations,
+  expectValidationCompletion,
   expectValidationRequest,
   loadExample,
   minimalManifest,
@@ -514,6 +515,7 @@ test("rejects byte-identical fake-model output and accepts one edited revision e
   ]);
   expect(new Set(api.guideRequests.map((request) => request.runId)).size).toBe(2);
   expect(new Set(api.guideRequests.map((request) => request.messages[0].id)).size).toBe(2);
+  await expectValidationCompletion(api);
   expect(api.validationRequests).toEqual(structuralValidationRequests(
     original, original,
     original, original,
