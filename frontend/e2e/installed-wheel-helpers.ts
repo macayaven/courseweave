@@ -1,4 +1,4 @@
-import { access, chmod, mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdtemp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -47,12 +47,16 @@ export async function makeRichCourse(root: string): Promise<void> {
   }, null, 2)}\n`, 'utf8');
 }
 
-async function run(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<void> {
+async function run(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
+  let output = '';
   await new Promise<void>((resolveRun, rejectRun) => {
-    const child = spawn(command, args, { cwd: options.cwd, env: options.env, stdio: 'ignore' });
+    const child = spawn(command, args, { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout?.on('data', (chunk) => { output += chunk.toString(); });
+    child.stderr?.on('data', (chunk) => { output += chunk.toString(); });
     child.once('error', () => rejectRun(new Error(`Installed-wheel setup command could not start: ${command}`)));
     child.once('exit', (code) => code === 0 ? resolveRun() : rejectRun(new Error(`Installed-wheel setup command failed: ${command}`)));
   });
+  return output;
 }
 
 async function availablePort(): Promise<number> {
@@ -87,7 +91,17 @@ function assertNoNode(venv: string): void {
 async function stop(process: ChildProcess): Promise<void> {
   if (process.exitCode !== null) return;
   process.kill('SIGTERM');
-  await new Promise<void>((resolveExit) => process.once('exit', () => resolveExit()));
+  const exited = await new Promise<boolean>((resolveExit) => {
+    const timer = setTimeout(() => resolveExit(false), 5_000);
+    process.once('exit', () => { clearTimeout(timer); resolveExit(true); });
+  });
+  if (!exited && process.exitCode === null) {
+    process.kill('SIGKILL');
+    await new Promise<void>((resolveExit) => {
+      const timer = setTimeout(resolveExit, 5_000);
+      process.once('exit', () => { clearTimeout(timer); resolveExit(); });
+    });
+  }
 }
 
 export async function launchInstalledWorkspace(mode: LaunchMode, options: { emptyCourse?: boolean } = {}) {
@@ -109,12 +123,13 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
     await run('uv', ['venv', '--python', '3.11', venv]);
     await run('uv', ['pip', 'install', '--python', join(venv, 'bin', 'python'), join(wheelRoot, wheelName), 'jupyterlab==4.6.3']);
     assertNoNode(venv);
-    await run(join(venv, 'bin', 'jupyter'), ['labextension', 'list']);
+    const environment = { ...process.env, PATH: noNodePath(venv), BROWSER: browserHelper, COURSEWEAVE_TEST_BOOTSTRAP_SOCKET: socketPath };
+    const discovery = await run(join(venv, 'bin', 'jupyter'), ['labextension', 'list'], { env: environment });
+    if (!/@courseweave\/lab/.test(discovery)) throw new Error('Installed JupyterLab did not discover @courseweave/lab.');
     handoff = await bootstrapSocket(socketPath);
     await writeFile(browserHelper, `#!${join(venv, 'bin', 'python')}\nimport os, socket, sys\ns = socket.socket(socket.AF_UNIX)\ns.connect(os.environ['COURSEWEAVE_TEST_BOOTSTRAP_SOCKET'])\ns.sendall(sys.argv[-1].encode('utf-8'))\ns.close()\n`, 'utf8');
     await chmod(browserHelper, 0o700);
     const port = await availablePort();
-    const environment = { ...process.env, PATH: noNodePath(venv), BROWSER: browserHelper, COURSEWEAVE_TEST_BOOTSTRAP_SOCKET: socketPath };
     launchProcess = spawn(join(venv, 'bin', 'courseweave'), [mode === 'learn' ? 'launch' : 'author', '--course-root', courseRoot, '--port', String(port)], { env: environment, stdio: 'ignore' });
     const child = launchProcess;
     return {
@@ -123,6 +138,13 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
       courseManifestExists: async () => access(join(courseRoot, 'courseweave.json')).then(() => true, () => false),
       coursePrivateStateExists: async () => access(join(courseRoot, '.courseweave')).then(() => true, () => false),
       terminalSentinelExists: async () => access(join(courseRoot, 'terminal-argv-must-not-run')).then(() => true, () => false),
+      courseFiles: async () => {
+        const files: string[] = [];
+        for (const name of await readdir(courseRoot, { recursive: true })) {
+          if ((await stat(join(courseRoot, name))).isFile()) files.push(name);
+        }
+        return files.sort();
+      },
       close: async () => { await stop(child); await handoff?.close(); await rm(owned, { recursive: true, force: true }); },
     };
   } catch (error) {

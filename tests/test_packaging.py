@@ -109,6 +109,14 @@ def _bridge_javascript(wheel_contents: dict[str, bytes]) -> list[bytes]:
 
 
 class TestWheelContents:
+    def test_installed_smoke_redacts_bootstrap_failures_and_checks_discovery(self) -> None:
+        helper = (REPO_ROOT / "frontend" / "e2e" / "installed-wheel-helpers.ts").read_text()
+        spec = (REPO_ROOT / "frontend" / "e2e" / "installed-wheel-lab.spec.ts").read_text()
+        assert "labextension', 'list'], { env: environment }" in helper
+        assert "@courseweave\\/lab" in helper
+        assert "Installed-wheel bootstrap navigation failed." in spec
+        assert "page.goto(bootstrapUrl" not in spec
+
     def test_installed_wheel_playwright_command_lists_the_dedicated_smoke(self) -> None:
         """The wheel smoke is opt-in and must not borrow the normal Vite suite."""
         completed = subprocess.run(
@@ -135,6 +143,8 @@ class TestWheelContents:
         assert referenced
         for asset in referenced:
             assert f"courseweave/static/learn/assets/{asset}" in wheel_contents
+        actual = sorted(name.rsplit("/", 1)[1] for name in wheel_contents if name.startswith("courseweave/static/learn/assets/"))
+        assert actual == sorted(referenced)
 
     def test_wheel_contains_static_author_asset(
         self, wheel_contents: dict[str, bytes]
@@ -151,6 +161,8 @@ class TestWheelContents:
             assert (
                 f"courseweave/static/author/assets/{match.group(1)}" in wheel_contents
             )
+        actual = sorted(name.rsplit("/", 1)[1] for name in wheel_contents if name.startswith("courseweave/static/author/assets/"))
+        assert actual == sorted(match.group(1) for reference in references if (match := re.fullmatch(r"/author/assets/([A-Za-z0-9._-]+\.(?:js|css))", reference)))
         for forbidden in (
             "127.0.0.1",
             "localhost",
@@ -234,6 +246,13 @@ class TestAuthorStaticRoute:
 
 
 class TestBuiltBridgeBundle:
+    def test_no_capability_or_token_can_be_retained_in_any_wheel_asset(self, wheel_contents: dict[str, bytes]) -> None:
+        forbidden = (b"browser-test-capability", b"test-capability", b"COURSEWEAVE_CAPABILITY_TOKEN", b"op://")
+        for name, data in wheel_contents.items():
+            if name.startswith("courseweave/static/") or name.startswith("courseweave/labextension/"):
+                for marker in forbidden:
+                    assert marker not in data, (name, marker)
+
     def test_bundle_resolves_service_origin_from_page_config(
         self, wheel_contents: dict[str, bytes]
     ) -> None:
