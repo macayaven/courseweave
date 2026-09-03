@@ -325,25 +325,21 @@ async function handleApi(route: Route, api: AuthorApiFixture): Promise<void> {
   if (method === "POST" && url.pathname === "/api/author/validate" && url.search === "") {
     const body = exactJson(request);
     const expected = api.validationExpectations[0];
-    const proposalCanonicalization =
-      body?.mode === "structural" &&
-      typeof body.manifest === "object" && body.manifest !== null && !Array.isArray(body.manifest) &&
-      api.proposals.some((proposal) => semanticJson(proposal.payload.manifest) === semanticJson(body.manifest));
     if (
       request.headers()["content-type"] !== "application/json" ||
       body === null ||
       Object.keys(body).sort().join(",") !== "manifest,mode" ||
       (body.mode !== "structural" && body.mode !== "runnable") ||
       typeof body.manifest !== "object" || body.manifest === null || Array.isArray(body.manifest) ||
-      (expected === undefined
-        ? !proposalCanonicalization
-        : body.mode !== expected.mode || semanticJson(body.manifest) !== semanticJson(expected.manifest))
+      expected === undefined ||
+      body.mode !== expected.mode ||
+      semanticJson(body.manifest) !== semanticJson(expected.manifest)
     ) {
       api.violations.push(`validate-contract:${request.postData() ?? ""}`);
       await route.abort();
       return;
     }
-    if (expected !== undefined) api.validationExpectations.shift();
+    api.validationExpectations.shift();
     const mode = body.mode;
     api.counts[mode === "structural" ? "structuralValidations" : "runnableValidations"] += 1;
     const manifest = body.manifest as JsonObject;

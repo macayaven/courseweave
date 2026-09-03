@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "playwright/test";
 import { readFile } from "node:fs/promises";
 
 import {
+  type AuthorApiFixture,
   createAuthorApi,
   emptyManifest,
   expectGuideRequest,
@@ -14,6 +15,17 @@ import {
   reloadAuthor,
   seedProposal,
 } from "./author-helpers";
+
+function queueStructuralValidations(
+  api: AuthorApiFixture,
+  ...manifests: Array<Record<string, unknown>>
+): void {
+  for (const manifest of manifests) expectValidationRequest(api, "structural", manifest);
+}
+
+function structuralValidationRequests(...manifests: Array<Record<string, unknown>>) {
+  return manifests.map((manifest) => ({ manifest, mode: "structural" as const }));
+}
 
 function newBrowserModule(phaseTitle = "New phase"): Record<string, unknown> {
   return {
@@ -277,9 +289,40 @@ test("records the exact one-message guide body and stable request identity", asy
   await expectNoBoundaryViolations(page, api);
 });
 
+test("denies a duplicate proposal validation after its one expectation is consumed", async ({ page }) => {
+  const manifest = minimalManifest();
+  const api = proposalFixture(manifest);
+  expectValidationRequest(api, "structural", manifest);
+  await mountAuthor(page, api);
+  expect(api.validationRequests).toEqual([{ manifest, mode: "structural" }]);
+
+  const outcome = await page.evaluate(async (body) => {
+    try {
+      await fetch("/api/author/validate", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer browser-test-capability",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      return "resolved";
+    } catch {
+      return "rejected";
+    }
+  }, { manifest, mode: "structural" });
+
+  expect(outcome).toBe("rejected");
+  expect(api.validationRequests).toEqual([{ manifest, mode: "structural" }]);
+  expect(api.violations).toEqual([
+    `validate-contract:${JSON.stringify({ manifest, mode: "structural" })}`,
+  ]);
+});
+
 test("traverses the Author regions and decides a proposal using only sequential keyboard input", async ({ page }) => {
-  const api = proposalFixture(minimalManifest());
-  expectValidationRequest(api, "structural", minimalManifest());
+  const manifest = minimalManifest();
+  const api = proposalFixture(manifest);
+  queueStructuralValidations(api, manifest);
   const author = await mountAuthor(page, api);
   const addModule = author.getByRole("button", { name: "Add module" });
   const selectModule = author.getByRole("button", { name: "Select module Start" });
@@ -292,6 +335,7 @@ test("traverses the Author regions and decides a proposal using only sequential 
   expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
   expect(await tabTo(page, addModule)).toBeGreaterThan(0);
   expect(await tabTo(page, selectModule)).toBe(1);
+  queueStructuralValidations(api, manifest);
   await page.keyboard.press("Space");
   await expect(selectModule).toHaveAttribute("aria-pressed", "true");
 
@@ -317,6 +361,7 @@ test("traverses the Author regions and decides a proposal using only sequential 
     previewTabStops: 0,
   });
 
+  queueStructuralValidations(api, manifest, manifest);
   await page.keyboard.press("Enter");
   const reviewedHeading = author.getByRole("heading", { name: "Review the browser proposal" });
   await expect(reviewedHeading).toBeFocused();
@@ -325,6 +370,12 @@ test("traverses the Author regions and decides a proposal using only sequential 
 
   expect(await tabTo(page, teacherComposer, "reverse")).toBeGreaterThan(0);
   await expect(teacherComposer).toBeFocused();
+  expect(api.validationRequests).toEqual(structuralValidationRequests(
+    manifest,
+    manifest,
+    manifest,
+    manifest,
+  ));
   await expectNoBoundaryViolations(page, api);
 });
 
@@ -414,11 +465,13 @@ test("rejects byte-identical fake-model output and accepts one edited revision e
   await author.getByLabel("Ask the curriculum teacher").fill("Suggest no change");
   await author.getByRole("button", { name: "Ask teacher" }).press("Enter");
   await expect(author.getByText("Local fixture advice", { exact: true })).toBeVisible();
+  queueStructuralValidations(api, original, original);
   await author.getByRole("button", { name: "Save suggested change" }).press("Enter");
   const first = author.getByRole("article").filter({ hasText: "Status: pending" });
   await expect(first).toHaveCount(1);
   const reject = first.getByRole("button", { name: "Reject" });
   await reject.focus();
+  queueStructuralValidations(api, original, original);
   await reject.press("Enter");
   await expect(author.getByRole("article").filter({ hasText: "Status: rejected" })).toHaveCount(1);
   expect(api.raw).toBe(originalRaw);
@@ -426,18 +479,20 @@ test("rejects byte-identical fake-model output and accepts one edited revision e
 
   await author.getByLabel("Ask the curriculum teacher").fill("Suggest a real change");
   await author.getByRole("button", { name: "Ask teacher" }).press("Enter");
+  queueStructuralValidations(api, original, suggested, original, suggested);
   await author.getByRole("button", { name: "Save suggested change" }).press("Enter");
   let pending = author.getByRole("article").filter({ hasText: "Status: pending" });
   await expect(pending).toHaveCount(1);
   const edited = structuredClone(suggested);
   edited.title = "Accepted edited browser title";
   await pending.getByLabel("Edit full manifest").fill(JSON.stringify(edited, null, 2));
-  expectValidationRequest(api, "structural", edited);
+  queueStructuralValidations(api, edited, original, edited, original, edited);
   await pending.getByRole("button", { name: "Save proposal edit" }).press("Enter");
 
   pending = author.getByRole("article").filter({ hasText: "Status: pending" });
   await expect(pending.getByText("Pending revision: 2", { exact: true })).toBeVisible();
   await expect(pending.getByLabel("Edit full manifest")).toHaveValue(JSON.stringify(edited, null, 2));
+  queueStructuralValidations(api, original, edited, original, edited, original, edited);
   await pending.getByRole("button", { name: "Accept" }).press("Enter");
 
   await expect(author.getByRole("article").filter({ hasText: "Status: accepted" })).toHaveCount(1);
@@ -459,8 +514,13 @@ test("rejects byte-identical fake-model output and accepts one edited revision e
   ]);
   expect(new Set(api.guideRequests.map((request) => request.runId)).size).toBe(2);
   expect(new Set(api.guideRequests.map((request) => request.messages[0].id)).size).toBe(2);
-  expect(api.validationRequests.every((request) => request.mode === "structural")).toBe(true);
-  expect(api.validationRequests.map((request) => request.manifest)).toContainEqual(edited);
+  expect(api.validationRequests).toEqual(structuralValidationRequests(
+    original, original,
+    original, original,
+    original, suggested, original, suggested,
+    edited, original, edited, original, edited,
+    original, edited, original, edited, original, edited,
+  ));
   await expectNoBoundaryViolations(page, api);
 });
 
@@ -523,8 +583,9 @@ test("keeps the four-region experience accessible and contained at 320 CSS pixel
   proposed.description = "Long proposal ".repeat(120);
   const api = createAuthorApi(manifest);
   seedProposal(api, proposed, "narrow-proposal", "Narrow proposal");
-  expectValidationRequest(api, "structural", proposed);
+  queueStructuralValidations(api, proposed);
   const author = await mountAuthor(page, api, { width: 320 });
+  queueStructuralValidations(api, proposed);
   await author.getByRole("button", { name: "Select surface show-help" }).press("Enter");
 
   const layout = await author.locator("body").evaluate(() => {
@@ -583,6 +644,7 @@ test("keeps the four-region experience accessible and contained at 320 CSS pixel
   expect(focusIndicator.contrast).toBeGreaterThanOrEqual(3);
   expect(focusIndicator.outlineStyle).toBe("solid");
   expect(focusIndicator.outlineWidth).toBeGreaterThanOrEqual(2);
+  queueStructuralValidations(api, proposed);
   await move.press("Enter");
   await expect(author.getByRole("button", { name: "Select surface show-help" })).toBeFocused();
   await expect(author.getByRole("status").filter({ hasText: "Moved surface show-help up." })).toBeVisible();
@@ -595,17 +657,20 @@ test("keeps the four-region experience accessible and contained at 320 CSS pixel
   });
   expect(forced.outlineStyle).toBe("solid");
   expect(forced.outlineWidth).toBeGreaterThanOrEqual(2);
+  expect(api.validationRequests).toEqual(structuralValidationRequests(proposed, proposed, proposed));
   await expectNoBoundaryViolations(page, api);
 });
 
 test("restores keyboard focus inside proposal review after a decision", async ({ page }) => {
-  const api = proposalFixture(minimalManifest());
-  expectValidationRequest(api, "structural", minimalManifest());
+  const manifest = minimalManifest();
+  const api = proposalFixture(manifest);
+  queueStructuralValidations(api, manifest);
   const author = await mountAuthor(page, api);
   const reject = author.getByRole("button", { name: "Reject" });
 
   await reject.focus();
   await expect(reject).toBeFocused();
+  queueStructuralValidations(api, manifest, manifest);
   await reject.press("Enter");
 
   await expect(author.getByText("Status: rejected")).toBeVisible();
@@ -621,6 +686,7 @@ test("restores keyboard focus inside proposal review after a decision", async ({
   expect(focus, "focus must be restored to a stable target in Proposal review").toMatchObject({
     inProposalReview: true,
   });
+  expect(api.validationRequests).toEqual(structuralValidationRequests(manifest, manifest, manifest));
   expect(api.violations).toEqual([]);
   await expect
     .poll(() =>
