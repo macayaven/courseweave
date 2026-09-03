@@ -106,6 +106,14 @@ class _FakeServerApp:
     base_url: str = "/jupyter/base/"
     web_app: _FakeWebApp = field(default_factory=_FakeWebApp)
     log: logging.Logger = field(default_factory=lambda: logging.getLogger("courseweave-test"))
+    no_browser_open_file: bool = False
+
+    def server_info(self) -> dict[str, Any]:
+        return {
+            "url": "http://127.0.0.1:9999/jupyter/base/",
+            "token": JUPYTER_AUTH_SENTINEL,
+            "root_dir": "/safe/course",
+        }
 
 
 def test_extension_hooks_register_base_url_handlers_and_only_three_page_values(
@@ -140,6 +148,24 @@ def test_extension_hooks_register_base_url_handlers_and_only_three_page_values(
     ]
 
 
+def test_extension_prevents_jupyter_token_runtime_files_without_disabling_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key, value in valid_environment().items():
+        monkeypatch.setenv(key, value)
+    serverapp = _FakeServerApp()
+
+    _load_jupyter_server_extension(serverapp)
+
+    assert serverapp.no_browser_open_file is True
+    assert serverapp.web_app.settings["page_config_data"]["token"] == JUPYTER_AUTH_SENTINEL
+    assert serverapp.server_info() == {
+        "url": "http://127.0.0.1:9999/jupyter/base/",
+        "token": "",
+        "root_dir": "/safe/course",
+    }
+
+
 def test_invalid_environment_registers_fail_closed_handlers_without_page_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -153,6 +179,8 @@ def test_invalid_environment_registers_fail_closed_handlers_without_page_values(
     )
     assert serverapp.web_app.settings["courseweave_runtime_settings"] is None
     assert len(serverapp.web_app.registrations[0][1]) == 3
+    assert serverapp.no_browser_open_file is False
+    assert serverapp.server_info()["token"] == JUPYTER_AUTH_SENTINEL
 
 
 def test_jupyter_server_221_selects_exact_jupyter_token_identity_contract(

@@ -12,12 +12,14 @@ from __future__ import annotations
 import os
 import secrets
 from pathlib import Path
+from typing import Literal
 
 import typer
 import uvicorn
 
 from courseweave import __version__
 from courseweave.api import create_app
+from courseweave.launch import LaunchSupervisor
 from courseweave.providers import ProviderConfig
 
 ENV_CAPABILITY_TOKEN = "COURSEWEAVE_CAPABILITY_TOKEN"
@@ -72,6 +74,46 @@ def serve(
         port=port,
         log_level="warning",
     )
+
+
+def _run_jupyter_mode(
+    course_root: Path, port: int, mode: Literal["learn", "author"]
+) -> None:
+    exit_code = LaunchSupervisor(course_root, port=port, mode=mode).run()
+    if exit_code:
+        raise typer.Exit(exit_code)
+
+
+@app.command()
+def launch(
+    course_root: Path = typer.Option(
+        ...,
+        "--course-root",
+        exists=True,
+        file_okay=False,
+        resolve_path=True,
+        help="Root directory of the course repository.",
+    ),
+    port: int = typer.Option(8765, "--port", min=1024, max=65535),
+) -> None:
+    """Open a CourseWeave learner workspace in authenticated JupyterLab."""
+    _run_jupyter_mode(course_root, port, "learn")
+
+
+@app.command()
+def author(
+    course_root: Path = typer.Option(
+        ...,
+        "--course-root",
+        exists=True,
+        file_okay=False,
+        resolve_path=True,
+        help="Root directory of the course repository.",
+    ),
+    port: int = typer.Option(8765, "--port", min=1024, max=65535),
+) -> None:
+    """Open CourseWeave Author in authenticated JupyterLab."""
+    _run_jupyter_mode(course_root, port, "author")
 
 
 def _version_callback(value: bool) -> None:

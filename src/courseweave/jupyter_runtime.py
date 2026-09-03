@@ -28,6 +28,7 @@ _PAGE_CONFIG_KEYS = (
     "courseweaveRuntimeId",
     "courseweaveLaunchMode",
 )
+_SERVER_INFO_GUARD = "_courseweave_server_info_guard_installed"
 _JSON_CONTENT_TYPE = re.compile(
     r'application/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?[ \t]*',
     re.IGNORECASE | re.ASCII,
@@ -297,10 +298,29 @@ def _jupyter_server_extension_points() -> list[dict[str, str]]:
     return [{"module": "courseweave.jupyter_runtime"}]
 
 
+def _guard_jupyter_runtime_files(serverapp: Any) -> None:
+    """Keep Jupyter's authentication token out of runtime files."""
+
+    serverapp.no_browser_open_file = True
+    if getattr(serverapp, _SERVER_INFO_GUARD, False):
+        return
+    original_server_info = serverapp.server_info
+
+    def redacted_server_info() -> dict[str, Any]:
+        info = dict(original_server_info())
+        info["token"] = ""
+        return info
+
+    serverapp.server_info = redacted_server_info
+    setattr(serverapp, _SERVER_INFO_GUARD, True)
+
+
 def _load_jupyter_server_extension(serverapp: Any) -> None:
     """Load using only public Jupyter Server 2.21 extension contracts."""
 
     settings = RuntimeSettings.from_environ(os.environ)
+    if settings is not None:
+        _guard_jupyter_runtime_files(serverapp)
     web_app = serverapp.web_app
     web_app.settings[_SETTINGS_KEY] = settings
     page_config = web_app.settings.setdefault("page_config_data", {})

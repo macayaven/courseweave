@@ -403,6 +403,13 @@ def create_app(
 
     @app.get("/api/proposals")
     async def list_proposals() -> Response:
+        root = _configured_root(app)
+        if (
+            root is not None
+            and not (root / "courseweave.json").exists()
+            and not (root / ".courseweave" / "courseweave.db").exists()
+        ):
+            return JSONResponse([])
         try:
             proposals = _course_store(app).list_proposals()
         except StoreError as exc:

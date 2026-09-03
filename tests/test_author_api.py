@@ -10,6 +10,7 @@ import socket
 import threading
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from courseweave.api import create_app
@@ -66,6 +67,25 @@ def test_missing_manifest_get_and_validation_are_read_only(tmp_path: Path) -> No
 
     assert validated.status_code == 200
     assert validated.json()["formatted_json"] == response.text
+    assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == before
+    assert not (tmp_path / "courseweave.json").exists()
+    assert not (tmp_path / ".courseweave").exists()
+
+
+def test_missing_manifest_proposal_listing_is_read_only_without_store_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
+
+    class ConstructionTripwire:
+        def __init__(self, *_args, **_kwargs) -> None:
+            raise AssertionError("empty Author startup must not construct CourseStore")
+
+    monkeypatch.setattr("courseweave.api.CourseStore", ConstructionTripwire)
+    response = client(tmp_path).get("/api/proposals", headers=AUTH)
+
+    assert response.status_code == 200
+    assert response.json() == []
     assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == before
     assert not (tmp_path / "courseweave.json").exists()
     assert not (tmp_path / ".courseweave").exists()
