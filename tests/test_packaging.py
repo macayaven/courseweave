@@ -123,10 +123,25 @@ class TestWheelContents:
     ) -> None:
         assert "courseweave/static/author/index.html" in wheel_contents
         index = wheel_contents["courseweave/static/author/index.html"].decode()
-        referenced = re.findall(r"/author/assets/([^\"']+\.(?:js|css))", index)
-        assert referenced
-        for asset in referenced:
-            assert f"courseweave/static/author/assets/{asset}" in wheel_contents
+        references = re.findall(r"(?:src|href)=[\"']([^\"']+)[\"']", index)
+        assert references
+        for reference in references:
+            match = re.fullmatch(
+                r"/author/assets/([A-Za-z0-9._-]+\.(?:js|css))", reference
+            )
+            assert match is not None, reference
+            assert (
+                f"courseweave/static/author/assets/{match.group(1)}" in wheel_contents
+            )
+        for forbidden in (
+            "127.0.0.1",
+            "localhost",
+            "test-capability",
+            "browser-test-capability",
+            "capability_token",
+            "capabilityToken",
+        ):
+            assert forbidden not in index
 
 
 class TestAuthorStaticRoute:
