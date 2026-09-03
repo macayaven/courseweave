@@ -209,6 +209,7 @@ class TestAuthorStaticRoute:
         self, wheel_contents: dict[str, bytes]
     ) -> None:
         metadata = json.loads(wheel_contents["courseweave/labextension/package.json"])
+        assert metadata["dependencies"]["@jupyterlab/apputils"] == "~4.7.3"
         jupyterlab = metadata["jupyterlab"]
         assert jupyterlab["extension"]
         build = jupyterlab["_build"]

@@ -178,6 +178,13 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     expect(guideReferrer).toMatch(/^https?:\/\/[^/]+\/$/);
     await expect(guide.locator('body')).toContainText('Installed wheel rich course');
     await expect(guide.getByRole('region', { name: 'Course dashboard' })).toContainText('Installed phase');
+    await page.getByRole('menuitem', { name: 'View' }).click({ timeout: 10_000 });
+    await page.getByRole('menuitem', { name: 'Activate Command Palette' }).click({ timeout: 10_000 });
+    const commandPalette = page.locator('.jp-ModalCommandPalette .lm-CommandPalette-input');
+    await expect(commandPalette).toBeVisible();
+    await commandPalette.fill('Open CourseWeave Dashboard');
+    await page.locator('.jp-ModalCommandPalette .lm-CommandPalette-item', { hasText: 'Open CourseWeave Dashboard' }).click();
+    await expect(page.locator('#courseweave-dashboard')).toContainText('Installed wheel rich course');
     await expect.poll(() => publishedContexts.some((body) => body.sequence === 0 && typeof body.source_id === 'string')).toBe(true);
     const invalidationPromise = guide.locator('body').evaluate(() => new Promise<boolean>((resolve) => {
       const listener = (event: MessageEvent) => {
