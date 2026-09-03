@@ -76,7 +76,9 @@ export class LabCaptureProvider {
       return;
     }
     this.pendingRequestId = request.requestId;
-    void this.capture(request).finally(() => {
+    void this.capture(request).catch(() => {
+      this.reject(request.requestId, 'unavailable');
+    }).finally(() => {
       if (this.pendingRequestId === request.requestId) this.pendingRequestId = null;
     });
   };

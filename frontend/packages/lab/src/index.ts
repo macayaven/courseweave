@@ -25,7 +25,6 @@ import { LabCaptureProvider } from './share';
 import {
   CourseSurfaceFactory,
   SurfaceRequestBroker,
-  coordinateForCoursePath,
   parseCourseSnapshot,
   registerCourseCommands,
   type CourseSnapshot
@@ -278,15 +277,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
             childWindow,
             serviceOrigin,
             course: () => course,
-            activeCoordinate: () => {
-              const metadata = factory.metadataFor(shell.currentWidget);
-              const explicit = metadata?.explicitModuleId !== null && metadata?.explicitModuleId !== undefined && metadata.explicitPhaseId !== null
-                ? { moduleId: metadata.explicitModuleId, phaseId: metadata.explicitPhaseId }
-                : null;
-              if (explicit !== null || course === null || shell.currentWidget === null) return explicit;
-              const activePath = (shell.currentWidget as { context?: { path?: unknown } }).context?.path;
-              return typeof activePath === 'string' ? coordinateForCoursePath(course, activePath) : null;
-            },
+            activeCoordinate: () => publisher?.acceptedCoordinate() ?? null,
             activeWidget: () => shell.currentWidget,
             notebook,
             editor,

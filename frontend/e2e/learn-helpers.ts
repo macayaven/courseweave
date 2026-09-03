@@ -65,7 +65,7 @@ export async function mountLearner(page: Page, api: MockApi): Promise<FrameLocat
       window.dispatchEvent(new CustomEvent('courseweave-test-navigation', { detail: data }));
       if (document.documentElement.dataset.deferReaderOutcome === 'true') return;
       const htmlSource = data.surfaceId === 'html-lesson' ? `${window.location.origin}/files/lessons/second.html` : data.surfaceId === 'video-lesson' ? 'https://video.example.test/second.mp4' : null;
-      (event.source as Window).postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: data.moduleId, phaseId: data.phaseId, surfaceId: data.surfaceId, htmlSource }, window.location.origin);
+      (event.source as Window).postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: data.moduleId, phaseId: data.phaseId, surfaceId: data.surfaceId, jupyterBaseUrl: `${window.location.origin}/`, htmlSource }, window.location.origin);
     });
     document.body.append(frame);
   });

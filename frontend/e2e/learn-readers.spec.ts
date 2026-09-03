@@ -52,7 +52,7 @@ test('production Learner rejects credential-bearing HTML before iframe assignmen
   await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('#learn-frame');
     const source = `${location.protocol}//capability@${location.host}/content/html-lesson`;
-    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', htmlSource: source }, location.origin);
+    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', jupyterBaseUrl: `${location.origin}/`, htmlSource: source }, location.origin);
   });
 
   await expect(learn.getByLabel('Course reader').getByRole('status')).toContainText('This course surface is unavailable.');
@@ -74,7 +74,7 @@ test('production Learner rejects a delayed destination outcome after newer conte
   await expect.poll(() => api.authenticatedRequests).toBeGreaterThan(requestCount);
   await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('#learn-frame');
-    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'video-lesson', htmlSource: null }, location.origin);
+    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'video-lesson', jupyterBaseUrl: `${location.origin}/`, htmlSource: null }, location.origin);
   });
 
   await expect(htmlReader).toBeVisible();
@@ -98,7 +98,7 @@ test('production Learner accepts a delayed HTML destination outcome only after n
 
   await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('#learn-frame');
-    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', htmlSource: `${location.origin}/files/lessons/second.html` }, location.origin);
+    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', jupyterBaseUrl: `${location.origin}/`, htmlSource: `${location.origin}/files/lessons/second.html` }, location.origin);
   });
 
   await expect(htmlReader).toBeVisible();

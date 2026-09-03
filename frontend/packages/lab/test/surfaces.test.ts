@@ -157,12 +157,14 @@ describe('CourseSurfaceFactory', () => {
     const iframe = reader.node.querySelector('iframe') as HTMLIFrameElement;
     expect(reader.id).toBe('courseweave-reader');
     expect(html.htmlSource).toBe('https://lab.test/base/files/lessons/a%20b.html');
+    expect(html.jupyterBaseUrl).toBe('https://lab.test/base/');
     expect(iframe.src).toBe(html.htmlSource);
     expect(iframe.referrerPolicy).toBe('no-referrer');
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-presentation');
 
     const video = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'video' });
     expect(video.htmlSource).toBe('https://video.test/watch?v=1');
+    expect(video.jupyterBaseUrl).toBe('https://lab.test/base/');
     expect(iframe.src).toBe(video.htmlSource);
     expect(shell.add).toHaveBeenCalledOnce();
   });
@@ -205,6 +207,29 @@ describe('CourseSurfaceFactory', () => {
     expect(factory.openDashboard()).not.toBe(dashboard);
     expect(shell.add).toHaveBeenCalledTimes(3);
   });
+
+  it('rerenders one existing dashboard from the latest authenticated course snapshot', async () => {
+    const { factory, shell, documents } = harness();
+    const dashboard = factory.openDashboard();
+    expect(dashboard.node.querySelector('h1')?.textContent).toBe('Course');
+    expect(dashboard.node.querySelector('button')?.textContent).toBe('html');
+
+    const refreshed = structuredClone(course);
+    refreshed.title = 'Refreshed Course';
+    refreshed.modules[0]!.phases[0]!.surfaces = [
+      { id: 'new-source', type: 'source', path: 'src/refreshed.py', label: 'Refreshed source' }
+    ];
+    factory.setCourse(refreshed);
+    const sameDashboard = factory.openDashboard();
+
+    expect(sameDashboard).toBe(dashboard);
+    expect(shell.add).toHaveBeenCalledOnce();
+    expect(dashboard.node.querySelector('h1')?.textContent).toBe('Refreshed Course');
+    expect([...dashboard.node.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['Refreshed source']);
+    dashboard.node.querySelector<HTMLButtonElement>('button')!.click();
+    await vi.waitFor(() => expect(documents.openOrReveal).toHaveBeenCalledWith('src/refreshed.py', 'Editor'));
+    expect(documents.openOrReveal).not.toHaveBeenCalledWith('lessons/a b.html', expect.anything());
+  });
 });
 
 describe('SurfaceRequestBroker', () => {
@@ -231,6 +256,7 @@ describe('SurfaceRequestBroker', () => {
       moduleId: 'm01',
       phaseId: 'p01',
       surfaceId: 'html',
+      jupyterBaseUrl: 'https://lab.test/base/',
       htmlSource: 'https://lab.test/base/files/lessons/a%20b.html'
     }, 'https://courseweave.test');
     broker.dispose();

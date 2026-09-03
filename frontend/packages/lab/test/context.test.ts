@@ -31,8 +31,8 @@ const empty: WorkspaceMetadata = {
   terminal_surface_id: null
 };
 
-function ok() {
-  return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+function ok(resolved: { module_id: string | null; phase_id: string | null; surface_id: string | null; reason: string } = { module_id: null, phase_id: null, surface_id: null, reason: 'empty_course' }) {
+  return new Response(JSON.stringify(resolved), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
 describe('active Jupyter metadata collection', () => {
@@ -126,7 +126,7 @@ describe('ContextPublisher', () => {
   });
 
   it('deduplicates exact accepted state and retains source/counter across an iframe replacement', async () => {
-    const postContext = vi.fn().mockResolvedValue(ok());
+    const postContext = vi.fn().mockImplementation(async () => ok());
     const firstChild = { postMessage: vi.fn() } as unknown as Window;
     const nextChild = { postMessage: vi.fn() } as unknown as Window;
     const publisher = new ContextPublisher({ sourceId: 'source-a', relay: { postContext }, childWindow: firstChild, serviceOrigin: 'https://courseweave.test' });
@@ -173,6 +173,57 @@ describe('ContextPublisher', () => {
     const postContext = vi.fn().mockResolvedValue(ok());
     await new ContextPublisher({ sourceId: 'source-new', relay: { postContext }, childWindow: { postMessage: vi.fn() } as unknown as Window, serviceOrigin: 'https://courseweave.test' }).publish(empty);
     expect(postContext).toHaveBeenCalledWith({ source_id: 'source-new', sequence: 0, ...empty });
+  });
+
+  it('exposes only the exact accepted resolver phase and clears it during a cell transition', async () => {
+    const second = deferred<Response>();
+    const postContext = vi.fn()
+      .mockResolvedValueOnce(ok({ module_id: 'm01', phase_id: 'cell-one', surface_id: 'shared-one', reason: 'cell_id' }))
+      .mockReturnValueOnce(second.promise);
+    const child = { postMessage: vi.fn() } as unknown as Window;
+    const publisher = new ContextPublisher({ sourceId: 'source-a', relay: { postContext }, childWindow: child, serviceOrigin: 'https://courseweave.test' });
+    const coordinate = () => (publisher as ContextPublisher & { acceptedCoordinate?(): { moduleId: string; phaseId: string } | null }).acceptedCoordinate?.();
+    const cellOne = { ...empty, active_path: 'notebooks/shared.ipynb', active_cell_id: 'real-cell-one', surface_kind: 'notebook' } as WorkspaceMetadata;
+    const cellTwo = { ...empty, active_path: 'notebooks/shared.ipynb', active_cell_tags: ['second-tag'], surface_kind: 'notebook' } as WorkspaceMetadata;
+
+    expect(coordinate()).toBeNull();
+    await publisher.publish(cellOne);
+    expect(coordinate()).toEqual({ moduleId: 'm01', phaseId: 'cell-one' });
+    const transition = publisher.publish(cellTwo);
+    expect(coordinate()).toBeNull();
+    second.resolve(ok({ module_id: 'm01', phase_id: 'cell-two', surface_id: 'shared-two', reason: 'cell_tag' }));
+    await transition;
+    expect(coordinate()).toEqual({ moduleId: 'm01', phaseId: 'cell-two' });
+    expect(postContext.mock.calls.map(([value]) => [value.sequence, value.active_cell_id, value.active_cell_tags])).toEqual([
+      [0, 'real-cell-one', []],
+      [1, null, ['second-tag']]
+    ]);
+  });
+
+  it('rejects a malformed resolved-context 200 without authority or invalidation', async () => {
+    const onRecovery = vi.fn();
+    const child = { postMessage: vi.fn() } as unknown as Window;
+    const malformed = new Response(JSON.stringify({ module_id: 'm01', phase_id: 'p01', surface_id: null, reason: 'active_path', extra: true }), { status: 200 });
+    const publisher = new ContextPublisher({ sourceId: 'source-a', relay: { postContext: vi.fn().mockResolvedValue(malformed) }, childWindow: child, serviceOrigin: 'https://courseweave.test', onRecovery });
+    await publisher.publish({ ...empty, active_path: 'lesson.ipynb', surface_kind: 'notebook' });
+    expect((publisher as ContextPublisher & { acceptedCoordinate?(): unknown }).acceptedCoordinate?.()).toBeNull();
+    expect(child.postMessage).not.toHaveBeenCalled();
+    expect(onRecovery).toHaveBeenCalledWith('backend');
+  });
+
+  it.each(['stale_context', 'context_conflict'] as const)('withdraws accepted authority after a changed state receives %s', async (code) => {
+    let calls = 0;
+    const postContext = vi.fn().mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) return ok({ module_id: 'm01', phase_id: 'cell-one', surface_id: 'shared-one', reason: 'cell_id' });
+      return new Response(JSON.stringify({ code, message: 'rejected', details: {} }), { status: 409 });
+    });
+    const child = { postMessage: vi.fn() } as unknown as Window;
+    const publisher = new ContextPublisher({ sourceId: 'source-a', relay: { postContext }, childWindow: child, serviceOrigin: 'https://courseweave.test' });
+    await publisher.publish({ ...empty, active_path: 'notebooks/shared.ipynb', active_cell_id: 'real-cell-one', surface_kind: 'notebook' });
+    await publisher.publish({ ...empty, active_path: 'notebooks/shared.ipynb', active_cell_id: 'unknown-cell', surface_kind: 'notebook' });
+    expect((publisher as ContextPublisher & { acceptedCoordinate?(): unknown }).acceptedCoordinate?.()).toBeNull();
+    expect(child.postMessage).toHaveBeenCalledOnce();
   });
 });
 

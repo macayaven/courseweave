@@ -101,6 +101,10 @@ function safeRelativePath(path: string): string {
 }
 
 export function localReaderUrl(path: string, jupyterOrigin: string, baseUrl: string): string {
+  return new URL(`files/${safeRelativePath(path)}`, canonicalJupyterBaseUrl(jupyterOrigin, baseUrl)).href;
+}
+
+export function canonicalJupyterBaseUrl(jupyterOrigin: string, baseUrl: string): string {
   const origin = canonicalOrigin(jupyterOrigin);
   let base: URL;
   try {
@@ -110,7 +114,9 @@ export function localReaderUrl(path: string, jupyterOrigin: string, baseUrl: str
   }
   if (base.origin !== origin || base.username || base.password || base.search || base.hash) throw new Error('invalid Jupyter base URL');
   const basePath = base.pathname.endsWith('/') ? base.pathname : `${base.pathname}/`;
-  return new URL(`files/${safeRelativePath(path)}`, `${origin}${basePath}`).href;
+  const segments = basePath.split('/').slice(1, -1);
+  if (basePath.includes('%') || segments.some((segment) => segment.length === 0 || segment === '.' || segment === '..' || segment === 'files')) throw new Error('invalid Jupyter base URL');
+  return `${origin}${basePath}`;
 }
 
 function videoUrl(value: string | undefined): string {
@@ -158,6 +164,7 @@ interface CourseSurfaceFactoryOptions {
 
 export interface SurfaceOpenResult {
   htmlSource: string | null;
+  jupyterBaseUrl: string;
   terminalSurfaceId: string | null;
 }
 
@@ -237,11 +244,21 @@ class IframeWidget extends Widget {
 }
 
 class DashboardWidget extends Widget {
-  constructor(course: CourseSnapshot, open: (coordinate: SurfaceCoordinate) => Promise<unknown>) {
-    const node = document.createElement('div');
+  constructor(course: CourseSnapshot, private readonly open: (coordinate: SurfaceCoordinate) => Promise<unknown>) {
+    super({ node: document.createElement('div') });
+    this.id = 'courseweave-dashboard';
+    this.title.label = 'Course dashboard';
+    this.title.closable = true;
+    this.updateCourse(course);
+  }
+
+  updateCourse(course: CourseSnapshot): void {
+    this.node.replaceChildren();
     const heading = document.createElement('h1');
     heading.textContent = course.title;
-    node.appendChild(heading);
+    this.node.appendChild(heading);
+    const status = document.createElement('p');
+    status.setAttribute('role', 'status');
     for (const module of course.modules) {
       for (const phase of module.phases) {
         for (const surface of phase.surfaces) {
@@ -249,21 +266,15 @@ class DashboardWidget extends Widget {
           button.type = 'button';
           button.textContent = surface.label ?? surface.id;
           button.addEventListener('click', () => {
-            void open({ moduleId: module.id, phaseId: phase.id, surfaceId: surface.id }).catch(() => {
+            void this.open({ moduleId: module.id, phaseId: phase.id, surfaceId: surface.id }).catch(() => {
               status.textContent = 'CourseWeave backend unavailable. Retry after restarting the service.';
             });
           });
-          node.appendChild(button);
+          this.node.appendChild(button);
         }
       }
     }
-    const status = document.createElement('p');
-    status.setAttribute('role', 'status');
-    node.appendChild(status);
-    super({ node });
-    this.id = 'courseweave-dashboard';
-    this.title.label = 'Course dashboard';
-    this.title.closable = true;
+    this.node.appendChild(status);
   }
 }
 
@@ -274,11 +285,15 @@ export class CourseSurfaceFactory {
   private author: IframeWidget | null = null;
   private readonly terminals = new Map<string, Widget>();
   private readonly metadata = new WeakMap<object, SurfaceMetadata>();
+  private readonly jupyterBaseUrl: string;
 
-  constructor(private readonly options: CourseSurfaceFactoryOptions) {}
+  constructor(private readonly options: CourseSurfaceFactoryOptions) {
+    this.jupyterBaseUrl = canonicalJupyterBaseUrl(options.jupyterOrigin, options.baseUrl);
+  }
 
   setCourse(course: CourseSnapshot): void {
     this.course = course;
+    if (this.dashboard !== null && !this.dashboard.isDisposed) this.dashboard.updateCourse(course);
   }
 
   private lookup(coordinate: SurfaceCoordinate): CourseSurface {
@@ -307,15 +322,15 @@ export class CourseSurfaceFactory {
     const surface = this.lookup(coordinate);
     if (surface.type === 'markdown') {
       this.nativeDocument(surface.path, 'Markdown Preview', 'markdown');
-      return { htmlSource: null, terminalSurfaceId: null };
+      return { htmlSource: null, jupyterBaseUrl: this.jupyterBaseUrl, terminalSurfaceId: null };
     }
     if (surface.type === 'notebook') {
       this.nativeDocument(surface.path, 'Notebook', 'notebook');
-      return { htmlSource: null, terminalSurfaceId: null };
+      return { htmlSource: null, jupyterBaseUrl: this.jupyterBaseUrl, terminalSurfaceId: null };
     }
     if (surface.type === 'source') {
       this.nativeDocument(surface.path, 'Editor', 'source');
-      return { htmlSource: null, terminalSurfaceId: null };
+      return { htmlSource: null, jupyterBaseUrl: this.jupyterBaseUrl, terminalSurfaceId: null };
     }
     if (surface.type === 'terminal') {
       if (surface.cwd !== undefined && surface.cwd !== '.') safeRelativePath(surface.cwd);
@@ -335,7 +350,7 @@ export class CourseSurfaceFactory {
       }
       this.metadata.set(widget, { activePath: null, surfaceKind: 'terminal', terminalSurfaceId: surface.id, explicitModuleId: coordinate.moduleId, explicitPhaseId: coordinate.phaseId });
       this.activate(widget);
-      return { htmlSource: null, terminalSurfaceId: surface.id };
+      return { htmlSource: null, jupyterBaseUrl: this.jupyterBaseUrl, terminalSurfaceId: surface.id };
     }
     if (surface.type === 'html' || surface.type === 'video') {
       const source = surface.type === 'html'
@@ -348,7 +363,7 @@ export class CourseSurfaceFactory {
       this.reader.iframe.src = source;
       this.metadata.set(this.reader, { activePath: surface.type === 'html' ? surface.path ?? null : null, surfaceKind: surface.type, terminalSurfaceId: null, explicitModuleId: coordinate.moduleId, explicitPhaseId: coordinate.phaseId });
       this.activate(this.reader);
-      return { htmlSource: source, terminalSurfaceId: null };
+      return { htmlSource: source, jupyterBaseUrl: this.jupyterBaseUrl, terminalSurfaceId: null };
     }
     throw new Error('Surface type is not supported.');
   }
@@ -405,6 +420,7 @@ export class SurfaceRequestBroker {
         moduleId: request.moduleId,
         phaseId: request.phaseId,
         surfaceId: request.surfaceId,
+        jupyterBaseUrl: result.jupyterBaseUrl,
         htmlSource: result.htmlSource
       }, this.options.serviceOrigin);
     }).catch(() => undefined).finally(() => this.flights.delete(key));

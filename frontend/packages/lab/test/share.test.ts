@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LabCaptureProvider } from '../src/share';
 import type { CourseSnapshot } from '../src/surfaces';
+import { ContextPublisher, type WorkspaceMetadata } from '../src/context';
 
 const course: CourseSnapshot = {
   id: 'course',
@@ -27,12 +28,12 @@ function editor(source: string, start = 0, end = source.length) {
   };
 }
 
-function harness(options: { source?: string; tags?: string[]; outputs?: unknown[]; active?: 'editor' | 'notebook' | 'terminal' } = {}) {
+function harness(options: { source?: string; tags?: string[]; outputs?: unknown[]; active?: 'editor' | 'notebook' | 'terminal'; path?: string; activeCoordinate?: () => { moduleId: string; phaseId: string } | null } = {}) {
   const child = { postMessage: vi.fn() } as unknown as Window;
   const fileEditor = editor(options.source ?? 'safe');
   const cellEditor = editor(options.source ?? 'safe');
   const panel = {
-    context: { path: 'lesson.ipynb' },
+    context: { path: options.path ?? 'lesson.ipynb' },
     content: { activeCell: { editor: cellEditor, model: {
       id: 'cell-a',
       type: 'code',
@@ -49,7 +50,7 @@ function harness(options: { source?: string; tags?: string[]; outputs?: unknown[
     childWindow: child,
     serviceOrigin: 'https://courseweave.test',
     course: () => course,
-    activeCoordinate: () => ({ moduleId: 'm01', phaseId: 'p01' }),
+    activeCoordinate: options.activeCoordinate ?? (() => ({ moduleId: 'm01', phaseId: 'p01' })),
     activeWidget: () => active,
     notebook: { currentWidget: panel, activeCell: panel.content.activeCell },
     editor: { currentWidget: file },
@@ -152,6 +153,88 @@ describe('LabCaptureProvider', () => {
     dispatch(child, request);
     await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledOnce());
     expect(child.postMessage).toHaveBeenCalledWith({ type: 'courseweave.share.capture.rejected.v1', requestId: 'request-a', code: 'unavailable' }, 'https://courseweave.test');
+    provider.dispose();
+  });
+
+  it('rejects a throwing selection accessor once and clears pending for a retry', async () => {
+    const { provider, child, cellEditor } = harness({ source: 'safe' });
+    cellEditor.getSelection.mockImplementationOnce(() => { throw new Error('widget exposed secret details'); });
+    dispatch(child, request);
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledOnce());
+    expect(child.postMessage).toHaveBeenLastCalledWith({
+      type: 'courseweave.share.capture.rejected.v1',
+      requestId: 'request-a',
+      code: 'unavailable'
+    }, 'https://courseweave.test');
+    expect(JSON.stringify(child.postMessage.mock.calls)).not.toContain('secret details');
+
+    dispatch(child, { ...request, requestId: 'request-b' });
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(2));
+    expect(child.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: 'request-b', content: 'safe' }), 'https://courseweave.test');
+    provider.dispose();
+  });
+
+  it('rejects a throwing output serializer without reflecting the exception', async () => {
+    const { provider, child, panel } = harness();
+    provider.setCourse(() => ({ ...course, policies: { max_shared_chars: 100 } }));
+    panel.content.activeCell.model.outputs.toJSON.mockImplementationOnce(() => { throw new Error('serialized secret detail'); });
+    dispatch(child, { ...request, requestId: 'output-error', kind: 'output', maxChars: 100 });
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledOnce());
+    expect(child.postMessage).toHaveBeenCalledWith({
+      type: 'courseweave.share.capture.rejected.v1',
+      requestId: 'output-error',
+      code: 'unavailable'
+    }, 'https://courseweave.test');
+    expect(JSON.stringify(child.postMessage.mock.calls)).not.toContain('serialized secret detail');
+    provider.dispose();
+  });
+
+  it('captures a shared notebook only under its currently accepted resolver phase', async () => {
+    const sharedCourse = structuredClone(course);
+    sharedCourse.policies.max_shared_chars = 100;
+    sharedCourse.modules[0]!.phases = [
+      { ...structuredClone(sharedCourse.modules[0]!.phases[0]!), id: 'cell-one', surfaces: [{ id: 'shared-one', type: 'notebook', path: 'notebooks/shared.ipynb' }] },
+      { ...structuredClone(sharedCourse.modules[0]!.phases[0]!), id: 'cell-two', surfaces: [{ id: 'shared-two', type: 'notebook', path: 'notebooks/shared.ipynb' }] }
+    ];
+    let resolveSecond!: (response: Response) => void;
+    const second = new Promise<Response>((resolve) => { resolveSecond = resolve; });
+    const resolved = (phase: string, reason: 'cell_id' | 'cell_tag') => new Response(JSON.stringify({ module_id: 'm01', phase_id: phase, surface_id: phase === 'cell-one' ? 'shared-one' : 'shared-two', reason }), { status: 200 });
+    const postContext = vi.fn().mockResolvedValueOnce(resolved('cell-one', 'cell_id')).mockReturnValueOnce(second).mockResolvedValueOnce(new Response(JSON.stringify({ module_id: 'm01', phase_id: 'cell-two', surface_id: 'shared-two', reason: 'cell_tag', unexpected: true }), { status: 200 }));
+    const contextChild = { postMessage: vi.fn() } as unknown as Window;
+    const publisher = new ContextPublisher({ sourceId: 'source-a', relay: { postContext }, childWindow: contextChild, serviceOrigin: 'https://courseweave.test' });
+    const { provider, child, panel } = harness({ source: 'safe', path: 'notebooks/shared.ipynb', activeCoordinate: () => publisher.acceptedCoordinate() });
+    provider.setCourse(() => sharedCourse);
+    const metadata = (cell: { id: string | null; tags: string[] }): WorkspaceMetadata => ({
+      active_path: 'notebooks/shared.ipynb', active_cell_id: cell.id, active_cell_tags: cell.tags,
+      surface_kind: 'notebook', explicit_module_id: null, explicit_phase_id: null,
+      video_seconds: null, terminal_surface_id: null
+    });
+
+    dispatch(child, { ...request, requestId: 'before', kind: 'cell', maxChars: 100 });
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(1));
+    expect(panel.content.activeCell.model.sharedModel.getSource).not.toHaveBeenCalled();
+
+    await publisher.publish(metadata({ id: 'real-cell-one', tags: [] }));
+    dispatch(child, { ...request, requestId: 'cell-one', kind: 'cell', maxChars: 100 });
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(2));
+    expect(child.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: 'cell-one', content: 'safe' }), 'https://courseweave.test');
+
+    const transition = publisher.publish(metadata({ id: null, tags: ['second-tag'] }));
+    await Promise.resolve();
+    dispatch(child, { ...request, requestId: 'during-transition', kind: 'cell', maxChars: 100 });
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(3));
+    expect(child.postMessage).toHaveBeenLastCalledWith({ type: 'courseweave.share.capture.rejected.v1', requestId: 'during-transition', code: 'forbidden' }, 'https://courseweave.test');
+    resolveSecond(resolved('cell-two', 'cell_tag'));
+    await transition;
+    dispatch(child, { ...request, requestId: 'cell-two', kind: 'cell', maxChars: 100 });
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(4));
+    expect(child.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: 'cell-two', content: 'safe' }), 'https://courseweave.test');
+
+    await publisher.publish(metadata({ id: 'unknown-cell', tags: [] }));
+    dispatch(child, { ...request, requestId: 'after-invalid', kind: 'cell', maxChars: 100 });
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(5));
+    expect(child.postMessage).toHaveBeenLastCalledWith({ type: 'courseweave.share.capture.rejected.v1', requestId: 'after-invalid', code: 'forbidden' }, 'https://courseweave.test');
+    expect(contextChild.postMessage).toHaveBeenCalledTimes(2);
     provider.dispose();
   });
 });

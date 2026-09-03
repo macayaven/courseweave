@@ -9,6 +9,7 @@ export type ReaderNavigationOutcome = {
   moduleId: string;
   phaseId: string;
   surfaceId: string;
+  jupyterBaseUrl?: string;
   htmlSource: string | null;
 };
 
@@ -27,15 +28,33 @@ function isCanonicalHttpsUrl(value: string): boolean {
   }
 }
 
-function isLocalHtmlSource(value: string, expectedParentOrigin: string): boolean {
+function canonicalJupyterBaseUrl(value: unknown, expectedParentOrigin: string): URL | null {
+  if (typeof value !== 'string') return null;
   try {
     const parsed = new URL(value);
-    if (parsed.origin !== expectedParentOrigin || parsed.username !== '' || parsed.password !== '' || parsed.search !== '' || parsed.hash !== '') return false;
-    const segments = parsed.pathname.split('/').filter(Boolean);
-    const files = segments.indexOf('files');
-    if (files < 0 || files === segments.length - 1) return false;
-    const decoded = segments.slice(files + 1).map((segment) => decodeURIComponent(segment));
-    return decoded.every((segment) => segment !== '' && segment !== '.' && segment !== '..' && !segment.includes('/') && !segment.includes('\\') && !segment.includes('%'));
+    if (parsed.origin !== expectedParentOrigin || parsed.username !== '' || parsed.password !== '' || parsed.search !== '' || parsed.hash !== '' || parsed.href !== value || !parsed.pathname.endsWith('/') || parsed.pathname.includes('%')) return null;
+    const segments = parsed.pathname.split('/').slice(1, -1);
+    if (segments.some((segment) => segment.length === 0 || segment === '.' || segment === '..' || segment === 'files')) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function isLocalHtmlSource(value: string, jupyterBaseUrl: unknown, expectedParentOrigin: string): boolean {
+  const base = canonicalJupyterBaseUrl(jupyterBaseUrl, expectedParentOrigin);
+  if (base === null) return false;
+  try {
+    const parsed = new URL(value);
+    if (parsed.origin !== expectedParentOrigin || parsed.username !== '' || parsed.password !== '' || parsed.search !== '' || parsed.hash !== '' || parsed.href !== value) return false;
+    const prefix = `${base.pathname}files/`;
+    if (!parsed.pathname.startsWith(prefix)) return false;
+    const segments = parsed.pathname.slice(prefix.length).split('/');
+    return segments.length > 0 && segments.every((segment) => {
+      if (segment.length === 0) return false;
+      const decoded = decodeURIComponent(segment);
+      return decoded !== '.' && decoded !== '..' && decoded !== 'files' && !decoded.includes('/') && !decoded.includes('\\') && !decoded.includes('%') && encodeURIComponent(decoded) === segment;
+    });
   } catch {
     return false;
   }
@@ -47,7 +66,8 @@ export function selectReaderRoute(course: CourseManifest, sourceId: string, outc
   if (surface === null || !['html', 'video'].includes(surface.type)) return null;
   if (active !== undefined && (active.moduleId !== outcome.moduleId || active.phaseId !== outcome.phaseId || active.surface.id !== surface.id || active.surface.type !== surface.type)) return null;
   if (expectedParentOrigin !== undefined) {
-    if (surface.type === 'html' && (outcome.htmlSource === null || !isLocalHtmlSource(outcome.htmlSource, expectedParentOrigin))) return null;
+    if (canonicalJupyterBaseUrl(outcome.jupyterBaseUrl, expectedParentOrigin) === null) return null;
+    if (surface.type === 'html' && (outcome.htmlSource === null || !isLocalHtmlSource(outcome.htmlSource, outcome.jupyterBaseUrl, expectedParentOrigin))) return null;
     if (surface.type === 'video' && (typeof surface.url !== 'string' || !isCanonicalHttpsUrl(surface.url) || outcome.htmlSource !== surface.url)) return null;
   }
   return { surface, htmlSource: surface.type === 'html' ? outcome.htmlSource : null };
@@ -85,12 +105,13 @@ export function reconcileReaderOutcome(stored: StoredReaderOutcome, sourceId: st
 export function parseReaderNavigation(value: unknown, expectedParentOrigin: string, allowedVideoUrls: readonly string[] = []): ReaderNavigationOutcome | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const data = value as Record<string, unknown>;
-  const expectedKeys = ['htmlSource', 'moduleId', 'phaseId', 'sourceId', 'surfaceId', 'type'];
+  const expectedKeys = ['htmlSource', 'jupyterBaseUrl', 'moduleId', 'phaseId', 'sourceId', 'surfaceId', 'type'];
   if (Object.keys(data).sort().join(',') !== expectedKeys.join(',')) return null;
   if (data.type !== 'courseweave.reader.opened.v1' || (data.htmlSource !== null && typeof data.htmlSource !== 'string')) return null;
   const fields = ['sourceId', 'moduleId', 'phaseId', 'surfaceId'] as const;
   if (fields.some((field) => typeof data[field] !== 'string' || data[field].trim() !== data[field] || data[field].length === 0)) return null;
-  if (data.htmlSource !== null && !isLocalHtmlSource(data.htmlSource, expectedParentOrigin) && !(isCanonicalHttpsUrl(data.htmlSource) && allowedVideoUrls.includes(data.htmlSource))) return null;
+  if (canonicalJupyterBaseUrl(data.jupyterBaseUrl, expectedParentOrigin) === null) return null;
+  if (data.htmlSource !== null && !isLocalHtmlSource(data.htmlSource, data.jupyterBaseUrl, expectedParentOrigin) && !(isCanonicalHttpsUrl(data.htmlSource) && allowedVideoUrls.includes(data.htmlSource))) return null;
   return data as ReaderNavigationOutcome;
 }
 

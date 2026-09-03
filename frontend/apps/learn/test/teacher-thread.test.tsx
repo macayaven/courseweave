@@ -199,7 +199,7 @@ describe('TeacherThread', () => {
   });
 
   it('never calls Share or Guide after capture rejection and never calls Guide after Share API failure', async () => {
-    const captureShare = vi.fn().mockRejectedValue(new Error('too_large'));
+    const captureShare = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({ kind: 'selection' as const, content: 'safe' });
     const share = vi.fn().mockRejectedValue(new Error('offline'));
     const postGuide = vi.fn();
     const common = { client: { share, postGuide, createProposal: vi.fn() }, sourceId: 'source-a', allowedShareKinds: ['selection'] as Array<'selection'>, maxShareChars: 4, onProvider: vi.fn(), onProposal: vi.fn(), onRefresh: vi.fn() };
@@ -210,11 +210,13 @@ describe('TeacherThread', () => {
     expect(await screen.findByText('Could not capture that content. Nothing was shared.')).toBeInTheDocument();
     expect(share).not.toHaveBeenCalled();
     expect(postGuide).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Share and ask' })).not.toBeDisabled();
 
-    view.rerender(<TeacherThread {...common} captureShare={vi.fn().mockResolvedValue({ kind: 'selection' as const, content: 'safe' })} />);
     fireEvent.click(screen.getByRole('button', { name: 'Share and ask' }));
     await vi.waitFor(() => expect(share).toHaveBeenCalledOnce());
+    expect(captureShare).toHaveBeenCalledTimes(2);
     expect(postGuide).not.toHaveBeenCalled();
+    view.unmount();
   });
 
   it('renders each assistant delta before the terminal event and retains it after RUN_ERROR', async () => {
