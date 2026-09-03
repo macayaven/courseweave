@@ -1237,4 +1237,111 @@ describe("Author validation presentation", () => {
     fireEvent.change(argument, { target: { value: "node" } });
     expect(screen.getByLabelText("Argument 1")).toHaveValue("node");
   });
+
+  it("falls back to the validation summary for nonempty duplicate array collection issues", async () => {
+    const manifest: AuthorManifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Duplicate arrays",
+      description: "",
+      entry_module_id: "module",
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [
+        {
+          id: "module",
+          title: "Module",
+          description: "",
+          phases: [
+            {
+              id: "phase",
+              title: "Phase",
+              kind: "lab",
+              teacher_mode: "debugging_coach",
+              completion: { type: "manual" },
+              capabilities: {
+                chat: false,
+                hint_level: "none",
+                share_selection: false,
+                share_cell: false,
+                share_output: false,
+                create_profile_proposal: false,
+                create_course_proposal: false,
+                create_workspace_proposal: false,
+              },
+              surfaces: [
+                {
+                  id: "terminal",
+                  type: "terminal",
+                  role: "exercise",
+                  label: "Run",
+                  argv: ["node", "node"],
+                  cwd: ".",
+                },
+                {
+                  id: "notebook",
+                  type: "notebook",
+                  role: "primary",
+                  path: "lesson.ipynb",
+                  match: { cell_ids: ["cell", "cell"] },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    appMocks.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: appMocks.retry,
+    });
+    appMocks.getCourse.mockResolvedValue({
+      manifest,
+      raw: "{}",
+      etag: '"etag"',
+    });
+    render(<AuthorApp />);
+    await screen.findByLabelText("Course title");
+
+    const duplicateCollectionIssues: Array<readonly [string, string]> = [
+      ["/modules/0/phases/0/surfaces/0/argv", "Duplicate arguments."],
+      [
+        "/modules/0/phases/0/surfaces/1/match/cell_ids",
+        "Duplicate notebook cells.",
+      ],
+    ];
+    for (const [path, message] of duplicateCollectionIssues) {
+      appMocks.validateCourse.mockRejectedValueOnce(
+        Object.assign(new Error("invalid"), {
+          details: {
+            issues: [{ path, code: "unique_items", message }],
+          },
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Validate structure" }),
+      );
+      await screen.findByText(message);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Focus first issue" }),
+      );
+      const summary = screen.getByLabelText("Validation issues");
+      expect(summary).toHaveFocus();
+      expect(document.getElementById(pointerToControlId(path))).toBeNull();
+      expect(
+        screen.getByRole("button", { name: "Select course Duplicate arrays" }),
+      ).toHaveAttribute("aria-pressed", "true");
+    }
+  });
 });

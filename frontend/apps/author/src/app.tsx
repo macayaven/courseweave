@@ -222,14 +222,24 @@ function selectionForPointer(
     )
   )
     return null;
-  return surface === undefined
-    ? null
-    : {
-        type: "surface",
-        moduleKey: module.clientKey,
-        phaseKey: phase.clientKey,
-        surfaceKey: surface.clientKey,
-      };
+  if (surface === undefined) return null;
+  if (
+    (surfaceRest === "argv" &&
+      (surface.type !== "terminal" || surface.argv.length !== 0)) ||
+    (surfaceRest === "match/cell_ids" &&
+      (surface.type !== "notebook" ||
+        (surface.match?.cell_ids?.length ?? 0) !== 0)) ||
+    (surfaceRest === "match/cell_tags" &&
+      (surface.type !== "notebook" ||
+        (surface.match?.cell_tags?.length ?? 0) !== 0))
+  )
+    return null;
+  return {
+    type: "surface",
+    moduleKey: module.clientKey,
+    phaseKey: phase.clientKey,
+    surfaceKey: surface.clientKey,
+  };
 }
 
 function AuthorEditor({
