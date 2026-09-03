@@ -8,6 +8,30 @@ import {
 } from "@testing-library/react";
 import { ImportExport, readImportFile } from "../src/import-export";
 
+const app = vi.hoisted(() => ({
+  getCourse: vi.fn(),
+  validateCourse: vi.fn(),
+  putCourse: vi.fn(),
+  runtime: vi.fn(),
+  retry: vi.fn(),
+}));
+vi.mock("../src/api", () => ({
+  createAuthorClient: () => ({
+    getCourse: app.getCourse,
+    validateCourse: app.validateCourse,
+    putCourse: app.putCourse,
+    getProposals: vi.fn(),
+    postGuide: vi.fn(),
+    createProposal: vi.fn(),
+    editProposal: vi.fn(),
+    acceptProposal: vi.fn(),
+    rejectProposal: vi.fn(),
+  }),
+  AuthorApiError: class AuthorApiError extends Error {},
+}));
+vi.mock("../src/runtime", () => ({ useAuthorRuntime: app.runtime }));
+import { AuthorApp } from "../src/app";
+
 const valid = { schema_version: 1, id: "course", title: "C" };
 
 afterEach(() => {
@@ -45,12 +69,10 @@ describe("Author import and export", () => {
   });
 
   it("retains the current state on failed import and can import the same file twice", async () => {
-    const validate = vi
-      .fn()
-      .mockResolvedValue({
-        manifest: valid,
-        formatted_json: '{\n  "schema_version": 1\n}\n',
-      });
+    const validate = vi.fn().mockResolvedValue({
+      manifest: valid,
+      formatted_json: '{\n  "schema_version": 1\n}\n',
+    });
     const imported = vi.fn();
     render(
       <ImportExport
@@ -70,6 +92,106 @@ describe("Author import and export", () => {
     await screen.findByText(/Imported into the local draft/i);
     fireEvent.change(input, { target: { files: [good] } });
     await waitFor(() => expect(imported).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps a dirty selected AuthorApp draft and baseline untouched when server structural import validation rejects unexpected fields", async () => {
+    const manifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Saved",
+      description: "",
+      entry_module_id: "module",
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [
+        {
+          id: "module",
+          title: "Module",
+          description: "",
+          phases: [
+            {
+              id: "phase",
+              title: "Phase",
+              kind: "read",
+              teacher_mode: "reading_companion",
+              completion: { type: "manual" },
+              capabilities: {
+                chat: false,
+                hint_level: "none",
+                share_selection: false,
+                share_cell: false,
+                share_output: false,
+                create_profile_proposal: false,
+                create_course_proposal: false,
+                create_workspace_proposal: false,
+              },
+              surfaces: [
+                {
+                  id: "surface",
+                  type: "markdown",
+                  role: "primary",
+                  path: "saved.md",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    app.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: app.retry,
+    });
+    app.getCourse.mockResolvedValue({
+      manifest,
+      raw: "{}",
+      etag: '"saved-etag"',
+    });
+    app.validateCourse.mockRejectedValue(
+      Object.assign(new Error("invalid"), {
+        details: {
+          issues: [
+            {
+              path: "/unexpected",
+              code: "schema_validation",
+              message: "Unexpected field.",
+            },
+          ],
+        },
+      }),
+    );
+    render(<AuthorApp />);
+    fireEvent.change(await screen.findByLabelText("Course title"), {
+      target: { value: "Dirty title" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select surface surface" }),
+    );
+    fireEvent.change(screen.getByLabelText("Import course file"), {
+      target: {
+        files: [
+          new File(
+            [JSON.stringify({ ...manifest, unexpected: true })],
+            "bad.json",
+          ),
+        ],
+      },
+    });
+    expect(await screen.findByText("invalid")).toBeInTheDocument();
+    expect(screen.getByLabelText("Path")).toHaveValue("saved.md");
+    expect(screen.getByText("Unsaved local draft.")).toBeInTheDocument();
+    expect(app.putCourse).not.toHaveBeenCalled();
   });
 
   it("does not replace a newer draft when import validation completes after its operation epoch changes", async () => {
@@ -148,5 +270,76 @@ describe("Author import and export", () => {
     expect(filename).toBe("courseweave.json");
     expect(click).toHaveBeenCalledOnce();
     expect(revoke).toHaveBeenCalledWith("blob:course");
+  });
+
+  it("exports and explicitly saves the identical server canonical byte sequence", async () => {
+    const manifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Café",
+      description: "",
+      entry_module_id: null,
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [],
+    };
+    const canonical = '{\n  "title": "Café"\n}\n';
+    app.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: app.retry,
+    });
+    app.getCourse.mockResolvedValue({
+      manifest,
+      raw: canonical,
+      etag: '"etag"',
+    });
+    app.validateCourse.mockResolvedValue({
+      manifest,
+      formatted_json: canonical,
+    });
+    app.putCourse.mockResolvedValue({
+      manifest,
+      raw: canonical,
+      etag: '"next"',
+    });
+    const create = vi.fn<(blob: Blob) => string>(() => "blob:canonical");
+    vi.stubGlobal("URL", { createObjectURL: create, revokeObjectURL: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      () => undefined,
+    );
+    render(<AuthorApp />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Validate structure" }),
+    );
+    await screen.findByText("Structural validation passed.");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Export courseweave.json" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save course" }));
+    await waitFor(() => expect(app.putCourse).toHaveBeenCalledOnce());
+    const blob = create.mock.calls[0]?.[0] as Blob;
+    const bytes = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(blob);
+    });
+    expect(bytes).toBe(canonical);
+    expect(app.putCourse).toHaveBeenCalledWith(
+      canonical,
+      '"etag"',
+      expect.anything(),
+    );
   });
 });
