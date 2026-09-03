@@ -740,6 +740,8 @@ describe("Author validation presentation", () => {
       raw: "{}",
       etag: '"etag"',
     });
+    const firstPath = "/modules/0/phases/0/surfaces/0/path";
+    const secondPath = "/modules/1/phases/0/surfaces/0/path";
     appMocks.validateCourse
       .mockResolvedValueOnce({ manifest: imported, formatted_json: "{}\n" })
       .mockRejectedValueOnce(
@@ -747,7 +749,12 @@ describe("Author validation presentation", () => {
           details: {
             issues: [
               {
-                path: "/modules/1/phases/0/surfaces/0/path",
+                path: firstPath,
+                code: "missing_artifact",
+                message: "Original path.",
+              },
+              {
+                path: secondPath,
                 code: "missing_artifact",
                 message: "Imported path.",
               },
@@ -764,15 +771,24 @@ describe("Author validation presentation", () => {
     await screen.findByText("Imported path.");
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     const control = await screen.findByLabelText("Path");
-    expect(control).toHaveValue("new.md");
+    expect(control).toHaveValue("one.md");
     expect(control).toHaveFocus();
-    expect(control).toHaveAttribute(
-      "id",
-      pointerToControlId("/modules/1/phases/0/surfaces/0/path"),
-    );
+    expect(control).toHaveAttribute("id", pointerToControlId(firstPath));
     expect(control).toHaveAttribute(
       "aria-describedby",
-      pointerToControlId("/modules/1/phases/0/surfaces/0/path", "issue"),
+      pointerToControlId(firstPath, "issue"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select surface new" }));
+    const second = await screen.findByLabelText("Path");
+    expect(second).toHaveValue("new.md");
+    expect(second).toHaveAttribute(
+      "aria-describedby",
+      pointerToControlId(secondPath, "issue"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Select surface one" }));
+    expect(await screen.findByLabelText("Path")).toHaveAttribute(
+      "aria-describedby",
+      pointerToControlId(firstPath, "issue"),
     );
   });
 });
