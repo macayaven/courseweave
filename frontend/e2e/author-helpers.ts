@@ -554,6 +554,7 @@ export async function mountAuthor(page: Page, api: AuthorApiFixture, options: { 
     frame.style.border = "0";
     frame.style.width = `${width}px`;
     frame.style.height = "1400px";
+    frame.referrerPolicy = "origin";
     frame.src = "/author/";
     window.addEventListener("message", (event) => {
       if (event.source === window) return;
@@ -593,7 +594,10 @@ export async function reloadAuthor(page: Page, author: FrameLocator, api: Author
   await page.evaluate((allowed) => {
     document.documentElement.dataset.allowedRuntimeRequests = String(allowed);
   }, expectedHandshakeCount);
-  await page.locator("#author-frame").evaluate((frame) => { (frame as HTMLIFrameElement).contentWindow?.location.reload(); });
+  await page.locator("#author-frame").evaluate((frame) => {
+    const iframe = frame as HTMLIFrameElement;
+    iframe.src = iframe.src;
+  });
   await expect(author.getByText("Draft matches the loaded course.")).toBeVisible();
   await expect.poll(() => page.evaluate(() => Number(document.documentElement.dataset.runtimeRequests))).toBe(expectedHandshakeCount);
   api.runtimeHandshakeCount = expectedHandshakeCount;
