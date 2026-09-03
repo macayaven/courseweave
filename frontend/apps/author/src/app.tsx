@@ -299,29 +299,39 @@ function AuthorEditor({
     }
     if (initialProposalsLoaded.current && !reconnecting) return;
     const getProposals = client.getProposals;
-    if (typeof getProposals !== "function") return;
+    if (typeof getProposals !== "function") {
+      setAuthorityState("blocked");
+      return;
+    }
+    setAuthorityState("refreshing");
     const controller = new AbortController();
     const started = connectionEpoch;
     void Promise.resolve(getProposals(controller.signal))
       .then((items) => {
         if (
-          !controller.signal.aborted &&
-          started === latestConnectionEpoch.current &&
-          (Array.isArray(items) || items === undefined)
-        ) {
-          initialProposalsLoaded.current = true;
-          proposalsEpoch.current = started;
-          setProposals((Array.isArray(items) ? items : []) as Proposal[]);
-          if (
-            reconnectEpoch.current === started &&
-            courseAuthorityEpoch === started
-          ) {
-            reconnectEpoch.current = null;
-            setAuthorityState("fresh");
-          }
+          controller.signal.aborted ||
+          started !== latestConnectionEpoch.current
+        )
+          return;
+        if (!Array.isArray(items)) {
+          setAuthorityState("blocked");
+          return;
+        }
+        initialProposalsLoaded.current = true;
+        proposalsEpoch.current = started;
+        setProposals(items as Proposal[]);
+        if (courseAuthorityEpoch === started) {
+          reconnectEpoch.current = null;
+          setAuthorityState("fresh");
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (
+          !controller.signal.aborted &&
+          started === latestConnectionEpoch.current
+        )
+          setAuthorityState("blocked");
+      });
     return () => controller.abort();
   }, [client, connected, connectionEpoch, courseAuthorityEpoch]);
   useEffect(() => {
@@ -492,17 +502,20 @@ function AuthorEditor({
       proposalsResult.status === "fulfilled" &&
       Array.isArray(proposalsResult.value);
     const complete = course && proposalList;
-    if (!current) return { course, proposals: proposalList, complete: false, current };
+    if (!current) return { committed: false };
     if (!complete) {
       setAuthorityState("blocked");
-      return { course, proposals: proposalList, complete: false, current };
+      return { committed: false };
     }
     if (courseResult.status === "fulfilled" && proposalsResult.status === "fulfilled") {
       onCourseSaved(courseResult.value);
       setProposals(proposalsResult.value as Proposal[]);
     }
+    initialProposalsLoaded.current = true;
+    proposalsEpoch.current = started;
+    reconnectEpoch.current = null;
     setAuthorityState("fresh");
-    return { course, proposals: proposalList, complete, current };
+    return { committed: true };
   }, [client, connectionEpoch, onCourseSaved]);
   const authorityRead = useRef<AbortController | null>(null);
   const retryAuthority = useCallback(() => {

@@ -38,7 +38,7 @@ vi.mock("../src/api", async () => {
       getCourse: appMocks.getCourse,
       validateCourse: appMocks.validateCourse,
       putCourse: vi.fn(),
-      getProposals: vi.fn(),
+      getProposals: vi.fn().mockResolvedValue([]),
       postGuide: vi.fn(),
       createProposal: vi.fn(),
       editProposal: vi.fn(),

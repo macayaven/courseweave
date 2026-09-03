@@ -39,7 +39,7 @@ describe("CurriculumThread", () => {
         recovery={false}
         onProvider={vi.fn()}
         onProposal={vi.fn()}
-        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefresh={vi.fn().mockResolvedValue({ committed: true })}
       />,
     );
     expect(postGuide).not.toHaveBeenCalled();
@@ -75,7 +75,7 @@ describe("CurriculumThread", () => {
         recovery={false}
         onProvider={vi.fn()}
         onProposal={onProposal}
-        onRefresh={vi.fn().mockResolvedValue(undefined)}
+        onRefresh={vi.fn().mockResolvedValue({ committed: true })}
       />,
     );
     const composer = screen.getByLabelText("Ask the curriculum teacher");
@@ -95,11 +95,11 @@ describe("CurriculumThread", () => {
     const postGuide = vi.fn().mockRejectedValue({ code: "not_configured" });
     const onProvider = vi.fn();
     const { rerender } = render(
-      <CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean={false} recovery={false} onProvider={onProvider} onProposal={vi.fn()} onRefresh={vi.fn()} />,
+      <CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean={false} recovery={false} onProvider={onProvider} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: false })} />,
     );
     expect(screen.getByRole("button", { name: "Ask teacher" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent(/saved manifest/i);
-    rerender(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} onProvider={onProvider} onProposal={vi.fn()} onRefresh={vi.fn()} />);
+    rerender(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} onProvider={onProvider} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: false })} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Retry" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
     await screen.findByText("Teacher unavailable");
@@ -109,13 +109,13 @@ describe("CurriculumThread", () => {
   it("blocks a second teacher operation after candidate persistence has no complete refresh", async () => {
     const postGuide = vi.fn().mockImplementation((body) => Promise.resolve(response(completed(body.threadId, body.runId, true))));
     const onProposal = vi.fn();
-    const view = render(<CurriculumThread client={{ postGuide, createProposal: vi.fn().mockResolvedValue({ id: "proposal-a" }) }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockResolvedValue(false)} />);
+    const view = render(<CurriculumThread client={{ postGuide, createProposal: vi.fn().mockResolvedValue({ id: "proposal-a" }) }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockResolvedValue({ committed: false })} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Save candidate" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save suggested change" }));
     await screen.findByText(/suggested change saved, refresh unavailable/i);
     expect(onProposal).toHaveBeenCalledWith({ id: "proposal-a" });
-    view.rerender(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} authorityBlocked onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockResolvedValue(false)} />);
+    view.rerender(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} authorityBlocked onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockResolvedValue({ committed: false })} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Second question" } });
     expect(screen.getByRole("button", { name: "Ask teacher" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
@@ -128,11 +128,11 @@ describe("CurriculumThread", () => {
         `data: ${JSON.stringify({ type: "RUN_ERROR", message: "provider failed" })}\n\n`;
       return Promise.resolve(response(error));
     });
-    const { rerender } = render(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="outline-a" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    const { rerender } = render(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="outline-a" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "First question" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
     await screen.findByText(/teacher run failed/i);
-    rerender(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="outline-b" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    rerender(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="outline-b" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(postGuide).toHaveBeenCalledTimes(2));
     const first = postGuide.mock.calls[0]?.[0];
@@ -150,14 +150,14 @@ describe("CurriculumThread", () => {
       `data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"assistant","delta":"Partial"}\n\n`,
     )));
     const onProvider = vi.fn();
-    const { rerender } = render(<CurriculumThread client={{ postGuide: inStream, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} onProvider={onProvider} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    const { rerender } = render(<CurriculumThread client={{ postGuide: inStream, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} onProvider={onProvider} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "EOF" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
     const interrupted = await screen.findByText("Partial");
     await waitFor(() => expect(interrupted).toHaveAttribute("data-state", "interrupted"));
     expect(screen.getByRole("button", { name: "Ask teacher" })).toBeEnabled();
     const preStream = vi.fn().mockRejectedValue(new Error("network down"));
-    rerender(<CurriculumThread client={{ postGuide: preStream, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} onProvider={onProvider} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    rerender(<CurriculumThread client={{ postGuide: preStream, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} onProvider={onProvider} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Network" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
     await screen.findByText(/connection interrupted/i);
@@ -168,7 +168,7 @@ describe("CurriculumThread", () => {
   it.each([400, 403, 404, 409])("drops an unavailable candidate (%i) without creating a proposal card", async (status) => {
     const postGuide = vi.fn().mockImplementation((body) => Promise.resolve(response(completed(body.threadId, body.runId, true))));
     const onProposal = vi.fn();
-    render(<CurriculumThread client={{ postGuide, createProposal: vi.fn().mockRejectedValue({ status }) }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    render(<CurriculumThread client={{ postGuide, createProposal: vi.fn().mockRejectedValue({ status }) }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={onProposal} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Persist candidate" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save suggested change" }));
@@ -183,12 +183,12 @@ describe("CurriculumThread", () => {
       streamController = controller;
       controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ type: "RUN_STARTED", threadId: body.threadId, runId: body.runId })}\n\ndata: {"type":"TEXT_MESSAGE_START","messageId":"assistant"}\n\ndata: {"type":"TEXT_MESSAGE_CONTENT","messageId":"assistant","delta":"Partial"}\n\n`));
     } }))));
-    const { rerender } = render(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    const { rerender } = render(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Partial run" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
     const partial = await screen.findByText("Partial");
     expect(partial).toHaveAttribute("data-state", "streaming");
-    rerender(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean recovery onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    rerender(<CurriculumThread client={{ postGuide, createProposal: vi.fn() }} sourceId="author-window" clean recovery onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     expect(screen.getByText("Partial")).toHaveAttribute("data-state", "interrupted");
     expect(streamController).toBeDefined();
   });
@@ -197,15 +197,15 @@ describe("CurriculumThread", () => {
     const postGuide = vi.fn().mockImplementation((body) => Promise.resolve(response(completed(body.threadId, body.runId, true))));
     let candidateSignal: AbortSignal | undefined;
     const createProposal = vi.fn().mockImplementation((_id, signal) => new Promise((resolve) => { candidateSignal = signal; }));
-    const { rerender } = render(<CurriculumThread client={{ postGuide, createProposal }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    const { rerender } = render(<CurriculumThread client={{ postGuide, createProposal }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), { target: { value: "Candidate" } });
     fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save suggested change" }));
     await waitFor(() => expect(candidateSignal).toBeDefined());
-    rerender(<CurriculumThread client={{ postGuide, createProposal }} sourceId="author-window" clean recovery onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    rerender(<CurriculumThread client={{ postGuide, createProposal }} sourceId="author-window" clean recovery onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     expect(candidateSignal?.aborted).toBe(true);
     expect(screen.queryByRole("button", { name: "Save suggested change" })).toBeNull();
-    rerender(<CurriculumThread client={{ postGuide, createProposal }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue(true)} />);
+    rerender(<CurriculumThread client={{ postGuide, createProposal }} sourceId="author-window" clean recovery={false} onProvider={vi.fn()} onProposal={vi.fn()} onRefresh={vi.fn().mockResolvedValue({ committed: true })} />);
     expect(screen.queryByRole("button", { name: "Save suggested change" })).toBeNull();
   });
 });

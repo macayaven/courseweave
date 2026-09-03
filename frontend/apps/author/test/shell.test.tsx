@@ -8,7 +8,12 @@ const mocks = vi.hoisted(() => ({
   useAuthorRuntime: vi.fn(),
 }));
 
-vi.mock('../src/api', () => ({ createAuthorClient: () => ({ getCourse: mocks.getCourse }) }));
+vi.mock('../src/api', () => ({
+  createAuthorClient: () => ({
+    getCourse: mocks.getCourse,
+    getProposals: vi.fn().mockResolvedValue([]),
+  }),
+}));
 vi.mock('../src/runtime', () => ({ useAuthorRuntime: mocks.useAuthorRuntime }));
 
 import { AuthorApp, AuthorShell } from '../src/app';

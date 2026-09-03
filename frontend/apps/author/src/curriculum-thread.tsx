@@ -22,7 +22,7 @@ type Transcript = {
   state: "streaming" | "finished" | "interrupted" | "failed";
 };
 
-type RefreshResult = boolean | { complete: boolean };
+type RefreshResult = { committed: boolean };
 
 export function CurriculumThread({
   client,
@@ -91,13 +91,17 @@ export function CurriculumThread({
     candidateFlights.current.set(candidateId, controller);
     try {
       const proposal = await client.createProposal(candidateId, controller.signal);
-      if (!alive.current || controller.signal.aborted) return;
+      if (!alive.current) return;
+      if (controller.signal.aborted) {
+        onAuthorityUnknown();
+        return;
+      }
       onProposal(proposal);
       setCandidates((items) => items.filter((id) => id !== candidateId));
       let refreshed = false;
       try {
         const result = await onRefresh(controller.signal);
-        refreshed = typeof result === "boolean" ? result : result.complete;
+        refreshed = result.committed;
       } catch {
         refreshed = false;
       }

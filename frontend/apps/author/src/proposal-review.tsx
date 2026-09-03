@@ -7,7 +7,7 @@ type ProposalClient = {
   acceptProposal(proposalId: string, body: { expected_revision: number }, signal?: AbortSignal): Promise<Proposal>;
   rejectProposal(proposalId: string, body: { expected_revision: number }, signal?: AbortSignal): Promise<Proposal>;
 };
-type RefreshResult = boolean | { course: boolean; proposals: boolean; complete: boolean; current?: boolean };
+type RefreshResult = { committed: boolean };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -106,14 +106,15 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
       } else {
         next = await client.rejectProposal(proposal.id, { expected_revision: proposal.revision }, controller.signal);
       }
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        onAuthorityUnknown();
+        return;
+      }
       onProposal(next);
-      let result: RefreshResult = false;
-      try { result = await onRefresh(controller.signal); } catch { result = false; }
-      const refreshed = typeof result === "boolean" ? result : result.complete;
-      const courseRefreshed = typeof result !== "boolean" ? result.course : refreshed;
-      if (action === "accept" && next.status === "accepted" && courseRefreshed) onAcceptedCourse();
-      setNotice(refreshed ? "Proposal saved from the authoritative review." : "Proposal saved, refresh unavailable; reconnect/review before another action.");
+      let committed = false;
+      try { committed = (await onRefresh(controller.signal)).committed; } catch { /* Parent remains blocked. */ }
+      if (action === "accept" && next.status === "accepted" && committed) onAcceptedCourse();
+      setNotice(committed ? "Proposal saved from the authoritative review." : "Proposal saved, refresh unavailable; reconnect/review before another action.");
     } catch (error) {
       if (controller.signal.aborted) {
         onAuthorityUnknown();
@@ -123,8 +124,7 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
       if (conflict) {
         let refreshed = false;
         try {
-          const result = await onRefresh(controller.signal);
-          refreshed = typeof result === "boolean" ? result : result.complete;
+          refreshed = (await onRefresh(controller.signal)).committed;
         } catch { /* Retain the local draft for review. */ }
         onConflict();
         setNotice(refreshed ? "Proposal changed; review refreshed proposals before trying again." : "Proposal changed, refresh unavailable; reconnect/review before trying again.");
