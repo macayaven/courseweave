@@ -195,6 +195,60 @@ describe("Author validation presentation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     expect(screen.getByLabelText("Course title")).toHaveFocus();
   });
+  it("keeps an unknown-only real AuthorApp issue summary focusable", async () => {
+    const manifest: AuthorManifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Course",
+      description: "",
+      entry_module_id: null,
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [],
+    };
+    appMocks.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: appMocks.retry,
+    });
+    appMocks.getCourse.mockResolvedValue({
+      manifest,
+      raw: "{}",
+      etag: '"etag"',
+    });
+    appMocks.validateCourse.mockRejectedValue(
+      Object.assign(new Error("invalid"), {
+        details: {
+          issues: [
+            {
+              path: "/server-only",
+              code: "schema_validation",
+              message: "Server-only.",
+            },
+          ],
+        },
+      }),
+    );
+    render(<AuthorApp />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Validate structure" }),
+    );
+    await screen.findByText("Server-only.");
+    fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
+    expect(
+      screen.getByRole("alert", { name: "Validation issues" }),
+    ).toHaveFocus();
+  });
   it("maps a surface pointer to its labelled control, summarizes issues, and focuses the first issue", () => {
     const issues: ValidationIssue[] = [
       {
