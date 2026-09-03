@@ -190,11 +190,18 @@ function selectionForPointer(
   if (module === undefined) return null;
   if (/^(id|title|description)$/.test(rest))
     return { type: "module", moduleKey: module.clientKey };
+  if (rest === "phases") return { type: "module", moduleKey: module.clientKey };
   const phaseMatch = rest.match(/^phases\/(\d+)(?:\/(.*))?$/);
   if (phaseMatch === null) return null;
   const phase = module.phases[Number(phaseMatch[1])];
   const phaseRest = phaseMatch[2] ?? "";
   if (phase === undefined) return null;
+  if (phaseRest === "surfaces")
+    return {
+      type: "phase",
+      moduleKey: module.clientKey,
+      phaseKey: phase.clientKey,
+    };
   if (
     /^(id|title|kind|teacher_mode|capabilities\/(chat|share_selection|share_cell|share_output|create_profile_proposal|create_course_proposal|create_workspace_proposal|hint_level)|completion\/(type|record_id|path))$/.test(
       phaseRest,
@@ -205,11 +212,16 @@ function selectionForPointer(
       moduleKey: module.clientKey,
       phaseKey: phase.clientKey,
     };
-  const surfaceMatch = phaseRest.match(
-    /^surfaces\/(\d+)\/(id|type|role|path|url|label|cwd|location|start_seconds|end_seconds|argv\/\d+|match\/(cell_ids|cell_tags)\/\d+)$/,
-  );
+  const surfaceMatch = phaseRest.match(/^surfaces\/(\d+)\/(.*)$/);
   if (surfaceMatch === null) return null;
   const surface = phase.surfaces[Number(surfaceMatch[1])];
+  const surfaceRest = surfaceMatch[2] ?? "";
+  if (
+    !/^(id|type|role|path|url|label|cwd|location|start_seconds|end_seconds|argv(?:\/\d+)?|match\/(cell_ids|cell_tags)(?:\/\d+)?)$/.test(
+      surfaceRest,
+    )
+  )
+    return null;
   return surface === undefined
     ? null
     : {

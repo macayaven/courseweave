@@ -97,7 +97,9 @@ function ArrayFields({
               id={
                 pointer === undefined
                   ? undefined
-                  : pointerToControlId(`${pointer}/${index}`)
+                  : pointerToControlId(
+                      values.length === 0 ? pointer : `${pointer}/${index}`,
+                    )
               }
               aria-label={`${itemLabel} ${index + 1}`}
               value={value}

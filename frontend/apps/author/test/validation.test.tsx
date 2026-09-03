@@ -1072,4 +1072,169 @@ describe("Author validation presentation", () => {
     );
     expect(control).toHaveFocus();
   });
+
+  it("routes collection issues to the selected repair control and begins each repair", async () => {
+    const manifest: AuthorManifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Collections",
+      description: "",
+      entry_module_id: "module",
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [
+        {
+          id: "module",
+          title: "Module",
+          description: "",
+          phases: [
+            {
+              id: "terminal-phase",
+              title: "Terminal phase",
+              kind: "lab",
+              teacher_mode: "debugging_coach",
+              completion: { type: "manual" },
+              capabilities: {
+                chat: false,
+                hint_level: "none",
+                share_selection: false,
+                share_cell: false,
+                share_output: false,
+                create_profile_proposal: false,
+                create_course_proposal: false,
+                create_workspace_proposal: false,
+              },
+              surfaces: [
+                {
+                  id: "terminal",
+                  type: "terminal",
+                  role: "exercise",
+                  label: "Run",
+                  argv: [],
+                  cwd: ".",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    appMocks.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: appMocks.retry,
+    });
+    appMocks.getCourse.mockResolvedValue({
+      manifest,
+      raw: "{}",
+      etag: '"etag"',
+    });
+    render(<AuthorApp />);
+    await screen.findByLabelText("Course title");
+
+    const phasePath = "/modules/0/phases";
+    appMocks.validateCourse.mockRejectedValueOnce(
+      Object.assign(new Error("invalid"), {
+        details: {
+          issues: [
+            { path: phasePath, code: "min_items", message: "Add a phase." },
+          ],
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
+    await screen.findByText("Add a phase.");
+    fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
+    const addPhase = await screen.findByRole("button", { name: "Add phase" });
+    expect(addPhase).toHaveAttribute("id", pointerToControlId(phasePath));
+    expect(addPhase).toHaveAttribute(
+      "aria-describedby",
+      pointerToControlId(phasePath, "issue"),
+    );
+    expect(addPhase).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Select module Module" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(addPhase);
+    expect(
+      screen.getByRole("button", { name: "Select phase New phase" }),
+    ).toBeInTheDocument();
+
+    const surfacePath = "/modules/0/phases/0/surfaces";
+    appMocks.validateCourse.mockRejectedValueOnce(
+      Object.assign(new Error("invalid"), {
+        details: {
+          issues: [
+            {
+              path: surfacePath,
+              code: "min_items",
+              message: "Add a surface.",
+            },
+          ],
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
+    await screen.findByText("Add a surface.");
+    fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
+    const addSurface = await screen.findByRole("button", {
+      name: "Add surface",
+    });
+    expect(addSurface).toHaveAttribute("id", pointerToControlId(surfacePath));
+    expect(addSurface).toHaveAttribute(
+      "aria-describedby",
+      pointerToControlId(surfacePath, "issue"),
+    );
+    expect(addSurface).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Select phase Terminal phase" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    const surfacesBeforeRepair = screen.getAllByRole("button", {
+      name: "Select surface surface",
+    }).length;
+    fireEvent.click(addSurface);
+    expect(
+      screen.getAllByRole("button", { name: "Select surface surface" }),
+    ).toHaveLength(surfacesBeforeRepair + 1);
+
+    const argvPath = "/modules/0/phases/0/surfaces/0/argv";
+    appMocks.validateCourse.mockRejectedValueOnce(
+      Object.assign(new Error("invalid"), {
+        details: {
+          issues: [
+            {
+              path: argvPath,
+              code: "min_items",
+              message: "Add an argument.",
+            },
+          ],
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
+    await screen.findByText("Add an argument.");
+    fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
+    const argument = await screen.findByLabelText("Argument 1");
+    expect(argument).toHaveAttribute("id", pointerToControlId(argvPath));
+    expect(argument).toHaveAttribute(
+      "aria-describedby",
+      pointerToControlId(argvPath, "issue"),
+    );
+    expect(argument).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Select surface terminal" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(argument, { target: { value: "node" } });
+    expect(screen.getByLabelText("Argument 1")).toHaveValue("node");
+  });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useState, type Dispatch, type FormEvent, type KeyboardEvent } from 'react';
 import { Button } from '@courseweave/ui';
 import { createModuleStart, type AuthorDocumentState, type DraftAction, type DraftModule, type DraftPhase, type DraftSelection, type DraftSurface } from './draft';
+import { pointerToControlId } from './validation';
 
 type OutlineProps = { state: AuthorDocumentState; dispatch: Dispatch<DraftAction> };
 
@@ -52,11 +53,11 @@ function SurfaceRow({ module, phase, surface, state, dispatch }: { module: Draft
       <Button type="button" onClick={() => dispatch({ type: 'surface.move', moduleKey: module.clientKey, phaseKey: phase.clientKey, surfaceKey: surface.clientKey, direction: 'down' })}>Move surface {surface.id || 'unnamed'} down</Button>
     </span> : null}</li>;
 }
-function PhaseRow({ module, phase, state, dispatch }: { module: DraftModule; phase: DraftPhase; state: AuthorDocumentState; dispatch: Dispatch<DraftAction> }) {
+function PhaseRow({ module, phase, moduleIndex, phaseIndex, state, dispatch }: { module: DraftModule; phase: DraftPhase; moduleIndex: number; phaseIndex: number; state: AuthorDocumentState; dispatch: Dispatch<DraftAction> }) {
   const select = { type: 'phase' as const, moduleKey: module.clientKey, phaseKey: phase.clientKey };
   return <li><SelectButton label={`Select phase ${phase.title || phase.id || 'unnamed'}`} itemKey={phase.clientKey} itemKind="phase" selection={state.selection} dispatch={() => dispatch({ type: 'select', selection: select })} />
     {selected(state.selection, phase.clientKey) ? <span>
-      <Button type="button" onClick={() => dispatch({ type: 'surface.create', moduleKey: module.clientKey, phaseKey: phase.clientKey })}>Add surface</Button>
+      <Button id={pointerToControlId(`/modules/${moduleIndex}/phases/${phaseIndex}/surfaces`)} type="button" onClick={() => dispatch({ type: 'surface.create', moduleKey: module.clientKey, phaseKey: phase.clientKey })}>Add surface</Button>
       <Button type="button" onClick={() => dispatch({ type: 'phase.create', moduleKey: module.clientKey })}>Add phase</Button>
       <Button type="button" onClick={() => dispatch({ type: 'phase.duplicate', moduleKey: module.clientKey, phaseKey: phase.clientKey })}>Duplicate phase {phase.title || phase.id || 'unnamed'}</Button>
       <Button type="button" onClick={() => dispatch({ type: 'phase.delete', moduleKey: module.clientKey, phaseKey: phase.clientKey })}>Delete phase {phase.title || phase.id || 'unnamed'}</Button>
@@ -66,17 +67,17 @@ function PhaseRow({ module, phase, state, dispatch }: { module: DraftModule; pha
     <ol>{phase.surfaces.map((surface) => <SurfaceRow key={surface.clientKey} module={module} phase={phase} surface={surface} state={state} dispatch={dispatch} />)}</ol>
   </li>;
 }
-function ModuleRow({ module, state, dispatch }: { module: DraftModule; state: AuthorDocumentState; dispatch: Dispatch<DraftAction> }) {
+function ModuleRow({ module, moduleIndex, state, dispatch }: { module: DraftModule; moduleIndex: number; state: AuthorDocumentState; dispatch: Dispatch<DraftAction> }) {
   const select = { type: 'module' as const, moduleKey: module.clientKey };
   return <li><SelectButton label={`Select module ${module.title || module.id || 'unnamed'}`} itemKey={module.clientKey} itemKind="module" selection={state.selection} dispatch={() => dispatch({ type: 'select', selection: select })} />
     {selected(state.selection, module.clientKey) ? <span>
-      <Button type="button" onClick={() => dispatch({ type: 'phase.create', moduleKey: module.clientKey })}>Add phase</Button>
+      <Button id={pointerToControlId(`/modules/${moduleIndex}/phases`)} type="button" onClick={() => dispatch({ type: 'phase.create', moduleKey: module.clientKey })}>Add phase</Button>
       <Button type="button" onClick={() => dispatch({ type: 'module.duplicate', moduleKey: module.clientKey })}>Duplicate module {module.title || module.id || 'unnamed'}</Button>
       <Button type="button" onClick={() => dispatch({ type: 'module.delete', moduleKey: module.clientKey })}>Delete module {module.title || module.id || 'unnamed'}</Button>
       <Button type="button" onClick={() => dispatch({ type: 'module.move', moduleKey: module.clientKey, direction: 'up' })}>Move module {module.title || module.id || 'unnamed'} up</Button>
       <Button type="button" onClick={() => dispatch({ type: 'module.move', moduleKey: module.clientKey, direction: 'down' })}>Move module {module.title || module.id || 'unnamed'} down</Button>
     </span> : null}
-    <ol>{module.phases.map((phase) => <PhaseRow key={phase.clientKey} module={module} phase={phase} state={state} dispatch={dispatch} />)}</ol>
+    <ol>{module.phases.map((phase, phaseIndex) => <PhaseRow key={phase.clientKey} module={module} phase={phase} moduleIndex={moduleIndex} phaseIndex={phaseIndex} state={state} dispatch={dispatch} />)}</ol>
   </li>;
 }
 export function Outline({ state, dispatch }: OutlineProps) {
@@ -90,7 +91,7 @@ export function Outline({ state, dispatch }: OutlineProps) {
     <SelectButton label={`Select course ${state.draft.title || 'unnamed'}`} itemKey="course" itemKind="course" selection={state.selection} dispatch={() => dispatch({ type: 'select', selection: { type: 'course' } })} />
     <Button type="button" onClick={() => setCreating(true)}>Add module</Button>
     {creating ? <ModuleStartWizard dispatch={dispatch} close={() => setCreating(false)} /> : null}
-    <ol>{state.draft.modules.map((module) => <ModuleRow key={module.clientKey} module={module} state={state} dispatch={dispatch} />)}</ol>
+    <ol>{state.draft.modules.map((module, moduleIndex) => <ModuleRow key={module.clientKey} module={module} moduleIndex={moduleIndex} state={state} dispatch={dispatch} />)}</ol>
     <p role="status" aria-live="polite">{state.notice}</p>
   </section>;
 }
