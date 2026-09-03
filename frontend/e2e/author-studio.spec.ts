@@ -1,16 +1,79 @@
-import { expect, test } from "playwright/test";
+import { expect, test, type Locator, type Page } from "playwright/test";
 import { readFile } from "node:fs/promises";
 
 import {
   createAuthorApi,
   emptyManifest,
+  expectGuideRequest,
   expectNoBoundaryViolations,
+  expectValidationRequest,
   loadExample,
   minimalManifest,
   mountAuthor,
   proposalFixture,
+  reloadAuthor,
   seedProposal,
 } from "./author-helpers";
+
+function newBrowserModule(phaseTitle = "New phase"): Record<string, unknown> {
+  return {
+    id: "browser-added",
+    title: "Browser added",
+    description: "",
+    phases: [{
+      id: "phase",
+      title: phaseTitle,
+      kind: "read",
+      teacher_mode: "reading_companion",
+      surfaces: [{ id: "surface", type: "markdown", role: "primary", path: "content.md" }],
+      completion: { type: "manual" },
+      capabilities: {
+        chat: false,
+        hint_level: "none",
+        share_selection: false,
+        share_cell: false,
+        share_output: false,
+        create_profile_proposal: false,
+        create_course_proposal: false,
+        create_workspace_proposal: false,
+      },
+    }],
+  };
+}
+
+function expectedWorkflowManifest(source: Record<string, unknown>, editedPhaseTitle: string): Record<string, unknown> {
+  const copiedModule = structuredClone((source.modules as Array<Record<string, unknown>>)[0]!);
+  copiedModule.id = `${copiedModule.id as string}-copy`;
+  const phases = copiedModule.phases as Array<Record<string, unknown>>;
+  for (const phase of phases) {
+    phase.id = `${phase.id as string}-copy`;
+    for (const surface of phase.surfaces as Array<Record<string, unknown>>) {
+      surface.id = `${surface.id as string}-copy`;
+    }
+  }
+  phases[0]!.title = editedPhaseTitle;
+  return {
+    ...structuredClone(source),
+    entry_module_id: "browser-added",
+    modules: [copiedModule, newBrowserModule()],
+  };
+}
+
+function expectedFirstManifest(phaseTitle: string): Record<string, unknown> {
+  const manifest = emptyManifest();
+  const module = newBrowserModule(phaseTitle);
+  module.id = "first-module";
+  module.title = "First module";
+  return { ...manifest, entry_module_id: "first-module", modules: [module] };
+}
+
+async function tabTo(page: Page, target: Locator, direction: "forward" | "reverse" = "forward", limit = 120): Promise<number> {
+  for (let step = 1; step <= limit; step += 1) {
+    await page.keyboard.press(direction === "forward" ? "Tab" : "Shift+Tab");
+    if (await target.evaluate((element) => element.ownerDocument.activeElement === element)) return step;
+  }
+  throw new Error(`Sequential keyboard focus did not reach the requested control within ${limit} steps.`);
+}
 
 test.beforeEach(({ baseURL }) => {
   test.skip(baseURL !== "http://127.0.0.1:4174", "requires the dedicated Author preview");
@@ -54,6 +117,10 @@ for (const example of ["minimal-course", "cli-course"] as const) {
     await expect(author.getByRole("button", { name: "Select module Browser added" })).toBeFocused();
     await expect(author.getByRole("button", { name: `Select module ${moduleTitle}`, exact: true })).toHaveCount(1);
 
+    const expectedManifest = expectedWorkflowManifest(source, `${phaseTitle} edited in browser`);
+    expectValidationRequest(api, "structural", expectedManifest);
+    expectValidationRequest(api, "runnable", expectedManifest);
+    expectValidationRequest(api, "structural", expectedManifest);
     await author.getByRole("button", { name: "Validate structure" }).press("Enter");
     await expect(author.getByText("Structural validation passed.", { exact: true })).toBeVisible();
     await author.getByRole("button", { name: "Check runnable diagnostics" }).press("Enter");
@@ -75,6 +142,7 @@ for (const example of ["minimal-course", "cli-course"] as const) {
 
     const savedModules = api.manifest.modules as Array<Record<string, unknown>>;
     expect(api.manifest.entry_module_id).toBe("browser-added");
+    expect(api.manifest).toEqual(expectedManifest);
     if (example === "minimal-course") {
       expect(savedModules.map((module) => module.id)).toEqual(["start-copy", "browser-added"]);
       const copiedPhases = savedModules[0]!.phases as Array<Record<string, unknown>>;
@@ -99,10 +167,7 @@ for (const example of ["minimal-course", "cli-course"] as const) {
       phases: [{ id: "phase", title: "New phase", surfaces: [{ id: "surface", type: "markdown", path: "content.md" }] }],
     });
 
-    await page.locator("#author-frame").evaluate((frame) => {
-      (frame as HTMLIFrameElement).contentWindow?.location.reload();
-    });
-    await expect(author.getByText("Draft matches the loaded course.")).toBeVisible();
+    await reloadAuthor(page, author, api);
     await expect(author.getByLabel("Entry module")).toHaveValue(/.+/);
     await expect(author.getByLabel("Entry module").locator("option:checked")).toHaveText("Browser added");
     await expect(author.getByRole("button", { name: "Select module Browser added" })).toBeVisible();
@@ -118,9 +183,150 @@ for (const example of ["minimal-course", "cli-course"] as const) {
       accepts: 0,
       rejects: 0,
     });
+    expect(api.validationRequests).toEqual([
+      { manifest: expectedManifest, mode: "structural" },
+      { manifest: expectedManifest, mode: "runnable" },
+      { manifest: expectedManifest, mode: "structural" },
+    ]);
     await expectNoBoundaryViolations(page, api);
   });
 }
+
+test("denies an asset-shaped request that is absent from the production index", async ({ page }) => {
+  const api = createAuthorApi(minimalManifest());
+  await mountAuthor(page, api);
+
+  const outcome = await page.evaluate(async () => {
+    try {
+      await fetch("/author/assets/unexpected-artifact.js");
+      return "resolved";
+    } catch {
+      return "rejected";
+    }
+  });
+
+  expect(outcome).toBe("rejected");
+  expect(api.violations).toEqual([
+    "unhandled-network:GET:http://127.0.0.1:4174/author/assets/unexpected-artifact.js",
+  ]);
+});
+
+test("denies an extra exact runtime request without sending the capability reply", async ({ page }) => {
+  const api = createAuthorApi(minimalManifest());
+  const author = await mountAuthor(page, api);
+  await author.locator("body").evaluate(() => {
+    document.documentElement.dataset.probeRuntimeReplies = "0";
+    window.addEventListener("message", (event) => {
+      if (event.data?.type === "courseweave.runtime.v1") {
+        document.documentElement.dataset.probeRuntimeReplies = String(
+          Number(document.documentElement.dataset.probeRuntimeReplies ?? "0") + 1,
+        );
+      }
+    });
+    window.parent.postMessage({ type: "courseweave.runtime.request.v1" }, window.location.origin);
+  });
+
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.runtimeRequests)).toBe("1");
+  await expect.poll(() => author.locator("html").getAttribute("data-probe-runtime-replies")).toBe("0");
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.unexpectedAuthorMessages)).toBe("1");
+});
+
+test("records the exact live draft and mode for each validation request", async ({ page }) => {
+  const original = minimalManifest();
+  const expected = structuredClone(original);
+  expected.title = "Live browser draft";
+  const api = createAuthorApi(original);
+  expectValidationRequest(api, "structural", expected);
+  expectValidationRequest(api, "runnable", expected);
+  const author = await mountAuthor(page, api);
+
+  await author.getByLabel("Course title").fill("Live browser draft");
+  await author.getByRole("button", { name: "Validate structure" }).press("Enter");
+  await author.getByRole("button", { name: "Check runnable diagnostics" }).press("Enter");
+
+  expect(api.validationRequests).toEqual([
+    { manifest: expected, mode: "structural" },
+    { manifest: expected, mode: "runnable" },
+  ]);
+  await expectNoBoundaryViolations(page, api);
+});
+
+test("records the exact one-message guide body and stable request identity", async ({ page }) => {
+  const api = createAuthorApi(minimalManifest());
+  expectGuideRequest(api, "Inspect this exact composer text");
+  const author = await mountAuthor(page, api);
+
+  await author.getByLabel("Ask the curriculum teacher").fill("Inspect this exact composer text");
+  await author.getByRole("button", { name: "Ask teacher" }).press("Enter");
+  await expect(author.getByText("Local fixture advice", { exact: true })).toBeVisible();
+
+  const requests = api.guideRequests;
+  expect(requests).toHaveLength(1);
+  expect(requests?.[0]).toEqual({
+    threadId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    runId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    messages: [{
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      role: "user",
+      content: "Inspect this exact composer text",
+    }],
+    tools: [],
+    context: [],
+    forwardedProps: { source_id: "browser-author-source" },
+  });
+  await expectNoBoundaryViolations(page, api);
+});
+
+test("traverses the Author regions and decides a proposal using only sequential keyboard input", async ({ page }) => {
+  const api = proposalFixture(minimalManifest());
+  expectValidationRequest(api, "structural", minimalManifest());
+  const author = await mountAuthor(page, api);
+  const addModule = author.getByRole("button", { name: "Add module" });
+  const selectModule = author.getByRole("button", { name: "Select module Start" });
+  const moduleId = author.getByLabel("Module ID");
+  const teacherComposer = author.getByLabel("Ask the curriculum teacher");
+  const proposalEditor = author.getByLabel("Edit full manifest");
+  const accept = author.getByRole("button", { name: "Accept" });
+  const reject = author.getByRole("button", { name: "Reject" });
+
+  expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
+  expect(await tabTo(page, addModule)).toBeGreaterThan(0);
+  expect(await tabTo(page, selectModule)).toBe(1);
+  await page.keyboard.press("Space");
+  await expect(selectModule).toHaveAttribute("aria-pressed", "true");
+
+  expect(await tabTo(page, moduleId)).toBeGreaterThan(0);
+  expect(await tabTo(page, teacherComposer)).toBeGreaterThan(0);
+  expect(await tabTo(page, proposalEditor)).toBeGreaterThan(0);
+  expect(await tabTo(page, accept)).toBe(1);
+  expect(await tabTo(page, reject)).toBe(1);
+
+  const logicalRegions = await author.locator("body").evaluate(() => {
+    const names = ["Outline", "Inspector", "Preview", "Curriculum teacher", "Proposal review"];
+    const elements = names.map((name) => document.querySelector<HTMLElement>(`section[aria-label="${name}"]`)!);
+    return {
+      names,
+      inOrder: elements.every((element, index) => index === elements.length - 1 ||
+        Boolean(element.compareDocumentPosition(elements[index + 1]!) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      previewTabStops: elements[2]!.querySelectorAll("a[href],button,input,select,textarea,[tabindex]:not([tabindex='-1'])").length,
+    };
+  });
+  expect(logicalRegions).toEqual({
+    names: ["Outline", "Inspector", "Preview", "Curriculum teacher", "Proposal review"],
+    inOrder: true,
+    previewTabStops: 0,
+  });
+
+  await page.keyboard.press("Enter");
+  const reviewedHeading = author.getByRole("heading", { name: "Review the browser proposal" });
+  await expect(reviewedHeading).toBeFocused();
+  await expect(author.getByText("Status: rejected")).toBeVisible();
+  expect(api.counts.rejects).toBe(1);
+
+  expect(await tabTo(page, teacherComposer, "reverse")).toBeGreaterThan(0);
+  await expect(teacherComposer).toBeFocused();
+  await expectNoBoundaryViolations(page, api);
+});
 
 test("creates the first manifest only after repairing an incomplete missing-root draft", async ({ page }) => {
   const api = createAuthorApi(emptyManifest(), { exists: false });
@@ -136,6 +342,7 @@ test("creates the first manifest only after repairing an incomplete missing-root
   await author.getByRole("button", { name: "Select phase New phase" }).press("Enter");
   const phaseTitle = author.getByLabel("Phase title");
   await phaseTitle.fill("");
+  expectValidationRequest(api, "structural", expectedFirstManifest(""));
   await author.getByRole("button", { name: "Validate structure" }).press("Enter");
   await expect(author.getByText("Structural validation found issues.", { exact: true })).toBeVisible();
   await expect(phaseTitle).toHaveValue("");
@@ -145,6 +352,7 @@ test("creates the first manifest only after repairing an incomplete missing-root
   expect(api.counts.puts).toBe(0);
 
   await phaseTitle.fill("Recovered phase");
+  expectValidationRequest(api, "structural", expectedFirstManifest("Recovered phase"));
   await author.getByRole("button", { name: "Save course" }).press("Enter");
   await expect(author.getByText("Saved exact canonical course bytes.", { exact: true })).toBeVisible();
   expect(api.counts.structuralValidations).toBe(2);
@@ -153,11 +361,16 @@ test("creates the first manifest only after repairing an incomplete missing-root
   expect(api.etag).toMatch(/^"[a-f0-9]{64}"$/);
   expect(api.manifest.entry_module_id).toBe("first-module");
   expect(((api.manifest.modules as Array<Record<string, unknown>>)[0]!.phases as Array<Record<string, unknown>>)[0]!.title).toBe("Recovered phase");
+  expect(api.validationRequests).toEqual([
+    { manifest: expectedFirstManifest(""), mode: "structural" },
+    { manifest: expectedFirstManifest("Recovered phase"), mode: "structural" },
+  ]);
   await expectNoBoundaryViolations(page, api);
 });
 
 test("retains the draft after failed import and keeps CRUD usable without a provider", async ({ page }) => {
   const api = createAuthorApi(minimalManifest(), { providerNotConfigured: true });
+  expectGuideRequest(api, "Review the saved course");
   const author = await mountAuthor(page, api);
   const file = author.getByLabel("Import course file");
   await file.focus();
@@ -192,7 +405,9 @@ test("rejects byte-identical fake-model output and accepts one edited revision e
   const original = minimalManifest();
   const suggested = structuredClone(original);
   suggested.title = "Unedited fake-model title";
-  const api = createAuthorApi(original, { guideManifests: [structuredClone(original), suggested] });
+  const api = createAuthorApi(original);
+  expectGuideRequest(api, "Suggest no change", original);
+  expectGuideRequest(api, "Suggest a real change", suggested);
   const originalRaw = api.raw;
   const author = await mountAuthor(page, api);
 
@@ -217,6 +432,7 @@ test("rejects byte-identical fake-model output and accepts one edited revision e
   const edited = structuredClone(suggested);
   edited.title = "Accepted edited browser title";
   await pending.getByLabel("Edit full manifest").fill(JSON.stringify(edited, null, 2));
+  expectValidationRequest(api, "structural", edited);
   await pending.getByRole("button", { name: "Save proposal edit" }).press("Enter");
 
   pending = author.getByRole("article").filter({ hasText: "Status: pending" });
@@ -230,6 +446,21 @@ test("rejects byte-identical fake-model output and accepts one edited revision e
   expect(api.mutations.map((mutation) => mutation.split(":")[0])).toEqual([
     "candidate", "reject", "candidate", "edit", "accept",
   ]);
+  expect(api.guideRequests.map((request) => ({
+    threadId: request.threadId,
+    content: request.messages[0].content,
+    role: request.messages[0].role,
+    tools: request.tools,
+    context: request.context,
+    source: request.forwardedProps.source_id,
+  }))).toEqual([
+    { threadId: api.guideThreadId, content: "Suggest no change", role: "user", tools: [], context: [], source: "browser-author-source" },
+    { threadId: api.guideThreadId, content: "Suggest a real change", role: "user", tools: [], context: [], source: "browser-author-source" },
+  ]);
+  expect(new Set(api.guideRequests.map((request) => request.runId)).size).toBe(2);
+  expect(new Set(api.guideRequests.map((request) => request.messages[0].id)).size).toBe(2);
+  expect(api.validationRequests.every((request) => request.mode === "structural")).toBe(true);
+  expect(api.validationRequests.map((request) => request.manifest)).toContainEqual(edited);
   await expectNoBoundaryViolations(page, api);
 });
 
@@ -250,6 +481,7 @@ test("renders hostile imported fields as inert text without fetch, navigation, m
     { id: "terminal", type: "terminal", role: "exercise", label: "Never execute", argv: ["sh", "-c", "window.__terminalExecuted=true"], cwd: "." },
   ];
 
+  expectValidationRequest(api, "structural", hostile);
   const file = author.getByLabel("Import course file");
   await file.setInputFiles({ name: "hostile.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(hostile), "utf8") });
   await expect(author.getByText("Imported into the local draft. Save explicitly to write it.", { exact: true })).toBeVisible();
@@ -274,6 +506,8 @@ test("renders hostile imported fields as inert text without fetch, navigation, m
   }))).toEqual({ script: undefined, terminal: undefined, location: "http://127.0.0.1:4174/author/", scripts: 1 });
   expect(api.counts.puts).toBe(0);
   expect(api.mutations).toEqual([]);
+  expect(api.runtimeHandshakeCount).toBe(1);
+  await expect.poll(() => page.evaluate(() => Number(document.documentElement.dataset.runtimeRequests))).toBe(1);
   await expectNoBoundaryViolations(page, api);
 });
 
@@ -289,6 +523,7 @@ test("keeps the four-region experience accessible and contained at 320 CSS pixel
   proposed.description = "Long proposal ".repeat(120);
   const api = createAuthorApi(manifest);
   seedProposal(api, proposed, "narrow-proposal", "Narrow proposal");
+  expectValidationRequest(api, "structural", proposed);
   const author = await mountAuthor(page, api, { width: 320 });
   await author.getByRole("button", { name: "Select surface show-help" }).press("Enter");
 
@@ -365,6 +600,7 @@ test("keeps the four-region experience accessible and contained at 320 CSS pixel
 
 test("restores keyboard focus inside proposal review after a decision", async ({ page }) => {
   const api = proposalFixture(minimalManifest());
+  expectValidationRequest(api, "structural", minimalManifest());
   const author = await mountAuthor(page, api);
   const reject = author.getByRole("button", { name: "Reject" });
 
@@ -401,6 +637,9 @@ test("restores focus to the separate Save after keeping a stale local draft", as
   const remote = structuredClone(initial);
   remote.title = "Remote course title";
   api.staleRemote = remote;
+  const local = structuredClone(initial);
+  local.title = "Local unsaved title";
+  expectValidationRequest(api, "structural", local);
   const author = await mountAuthor(page, api);
 
   await author.getByLabel("Course title").fill("Local unsaved title");
@@ -420,5 +659,6 @@ test("restores focus to the separate Save after keeping a stale local draft", as
     "manual conflict review must restore focus to the required separate Save",
   ).toBeFocused();
   expect(api.counts.puts).toBe(1);
+  expect(api.validationRequests).toEqual([{ manifest: local, mode: "structural" }]);
   await expectNoBoundaryViolations(page, api);
 });

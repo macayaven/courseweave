@@ -14,13 +14,38 @@ export type ProposalFixture = JsonObject & {
   target_hash: string | null;
 };
 
+type ValidationRequest = {
+  manifest: JsonObject;
+  mode: "structural" | "runnable";
+};
+
+type GuideRequest = {
+  threadId: string;
+  runId: string;
+  messages: [{ id: string; role: "user"; content: string }];
+  tools: [];
+  context: [];
+  forwardedProps: { source_id: "browser-author-source" };
+};
+
+type GuideExpectation = {
+  content: string;
+  manifest?: JsonObject;
+};
+
 export type AuthorApiFixture = {
   manifest: JsonObject;
   raw: string;
   etag: string;
   proposals: ProposalFixture[];
   candidates: Map<string, JsonObject>;
-  guideManifests: JsonObject[];
+  validationRequests: ValidationRequest[];
+  validationExpectations: ValidationRequest[];
+  guideRequests: GuideRequest[];
+  guideExpectations: GuideExpectation[];
+  guideThreadId: string | null;
+  guideRunIds: Set<string>;
+  guideMessageIds: Set<string>;
   providerNotConfigured: boolean;
   staleRemote: JsonObject | null;
   validationIssue(manifest: JsonObject, mode: "structural" | "runnable"): ValidationIssue[];
@@ -37,12 +62,27 @@ export type AuthorApiFixture = {
     rejects: number;
   };
   authenticatedRequests: number;
+  runtimeHandshakeCount: number;
   mutations: string[];
   violations: string[];
 };
 
 const serviceOrigin = "http://127.0.0.1:4174";
 const capabilityToken = "browser-test-capability";
+const authorIndex = readFileSync(
+  new URL("../../src/courseweave/static/author/index.html", import.meta.url),
+  "utf8",
+);
+const authorStaticPaths = new Set([
+  "/author/",
+  ...Array.from(authorIndex.matchAll(/(?:src|href)=["']([^"']+)["']/g), (match) => {
+    const reference = new URL(match[1]!, serviceOrigin);
+    if (reference.origin !== serviceOrigin || reference.search !== "" || reference.hash !== "") {
+      throw new Error(`Author index contains a non-local static reference: ${match[1]}`);
+    }
+    return reference.pathname;
+  }),
+]);
 
 export function canonical(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -113,7 +153,6 @@ export function createAuthorApi(
     exists?: boolean;
     providerNotConfigured?: boolean;
     proposals?: ProposalFixture[];
-    guideManifests?: JsonObject[];
     validationIssue?: AuthorApiFixture["validationIssue"];
   } = {},
 ): AuthorApiFixture {
@@ -124,7 +163,13 @@ export function createAuthorApi(
     etag: options.exists === false ? '""' : `"${sha256(raw)}"`,
     proposals: options.proposals ?? [],
     candidates: new Map(),
-    guideManifests: [...(options.guideManifests ?? [])],
+    validationRequests: [],
+    validationExpectations: [],
+    guideRequests: [],
+    guideExpectations: [],
+    guideThreadId: null,
+    guideRunIds: new Set(),
+    guideMessageIds: new Set(),
     providerNotConfigured: options.providerNotConfigured ?? false,
     staleRemote: null,
     validationIssue: options.validationIssue ?? ((value) => ordinaryValidationIssues(value)),
@@ -141,9 +186,29 @@ export function createAuthorApi(
       rejects: 0,
     },
     authenticatedRequests: 0,
+    runtimeHandshakeCount: 0,
     mutations: [],
     violations: [],
   };
+}
+
+export function expectValidationRequest(
+  api: AuthorApiFixture,
+  mode: ValidationRequest["mode"],
+  manifest: JsonObject,
+): void {
+  api.validationExpectations.push({ mode, manifest: structuredClone(manifest) });
+}
+
+export function expectGuideRequest(
+  api: AuthorApiFixture,
+  content: string,
+  manifest?: JsonObject,
+): void {
+  api.guideExpectations.push({
+    content,
+    ...(manifest === undefined ? {} : { manifest: structuredClone(manifest) }),
+  });
 }
 
 export function seedProposal(
@@ -189,6 +254,19 @@ function exactJson(request: ReturnType<Route["request"]>): JsonObject | null {
   } catch {
     return null;
   }
+}
+
+function semanticJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(semanticJson).join(",")}]`;
+  if (typeof value !== "object" || value === null) return JSON.stringify(value);
+  return `{${Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => `${JSON.stringify(key)}:${semanticJson(child)}`)
+    .join(",")}}`;
+}
+
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 }
 
 function mutationHeaders(route: Route, api: AuthorApiFixture): boolean {
@@ -246,20 +324,30 @@ async function handleApi(route: Route, api: AuthorApiFixture): Promise<void> {
   }
   if (method === "POST" && url.pathname === "/api/author/validate" && url.search === "") {
     const body = exactJson(request);
+    const expected = api.validationExpectations[0];
+    const proposalCanonicalization =
+      body?.mode === "structural" &&
+      typeof body.manifest === "object" && body.manifest !== null && !Array.isArray(body.manifest) &&
+      api.proposals.some((proposal) => semanticJson(proposal.payload.manifest) === semanticJson(body.manifest));
     if (
       request.headers()["content-type"] !== "application/json" ||
       body === null ||
       Object.keys(body).sort().join(",") !== "manifest,mode" ||
       (body.mode !== "structural" && body.mode !== "runnable") ||
-      typeof body.manifest !== "object" || body.manifest === null || Array.isArray(body.manifest)
+      typeof body.manifest !== "object" || body.manifest === null || Array.isArray(body.manifest) ||
+      (expected === undefined
+        ? !proposalCanonicalization
+        : body.mode !== expected.mode || semanticJson(body.manifest) !== semanticJson(expected.manifest))
     ) {
       api.violations.push(`validate-contract:${request.postData() ?? ""}`);
       await route.abort();
       return;
     }
+    if (expected !== undefined) api.validationExpectations.shift();
     const mode = body.mode;
     api.counts[mode === "structural" ? "structuralValidations" : "runnableValidations"] += 1;
     const manifest = body.manifest as JsonObject;
+    api.validationRequests.push({ mode, manifest: structuredClone(manifest) });
     const issues = api.validationIssue(manifest, mode);
     if (issues.length > 0) {
       await json(route, { code: "validation_error", message: "Course validation failed.", details: { issues } }, 422);
@@ -299,25 +387,38 @@ async function handleApi(route: Route, api: AuthorApiFixture): Promise<void> {
   }
   if (method === "POST" && url.pathname === "/api/author/guide" && url.search === "") {
     const body = exactJson(request);
-    api.counts.guides += 1;
+    const expected = api.guideExpectations[0];
+    const message = Array.isArray(body?.messages) ? body.messages[0] as JsonObject | undefined : undefined;
     if (
       request.headers()["content-type"] !== "application/json" || body === null ||
       Object.keys(body).sort().join(",") !== "context,forwardedProps,messages,runId,threadId,tools" ||
       !Array.isArray(body.messages) || body.messages.length !== 1 ||
       !Array.isArray(body.tools) || body.tools.length !== 0 ||
       !Array.isArray(body.context) || body.context.length !== 0 ||
-      typeof body.threadId !== "string" || typeof body.runId !== "string" ||
-      JSON.stringify(body.forwardedProps) !== JSON.stringify({ source_id: "browser-author-source" })
+      !isUuid(body.threadId) || !isUuid(body.runId) ||
+      semanticJson(body.forwardedProps) !== semanticJson({ source_id: "browser-author-source" }) ||
+      message === undefined || Object.keys(message).sort().join(",") !== "content,id,role" ||
+      !isUuid(message.id) || message.role !== "user" ||
+      expected === undefined || message.content !== expected.content ||
+      (api.guideThreadId !== null && body.threadId !== api.guideThreadId) ||
+      api.guideRunIds.has(body.runId) || api.guideMessageIds.has(message.id) ||
+      body.threadId === body.runId || body.threadId === message.id || body.runId === message.id
     ) {
       api.violations.push(`guide-contract:${request.postData() ?? ""}`);
       await route.abort();
       return;
     }
+    api.guideExpectations.shift();
+    api.guideThreadId ??= body.threadId;
+    api.guideRunIds.add(body.runId);
+    api.guideMessageIds.add(message.id as string);
+    api.counts.guides += 1;
+    api.guideRequests.push(structuredClone(body) as GuideRequest);
     if (api.providerNotConfigured) {
       await json(route, { code: "not_configured", message: "Teacher unavailable.", details: {} }, 503);
       return;
     }
-    const proposalManifest = api.guideManifests.shift();
+    const proposalManifest = expected.manifest;
     const candidateId = `candidate-${api.counts.guides}`;
     const candidate = proposalManifest === undefined ? "" :
       `data: ${JSON.stringify({
@@ -418,21 +519,29 @@ async function handleApi(route: Route, api: AuthorApiFixture): Promise<void> {
 
 export async function mountAuthor(page: Page, api: AuthorApiFixture, options: { width?: number } = {}): Promise<FrameLocator> {
   await page.context().route("**/*", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.origin === serviceOrigin && (url.pathname === "/author/" || url.pathname.startsWith("/author/assets/"))) {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (
+      request.method() === "GET" &&
+      url.origin === serviceOrigin &&
+      url.search === "" &&
+      url.hash === "" &&
+      authorStaticPaths.has(url.pathname)
+    ) {
       await route.continue();
       return;
     }
-    api.violations.push(`unhandled-network:${route.request().method()}:${route.request().url()}`);
+    api.violations.push(`unhandled-network:${request.method()}:${request.url()}`);
     await route.abort();
   });
   await page.route("**/api/**", (route) => handleApi(route, api));
   await page.goto("/author/");
-  await page.evaluate((width) => {
+  await page.evaluate(({ width, expectedServiceOrigin }) => {
     document.body.replaceChildren();
     document.body.style.margin = "0";
     document.documentElement.dataset.unexpectedAuthorMessages = "0";
     document.documentElement.dataset.runtimeRequests = "0";
+    document.documentElement.dataset.allowedRuntimeRequests = "1";
     const frame = document.createElement("iframe");
     frame.id = "author-frame";
     frame.title = "CourseWeave Author host";
@@ -443,30 +552,51 @@ export async function mountAuthor(page: Page, api: AuthorApiFixture, options: { 
     window.addEventListener("message", (event) => {
       if (event.source === window) return;
       const data = event.data as Record<string, unknown>;
-      if (data?.type === "courseweave.runtime.request.v1" && Object.keys(data).join(",") === "type") {
-        document.documentElement.dataset.runtimeRequests = String(Number(document.documentElement.dataset.runtimeRequests ?? "0") + 1);
+      const runtimeRequests = Number(document.documentElement.dataset.runtimeRequests ?? "0");
+      const allowedRuntimeRequests = Number(document.documentElement.dataset.allowedRuntimeRequests ?? "0");
+      if (
+        event.source === frame.contentWindow &&
+        event.origin === expectedServiceOrigin &&
+        data?.type === "courseweave.runtime.request.v1" &&
+        Object.keys(data).join(",") === "type" &&
+        runtimeRequests < allowedRuntimeRequests
+      ) {
+        document.documentElement.dataset.runtimeRequests = String(runtimeRequests + 1);
         (event.source as Window).postMessage({
-          type: "courseweave.runtime.v1", serviceOrigin: window.location.origin,
+          type: "courseweave.runtime.v1", serviceOrigin: expectedServiceOrigin,
           capabilityToken: "browser-test-capability", sourceId: "browser-author-source",
-        }, event.origin);
+        }, expectedServiceOrigin);
         return;
       }
       document.documentElement.dataset.unexpectedAuthorMessages = String(Number(document.documentElement.dataset.unexpectedAuthorMessages ?? "0") + 1);
     });
     document.body.append(frame);
-  }, options.width ?? 1024);
+  }, { width: options.width ?? 1024, expectedServiceOrigin: serviceOrigin });
 
   const author = page.frameLocator("#author-frame");
   await expect(author.getByText("Draft matches the loaded course.")).toBeVisible();
+  api.runtimeHandshakeCount = Number(
+    await page.evaluate(() => document.documentElement.dataset.runtimeRequests),
+  );
+  expect(api.runtimeHandshakeCount).toBe(1);
   return author;
 }
 
-export async function reloadAuthor(page: Page, author: FrameLocator): Promise<void> {
+export async function reloadAuthor(page: Page, author: FrameLocator, api: AuthorApiFixture): Promise<void> {
+  const expectedHandshakeCount = api.runtimeHandshakeCount + 1;
+  await page.evaluate((allowed) => {
+    document.documentElement.dataset.allowedRuntimeRequests = String(allowed);
+  }, expectedHandshakeCount);
   await page.locator("#author-frame").evaluate((frame) => { (frame as HTMLIFrameElement).contentWindow?.location.reload(); });
   await expect(author.getByText("Draft matches the loaded course.")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Number(document.documentElement.dataset.runtimeRequests))).toBe(expectedHandshakeCount);
+  api.runtimeHandshakeCount = expectedHandshakeCount;
 }
 
 export async function expectNoBoundaryViolations(page: Page, api: AuthorApiFixture): Promise<void> {
   expect(api.violations).toEqual([]);
+  expect(api.validationExpectations, "all ordered validation expectations must be consumed").toEqual([]);
+  expect(api.guideExpectations, "all ordered guide expectations must be consumed").toEqual([]);
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.unexpectedAuthorMessages)).toBe("0");
+  await expect.poll(() => page.evaluate(() => Number(document.documentElement.dataset.runtimeRequests))).toBe(api.runtimeHandshakeCount);
 }
