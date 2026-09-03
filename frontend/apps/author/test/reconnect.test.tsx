@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -123,8 +123,85 @@ function Harness({
   useBeforeUnload(dirty);
   return <output>{status}</output>;
 }
-afterEach(cleanup);
+beforeEach(resetApp);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 describe("Author reconnect and unload recovery", () => {
+  it("exports current local canonical bytes from a reconnect conflict without PUT", async () => {
+    const localRaw = '{\n  "title": "Dirty café"\n}\n';
+    const oldRaw = '{\n  "title": "Course"\n}\n';
+    const remoteRaw = '{\n  "title": "Remote"\n}\n';
+    appMocks.getCourse
+      .mockResolvedValueOnce({ manifest: course, raw: oldRaw, etag: '"old"' })
+      .mockResolvedValueOnce({
+        manifest: { ...course, title: "Remote" },
+        raw: remoteRaw,
+        etag: '"remote"',
+      });
+    appMocks.validateCourse.mockResolvedValue({
+      manifest: { ...course, title: "Dirty café" },
+      formatted_json: localRaw,
+    });
+    const create = vi.fn<(blob: Blob) => string>(() => "blob:reconnect");
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL: create, revokeObjectURL: revoke });
+    let filename = "";
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function (this: HTMLAnchorElement) {
+        filename = this.download;
+      },
+    );
+
+    const view = render(<AuthorApp />);
+    fireEvent.change(await screen.findByLabelText("Course title"), {
+      target: { value: "Dirty café" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select surface surface" }),
+    );
+
+    appMocks.runtime.mockReturnValue({
+      status: "disconnected",
+      runtime: null,
+      retry: appMocks.retry,
+    });
+    view.rerender(<AuthorApp />);
+    appMocks.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "fresh-export",
+        sourceId: "author-export",
+      },
+      retry: appMocks.retry,
+    });
+    view.rerender(<AuthorApp />);
+
+    await screen.findByText(/remote version changed/i);
+    const exportButton = await screen.findByRole("button", {
+      name: "Export local courseweave.json",
+    });
+    await waitFor(() => expect(exportButton).toBeEnabled());
+    fireEvent.click(exportButton);
+
+    const blob = create.mock.calls[0]?.[0] as Blob;
+    const bytes = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(blob);
+    });
+
+    expect(bytes).toBe(localRaw);
+    expect(bytes).not.toBe(oldRaw);
+    expect(bytes).not.toBe(remoteRaw);
+    expect(filename).toBe("courseweave.json");
+    expect(revoke).toHaveBeenCalledWith("blob:reconnect");
+    expect(appMocks.putCourse).not.toHaveBeenCalled();
+  });
   it("installs beforeunload only while a local draft is dirty and removes it after save/unmount", () => {
     const listener = vi.spyOn(window, "addEventListener");
     const remove = vi.spyOn(window, "removeEventListener");
