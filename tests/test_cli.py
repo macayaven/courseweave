@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import select
 import signal
 import socket
 import stat
@@ -89,6 +90,58 @@ def test_course_lock_refuses_a_symlink_lock_file(tmp_path: Path) -> None:
     assert outside.read_text(encoding="utf-8") == "unchanged"
 
 
+def test_child_inherited_lock_fd_holds_contention_until_child_exit(
+    tmp_path: Path,
+) -> None:
+    course = tmp_path / "course"
+    course.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    owner = CourseLock(course, runtime_root=runtime).acquire()
+    child = subprocess.Popen(
+        [
+            os.sys.executable,
+            "-c",
+            (
+                "import os,sys; "
+                "os.fstat(int(sys.argv[1])); "
+                "sys.stdout.write('ready\\n'); sys.stdout.flush(); "
+                "sys.stdin.buffer.read(1)"
+            ),
+            str(owner.fileno()),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        pass_fds=(owner.fileno(),),
+    )
+    contender = CourseLock(course, runtime_root=runtime)
+    try:
+        assert child.stdout is not None
+        readable, _, _ = select.select([child.stdout], [], [], 5.0)
+        assert readable
+        assert child.stdout.readline() == b"ready\n"
+
+        owner.release()
+        try:
+            with pytest.raises(CourseLockError, match="already running"):
+                contender.acquire()
+        finally:
+            contender.release()
+
+        assert child.stdin is not None
+        child.communicate(input=b"x", timeout=5.0)
+        assert child.returncode == 0
+
+        after_exit = CourseLock(course, runtime_root=runtime).acquire()
+        after_exit.release()
+    finally:
+        owner.release()
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=5.0)
+
+
 class _FakeSocket:
     def __init__(self, *, fail_bind: bool = False) -> None:
         self.fail_bind = fail_bind
@@ -153,6 +206,9 @@ class _SupervisorLock:
     def release(self) -> None:
         self.release_calls += 1
         self.events.append("lock.release")
+
+    def fileno(self) -> int:
+        return 73
 
 
 class _SupervisorSocket:
@@ -244,6 +300,40 @@ class _SupervisorProcess:
         self.returncode = -signal.SIGKILL
 
 
+class _UnstoppableProcess(_SupervisorProcess):
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        second_wait_error: BaseException,
+        kill_error: BaseException | None = None,
+        terminate_error: BaseException | None = None,
+    ) -> None:
+        super().__init__(events)
+        self.second_wait_error = second_wait_error
+        self.kill_error = kill_error
+        self.terminate_error = terminate_error
+        self.wait_calls = 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.wait_calls += 1
+        if self.wait_calls == 1:
+            raise subprocess.TimeoutExpired("jupyterlab", timeout)
+        raise self.second_wait_error
+
+    def terminate(self) -> None:
+        self.terminate_calls += 1
+        self.events.append("jupyter.terminate")
+        if self.terminate_error is not None:
+            raise self.terminate_error
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        self.events.append("jupyter.kill")
+        if self.kill_error is not None:
+            raise self.kill_error
+
+
 class _FakeSignals:
     def __init__(self) -> None:
         self.handlers: dict[int, Any] = {}
@@ -277,6 +367,7 @@ def _supervisor_fixture(
     course_ready: Any = None,
     jupyter_ready: Any = None,
     browser: Any = None,
+    process_builder: Any = None,
 ) -> tuple[LaunchSupervisor, dict[str, Any]]:
     course = tmp_path / "course root with spaces"
     course.mkdir()
@@ -284,10 +375,14 @@ def _supervisor_fixture(
     lock = _SupervisorLock(events)
     listener = _SupervisorSocket(events, 43123)
     server = _SupervisorServer(events, listener, fail=api_fail)
-    process = _SupervisorProcess(
-        events,
-        initial_returncode=process_returncode,
-        output=(b"token=owned-jupyter-secret\nowned-course-secret\n"),
+    process = (
+        process_builder(events)
+        if process_builder is not None
+        else _SupervisorProcess(
+            events,
+            initial_returncode=process_returncode,
+            output=(b"token=owned-jupyter-secret\nowned-course-secret\n"),
+        )
     )
     signals = _FakeSignals()
     secrets = iter(("owned-course-secret", "owned-jupyter-secret", "owned-runtime-id"))
@@ -471,6 +566,281 @@ def test_browser_failure_cleans_owned_resources_once_and_emits_one_safe_error(
     assert "owned-course-secret" not in state["errors"][0]
     assert "owned-jupyter-secret" not in state["errors"][0]
     assert "?token=" not in state["errors"][0]
+
+
+@pytest.mark.parametrize(
+    ("second_wait_error", "terminate_error", "kill_error"),
+    [
+        (
+            subprocess.TimeoutExpired("jupyterlab", 0.5),
+            None,
+            None,
+        ),
+        (
+            RuntimeError("owned-jupyter-secret after kill"),
+            RuntimeError("owned-course-secret during terminate"),
+            RuntimeError("owned-jupyter-secret during kill"),
+        ),
+    ],
+    ids=("second-timeout", "terminate-kill-and-second-wait-errors"),
+)
+def test_unconfirmed_jupyter_shutdown_contains_failures_and_keeps_lock_held(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    second_wait_error: BaseException,
+    terminate_error: BaseException | None,
+    kill_error: BaseException | None,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    supervisor, state = _supervisor_fixture(
+        tmp_path,
+        monkeypatch,
+        browser=lambda _url: False,
+        process_builder=lambda events: _UnstoppableProcess(
+            events,
+            second_wait_error=second_wait_error,
+            terminate_error=terminate_error,
+            kill_error=kill_error,
+        ),
+    )
+
+    assert supervisor.run() == 1
+
+    process = state["process"]
+    assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert process.wait_calls == 2
+    assert state["popen_calls"][0][1]["pass_fds"] == (73,)
+    assert "api.stop" in state["events"]
+    assert state["listener"].close_calls == 1
+    assert state["lock"].release_calls == 0
+    assert supervisor._jupyter_process is process
+    assert supervisor._lock is state["lock"]
+    assert len(state["errors"]) == 1
+    assert "owned-course-secret" not in state["errors"][0]
+    assert "owned-jupyter-secret" not in state["errors"][0]
+    captured = capsys.readouterr()
+    assert "owned-course-secret" not in captured.err
+    assert "owned-jupyter-secret" not in captured.err
+
+    supervisor._cleanup()
+    assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert state["listener"].close_calls == 1
+    assert state["lock"].release_calls == 0
+
+
+def test_live_api_thread_downgrades_success_and_keeps_lock_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    supervisor, state = _supervisor_fixture(tmp_path, monkeypatch)
+
+    class StuckApiThread:
+        def __init__(self) -> None:
+            self.join_calls = 0
+
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+            self.join_calls += 1
+
+        def is_alive(self) -> bool:
+            return True
+
+    api_thread = StuckApiThread()
+
+    def start_stuck_api() -> None:
+        supervisor._api_thread = api_thread  # type: ignore[assignment]
+        supervisor._api_started.set()
+
+    supervisor._start_api = start_stuck_api  # type: ignore[method-assign]
+
+    assert supervisor.run() == 1
+
+    assert api_thread.join_calls == 1
+    assert "api.stop" in state["events"]
+    assert state["listener"].close_calls == 1
+    assert state["lock"].release_calls == 0
+    assert supervisor._api_thread is api_thread
+    assert supervisor._lock is state["lock"]
+    assert len(state["errors"]) == 1
+    assert "owned-course-secret" not in state["errors"][0]
+    assert "owned-jupyter-secret" not in state["errors"][0]
+
+    supervisor._cleanup()
+    assert api_thread.join_calls == 2
+    assert state["listener"].close_calls == 1
+    assert state["lock"].release_calls == 0
+
+
+def test_cleanup_step_errors_do_not_skip_later_independently_safe_actions(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+
+    class FaultingOutputThread:
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+            events.append("output.join")
+            raise RuntimeError("owned-jupyter-secret from output join")
+
+        def is_alive(self) -> bool:
+            return False
+
+    class FaultingServer:
+        @property
+        def should_exit(self) -> bool:
+            return False
+
+        @should_exit.setter
+        def should_exit(self, _value: bool) -> None:
+            events.append("api.stop")
+            raise RuntimeError("owned-course-secret from API stop")
+
+    class FaultingApiThread:
+        def join(self, timeout: float | None = None) -> None:
+            del timeout
+            events.append("api.join")
+            raise RuntimeError("owned-jupyter-secret from API join")
+
+        def is_alive(self) -> bool:
+            return False
+
+    class ClosingListener:
+        def fileno(self) -> int:
+            return 91
+
+        def close(self) -> None:
+            events.append("listener.close")
+
+    class FaultingLock:
+        def release(self) -> None:
+            events.append("lock.release")
+            raise RuntimeError("owned-course-secret from lock release")
+
+    class FaultingTemporaryDirectory:
+        def cleanup(self) -> None:
+            events.append("temporary.cleanup")
+            raise RuntimeError("owned-jupyter-secret from temporary cleanup")
+
+    class FaultingEnvironment(dict[str, str]):
+        def clear(self) -> None:
+            events.append("environment.clear")
+            raise RuntimeError("owned-course-secret from environment clear")
+
+    class FaultingSignals(_FakeSignals):
+        def signal(self, signum: int, handler: Any) -> None:
+            if isinstance(handler, str):
+                events.append(f"signal.restore.{signum}")
+                if signum == signal.SIGINT:
+                    raise RuntimeError("owned-jupyter-secret from signal restore")
+            super().signal(signum, handler)
+
+    supervisor = LaunchSupervisor(tmp_path, signal_api=FaultingSignals())
+    process = _SupervisorProcess(events, initial_returncode=0)
+    lock = FaultingLock()
+    temporary = FaultingTemporaryDirectory()
+    environment = FaultingEnvironment(secret="owned-course-secret")
+    supervisor._jupyter_process = process
+    supervisor._output_threads = [FaultingOutputThread()]  # type: ignore[list-item]
+    supervisor._api_server = FaultingServer()
+    supervisor._api_thread = FaultingApiThread()  # type: ignore[assignment]
+    supervisor._listener = ClosingListener()
+    supervisor._lock = lock
+    supervisor._temporary_directory = temporary  # type: ignore[assignment]
+    supervisor._child_environment = environment
+    supervisor.capability_token = "owned-course-secret"
+    supervisor.jupyter_token = "owned-jupyter-secret"
+    supervisor.runtime_id = "owned-runtime-id"
+    supervisor._previous_handlers = {
+        signal.SIGINT: f"previous-{signal.SIGINT}",
+        signal.SIGTERM: f"previous-{signal.SIGTERM}",
+    }
+
+    assert supervisor._cleanup() is False
+
+    assert events == [
+        "output.join",
+        "api.stop",
+        "api.join",
+        "listener.close",
+        "lock.release",
+        "temporary.cleanup",
+        "environment.clear",
+        f"signal.restore.{signal.SIGINT}",
+        f"signal.restore.{signal.SIGTERM}",
+    ]
+    assert supervisor._lock is lock
+    assert supervisor._temporary_directory is temporary
+    assert supervisor._child_environment is None
+    assert supervisor.capability_token is None
+    assert supervisor.jupyter_token is None
+    assert supervisor.runtime_id is None
+    assert signal.SIGINT in supervisor._previous_handlers
+    assert signal.SIGTERM not in supervisor._previous_handlers
+
+
+def test_listener_close_error_retains_lock_but_continues_secret_and_signal_cleanup(
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+
+    class FaultingListener:
+        def fileno(self) -> int:
+            return 92
+
+        def close(self) -> None:
+            events.append("listener.close")
+            raise RuntimeError("owned-jupyter-secret from listener close")
+
+    class RecordingLock:
+        release_calls = 0
+
+        def release(self) -> None:
+            self.release_calls += 1
+
+    class RecordingTemporaryDirectory:
+        def cleanup(self) -> None:
+            events.append("temporary.cleanup")
+
+    class RecordingEnvironment(dict[str, str]):
+        def clear(self) -> None:
+            events.append("environment.clear")
+            super().clear()
+
+    class RecordingSignals(_FakeSignals):
+        def signal(self, signum: int, handler: Any) -> None:
+            if isinstance(handler, str):
+                events.append(f"signal.restore.{signum}")
+            super().signal(signum, handler)
+
+    signals = RecordingSignals()
+    supervisor = LaunchSupervisor(tmp_path, signal_api=signals)
+    lock = RecordingLock()
+    supervisor._listener = FaultingListener()
+    supervisor._lock = lock
+    supervisor._temporary_directory = RecordingTemporaryDirectory()  # type: ignore[assignment]
+    supervisor._child_environment = RecordingEnvironment(secret="owned-course-secret")
+    supervisor.capability_token = "owned-course-secret"
+    supervisor.jupyter_token = "owned-jupyter-secret"
+    supervisor.runtime_id = "owned-runtime-id"
+    supervisor._previous_handlers = {
+        signal.SIGINT: f"previous-{signal.SIGINT}",
+        signal.SIGTERM: f"previous-{signal.SIGTERM}",
+    }
+
+    assert supervisor._cleanup() is False
+
+    assert lock.release_calls == 0
+    assert events == [
+        "listener.close",
+        "temporary.cleanup",
+        "environment.clear",
+        f"signal.restore.{signal.SIGINT}",
+        f"signal.restore.{signal.SIGTERM}",
+    ]
+    assert supervisor.capability_token is None
+    assert supervisor.jupyter_token is None
+    assert supervisor.runtime_id is None
 
 
 def test_api_failure_prevents_jupyter_spawn_and_reports_once(

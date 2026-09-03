@@ -109,10 +109,14 @@ class CourseLock:
         if self._fd is None:
             return
         file_fd, self._fd = self._fd, None
-        try:
-            fcntl.flock(file_fd, fcntl.LOCK_UN)
-        finally:
-            os.close(file_fd)
+        # Closing only this descriptor preserves an inherited flock in an
+        # unconfirmed owned child; the final holder's close releases it.
+        os.close(file_fd)
+
+    def fileno(self) -> int:
+        if self._fd is None:
+            raise CourseLockError("CourseWeave runtime lock is not acquired.")
+        return self._fd
 
     def __enter__(self) -> CourseLock:
         return self.acquire()
@@ -405,17 +409,22 @@ class LaunchSupervisor:
         self._shutdown_timeout = shutdown_timeout
         self._lock: Any | None = None
         self._listener: Any | None = None
+        self._listener_close_attempted = False
+        self._listener_close_confirmed = False
         self._api_server: Any | None = None
         self._api_thread: threading.Thread | None = None
         self._api_started = threading.Event()
         self._api_stopped = threading.Event()
         self._api_failed = False
         self._jupyter_process: Any | None = None
+        self._jupyter_shutdown_attempted = False
         self._output_threads: list[threading.Thread] = []
         self._temporary_directory: tempfile.TemporaryDirectory[str] | None = None
         self._child_environment: dict[str, str] | None = None
         self._requested_signal: int | None = None
         self._previous_handlers: dict[int, Any] = {}
+        self._lock_release_attempted = False
+        self._temporary_cleanup_attempted = False
         self._reported_error = False
         self.capability_token: str | None = None
         self.jupyter_token: str | None = None
@@ -423,8 +432,8 @@ class LaunchSupervisor:
 
     def run(self) -> int:
         exit_code = 1
-        self._install_signal_handlers()
         try:
+            self._install_signal_handlers()
             self._lock = self._lock_factory(self.course_root)
             self._lock.acquire()
             self._listener = self._listener_factory(self.port)
@@ -463,32 +472,36 @@ class LaunchSupervisor:
                 stderr=subprocess.PIPE,
                 shell=False,
                 start_new_session=False,
+                pass_fds=(self._lock.fileno(),),
             )
             self._start_output_drains()
             self._wait_for_jupyter(jupyter_url, service_url)
             if self._requested_signal is not None:
-                return 128 + self._requested_signal
-            bootstrap_url = (
-                f"{jupyter_url}lab?token={quote(self.jupyter_token, safe='')}"
-            )
-            try:
-                opened = self._browser_opener(bootstrap_url)
-            finally:
-                bootstrap_url = ""
-            if not opened:
-                raise _LaunchFailure()
-            exit_code = self._wait_for_exit()
-            return exit_code
+                exit_code = 128 + self._requested_signal
+            else:
+                bootstrap_url = (
+                    f"{jupyter_url}lab?token={quote(self.jupyter_token, safe='')}"
+                )
+                try:
+                    opened = self._browser_opener(bootstrap_url)
+                finally:
+                    bootstrap_url = ""
+                if not opened:
+                    raise _LaunchFailure()
+                exit_code = self._wait_for_exit()
         except _LaunchFailure as exc:
             exit_code = exc.exit_code
             if self._requested_signal is None:
                 self._report_failure()
-            return exit_code
         except Exception:
             self._report_failure()
-            return exit_code
         finally:
-            self._cleanup()
+            cleanup_ok = self._cleanup()
+        if not cleanup_ok:
+            if exit_code == 0:
+                exit_code = 1
+            self._report_failure()
+        return exit_code
 
     def _build_child_environment(
         self, service_url: str, config_dir: Path, runtime_dir: Path
@@ -537,10 +550,16 @@ class LaunchSupervisor:
             self._previous_handlers[signum] = self._signal_api.getsignal(signum)
             self._signal_api.signal(signum, self._request_stop)
 
-    def _restore_signal_handlers(self) -> None:
-        for signum, handler in self._previous_handlers.items():
-            self._signal_api.signal(signum, handler)
-        self._previous_handlers.clear()
+    def _restore_signal_handlers(self) -> bool:
+        restored = True
+        for signum, handler in list(self._previous_handlers.items()):
+            try:
+                self._signal_api.signal(signum, handler)
+            except BaseException:
+                restored = False
+            else:
+                self._previous_handlers.pop(signum, None)
+        return restored
 
     def _request_stop(self, signum: int, _frame: object) -> None:
         if self._requested_signal is None:
@@ -665,58 +684,185 @@ class LaunchSupervisor:
         if self._reported_error:
             return
         self._reported_error = True
-        self._error_sink(
-            "CourseWeave could not start the workspace. Check the course root, "
-            "requested port, and JupyterLab installation, then retry."
-        )
+        try:
+            self._error_sink(
+                "CourseWeave could not start the workspace. Check the course root, "
+                "requested port, and JupyterLab installation, then retry."
+            )
+        except BaseException:
+            pass
 
-    def _cleanup(self) -> None:
-        self._stop_jupyter()
-        self._stop_api()
-        self._close_listener()
+    def _cleanup(self) -> bool:
+        cleanup_ok = True
+        try:
+            jupyter_stopped, stage_ok = self._stop_jupyter()
+        except BaseException:
+            jupyter_stopped, stage_ok = False, False
+        cleanup_ok = cleanup_ok and stage_ok
+
+        try:
+            api_stopped, stage_ok = self._stop_api()
+        except BaseException:
+            api_stopped, stage_ok = False, False
+        cleanup_ok = cleanup_ok and stage_ok
+
+        try:
+            listener_closed, stage_ok = self._close_listener()
+        except BaseException:
+            listener_closed, stage_ok = False, False
+        cleanup_ok = cleanup_ok and stage_ok
+
+        safe_to_unlock = jupyter_stopped and api_stopped and listener_closed
         if self._lock is not None:
-            self._lock.release()
-            self._lock = None
+            if safe_to_unlock and not self._lock_release_attempted:
+                self._lock_release_attempted = True
+                try:
+                    self._lock.release()
+                except BaseException:
+                    cleanup_ok = False
+                else:
+                    self._lock = None
+            else:
+                cleanup_ok = False
+
         if self._temporary_directory is not None:
-            self._temporary_directory.cleanup()
-            self._temporary_directory = None
+            if jupyter_stopped and not self._temporary_cleanup_attempted:
+                self._temporary_cleanup_attempted = True
+                try:
+                    self._temporary_directory.cleanup()
+                except BaseException:
+                    cleanup_ok = False
+                else:
+                    self._temporary_directory = None
+            else:
+                cleanup_ok = False
+
         if self._child_environment is not None:
-            self._child_environment.clear()
-            self._child_environment = None
-        self.capability_token = None
-        self.jupyter_token = None
-        self.runtime_id = None
-        self._restore_signal_handlers()
-
-    def _stop_jupyter(self) -> None:
-        process = self._jupyter_process
-        if process is not None and process.poll() is None:
-            process.terminate()
+            environment, self._child_environment = self._child_environment, None
             try:
-                process.wait(timeout=self._shutdown_timeout)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=self._shutdown_timeout)
+                environment.clear()
+            except BaseException:
+                cleanup_ok = False
+        for name in ("capability_token", "jupyter_token", "runtime_id"):
+            try:
+                setattr(self, name, None)
+            except BaseException:
+                cleanup_ok = False
+        try:
+            handlers_restored = self._restore_signal_handlers()
+        except BaseException:
+            handlers_restored = False
+        return cleanup_ok and handlers_restored
+
+    def _stop_jupyter(self) -> tuple[bool, bool]:
+        process = self._jupyter_process
+        cleanup_ok = True
+        process_stopped = process is None
+        if process is not None:
+            try:
+                process_stopped = process.poll() is not None
+            except BaseException:
+                cleanup_ok = False
+                process_stopped = False
+            if not process_stopped and not self._jupyter_shutdown_attempted:
+                self._jupyter_shutdown_attempted = True
+                try:
+                    process.terminate()
+                except BaseException:
+                    cleanup_ok = False
+                try:
+                    process.wait(timeout=self._shutdown_timeout)
+                except subprocess.TimeoutExpired:
+                    pass
+                except BaseException:
+                    cleanup_ok = False
+                else:
+                    process_stopped = True
+                if not process_stopped:
+                    try:
+                        process.kill()
+                    except BaseException:
+                        cleanup_ok = False
+                    try:
+                        process.wait(timeout=self._shutdown_timeout)
+                    except BaseException:
+                        cleanup_ok = False
+                    else:
+                        process_stopped = True
+            if process_stopped:
+                self._jupyter_process = None
+            else:
+                cleanup_ok = False
+
+        remaining_threads: list[threading.Thread] = []
         for thread in self._output_threads:
-            thread.join(timeout=self._shutdown_timeout)
-        self._output_threads.clear()
-        self._jupyter_process = None
+            try:
+                thread.join(timeout=self._shutdown_timeout)
+            except BaseException:
+                cleanup_ok = False
+            try:
+                thread_alive = thread.is_alive()
+            except BaseException:
+                cleanup_ok = False
+                thread_alive = True
+            if thread_alive:
+                cleanup_ok = False
+                remaining_threads.append(thread)
+        self._output_threads = remaining_threads
+        return process_stopped, cleanup_ok
 
-    def _stop_api(self) -> None:
-        if self._api_server is not None and not self._api_server.should_exit:
-            self._api_server.should_exit = True
+    def _stop_api(self) -> tuple[bool, bool]:
+        cleanup_ok = True
+        if self._api_server is not None:
+            try:
+                should_request_stop = not self._api_server.should_exit
+            except BaseException:
+                cleanup_ok = False
+                should_request_stop = True
+            if should_request_stop:
+                try:
+                    self._api_server.should_exit = True
+                except BaseException:
+                    cleanup_ok = False
+        api_stopped = self._api_thread is None
         if self._api_thread is not None:
-            self._api_thread.join(timeout=self._shutdown_timeout)
+            try:
+                self._api_thread.join(timeout=self._shutdown_timeout)
+            except BaseException:
+                cleanup_ok = False
+            try:
+                api_stopped = not self._api_thread.is_alive()
+            except BaseException:
+                cleanup_ok = False
+                api_stopped = False
+        if api_stopped:
             self._api_thread = None
-        self._api_server = None
+            self._api_server = None
+        else:
+            cleanup_ok = False
+        return api_stopped, cleanup_ok
 
-    def _close_listener(self) -> None:
+    def _close_listener(self) -> tuple[bool, bool]:
         if self._listener is None:
-            return
+            self._listener_close_confirmed = True
+            return True, True
+        if self._listener_close_attempted:
+            return self._listener_close_confirmed, self._listener_close_confirmed
+        cleanup_ok = True
         try:
             open_listener = self._listener.fileno() >= 0
-        except (AttributeError, OSError):
+        except BaseException:
+            cleanup_ok = False
             open_listener = True
-        if open_listener:
+        if not open_listener:
+            self._listener = None
+            self._listener_close_confirmed = True
+            return True, cleanup_ok
+        self._listener_close_attempted = True
+        try:
             self._listener.close()
+        except BaseException:
+            return False, False
         self._listener = None
+        self._listener_close_confirmed = True
+        return True, cleanup_ok
