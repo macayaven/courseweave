@@ -17,7 +17,7 @@ function controlFor(pointer: string): HTMLElement | null {
 }
 
 /** Adds accessible issue references only to controls registered with their JSON Pointer. */
-export function ValidationSummary({ issues }: { issues: readonly ValidationIssue[] }) {
+export function ValidationSummary({ issues, onFocusIssues }: { issues: readonly ValidationIssue[]; onFocusIssues?(issues: readonly ValidationIssue[]): void }) {
   const summary = useRef<HTMLElement>(null);
   useEffect(() => {
     const touched: HTMLElement[] = [];
@@ -32,7 +32,7 @@ export function ValidationSummary({ issues }: { issues: readonly ValidationIssue
     return () => touched.forEach((control) => control.removeAttribute('aria-describedby'));
   }, [issues]);
   if (issues.length === 0) return null;
-  const focusFirst = () => { const first = issues.find((issue) => controlFor(issue.path) !== null); const control = first === undefined ? null : controlFor(first.path); if (control === null) summary.current?.focus(); else control.focus(); };
+  const focusFirst = () => { if (onFocusIssues !== undefined) { onFocusIssues(issues); return; } const first = issues.find((issue) => controlFor(issue.path) !== null); const control = first === undefined ? null : controlFor(first.path); if (control === null) summary.current?.focus(); else control.focus(); };
   return <section ref={summary} tabIndex={-1} aria-label="Validation issues" role="alert">
     <h2>Validation issues</h2>
     <button type="button" onClick={focusFirst}>Focus first issue</button>

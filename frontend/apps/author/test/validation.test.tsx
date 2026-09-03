@@ -1,9 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useReducer } from 'react';
 import type { AuthorManifest } from '@courseweave/ui';
 import { createDraft, draftReducer, type AuthorDocumentState } from '../src/draft';
 import { Inspector } from '../src/inspector';
+
+const appMocks = vi.hoisted(() => ({ getCourse: vi.fn(), validateCourse: vi.fn(), runtime: vi.fn(), retry: vi.fn() }));
+vi.mock('../src/api', async () => {
+  class AuthorApiError extends Error { constructor(readonly status: number, readonly code: string, readonly details: Record<string, unknown>, message: string) { super(message); } }
+  return { AuthorApiError, createAuthorClient: () => ({ getCourse: appMocks.getCourse, validateCourse: appMocks.validateCourse, putCourse: vi.fn(), getProposals: vi.fn(), postGuide: vi.fn(), createProposal: vi.fn(), editProposal: vi.fn(), acceptProposal: vi.fn(), rejectProposal: vi.fn() }) };
+});
+vi.mock('../src/runtime', () => ({ useAuthorRuntime: appMocks.runtime }));
+import { AuthorApp } from '../src/app';
 import { ValidationSummary, pointerToControlId, type ValidationIssue } from '../src/validation';
 
 afterEach(cleanup);
@@ -30,5 +38,21 @@ describe('Author validation presentation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Focus first issue' }));
     expect(screen.getByLabelText('Path')).toHaveFocus();
     expect(screen.getByLabelText('Path')).toHaveAttribute('id', pointerToControlId('/modules/0/phases/0/surfaces/0/path'));
+  });
+
+  it('reveals and focuses the actual non-selected second-module Path field with its deterministic pointer association', async () => {
+    const manifest: AuthorManifest = { schema_version: 1, id: 'course', title: 'Course', description: '', entry_module_id: 'one', policies: { content_sharing: 'explicit_only', durable_mutation: 'proposal_or_direct_student_action', terminal_execution: 'student_only', conversation_memory: 'session_only', max_shared_chars: 1, workspace_write_globs: [] }, modules: ['one', 'two'].map((id) => ({ id, title: id, description: '', phases: [{ id: 'phase', title: 'Phase', kind: 'read', teacher_mode: 'reading_companion', completion: { type: 'manual' as const }, capabilities: { chat: false, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [{ id: 'surface', type: 'markdown' as const, role: 'primary' as const, path: `${id}.md` }] }] })) };
+    appMocks.runtime.mockReturnValue({ status: 'ready', runtime: { serviceOrigin: 'https://course.test', capabilityToken: 'token', sourceId: 'author' }, retry: appMocks.retry });
+    appMocks.getCourse.mockResolvedValue({ manifest, raw: '{}', etag: '"etag"' });
+    appMocks.validateCourse.mockRejectedValue(Object.assign(new Error('invalid'), { status: 422, code: 'validation_error', details: { issues: [{ path: '/unknown', code: 'schema_validation', message: 'Unknown.' }, { path: '/modules/1/phases/0/surfaces/0/path', code: 'missing_artifact', message: 'Second path missing.' }] } }));
+    render(<AuthorApp />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Validate structure' }));
+    await screen.findByText('Second path missing.');
+    fireEvent.click(screen.getByRole('button', { name: 'Focus first issue' }));
+    const path = await screen.findByLabelText('Path');
+    expect(path).toHaveValue('two.md');
+    expect(path).toHaveFocus();
+    expect(path).toHaveAttribute('id', pointerToControlId('/modules/1/phases/0/surfaces/0/path'));
+    expect(path).toHaveAttribute('aria-describedby', pointerToControlId('/modules/1/phases/0/surfaces/0/path', 'issue'));
   });
 });
