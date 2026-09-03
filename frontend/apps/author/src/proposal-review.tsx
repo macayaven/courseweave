@@ -59,6 +59,7 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
   const [notice, setNotice] = useState<string | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const controllers = useRef(new Map<string, AbortController>());
+  const proposalHeadings = useRef(new Map<string, HTMLHeadingElement>());
   const key = (proposal: Proposal) => `${proposal.id}:${proposal.revision}`;
   useEffect(() => () => controllers.current.forEach((controller) => controller.abort()), []);
   useEffect(() => {
@@ -85,9 +86,10 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
     : savePending ? "Wait for the direct Save to finish before changing a proposal." : null;
   const savedHash = etagHash(savedEtag);
 
-  const perform = async (proposal: Proposal, action: "edit" | "accept" | "reject") => {
+  const perform = async (proposal: Proposal, action: "edit" | "accept" | "reject", trigger: HTMLButtonElement) => {
     const proposalKey = key(proposal);
     if (blockReason !== null || active !== null || proposal.target_hash !== savedHash || canonical[proposalKey] === undefined) return;
+    const restoreFocus = document.activeElement === trigger;
     const controller = new AbortController();
     const actionKey = `${proposalKey}:${action}`;
     controllers.current.set(actionKey, controller);
@@ -114,6 +116,9 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
       let committed = false;
       try { committed = (await onRefresh(controller.signal)).committed; } catch { /* Parent remains blocked. */ }
       if (action === "accept" && next.status === "accepted" && committed) onAcceptedCourse();
+      if (committed && restoreFocus && !trigger.isConnected && document.activeElement === document.body) {
+        proposalHeadings.current.get(proposal.id)?.focus();
+      }
       setNotice(committed ? "Proposal saved from the authoritative review." : "Proposal saved, refresh unavailable; reconnect/review before another action.");
     } catch (error) {
       if (controller.signal.aborted) {
@@ -143,6 +148,6 @@ export function ProposalReview({ proposals, savedRaw, savedEtag, client, clean, 
     const proposed = canonical[proposalKey];
     const targetCurrent = proposal.target_hash === savedHash;
     const actionable = proposal.status === "pending" && targetCurrent && proposed !== undefined && blockReason === null && active === null;
-    return <article key={proposalKey}><h3>{proposal.summary}</h3><p>Status: {proposal.status}</p><p>Pending revision: {proposal.revision}</p><p>Target hash: {proposal.target_hash ?? "missing manifest"}</p>{targetCurrent ? <><h4>Target manifest</h4><pre>{savedRaw}</pre></> : <><p role="status">Proposal target no longer matches the saved course. It cannot be applied.</p><h4>Current saved manifest (not the proposal target)</h4><pre>{savedRaw}</pre></>}<h4>Proposed manifest</h4><pre>{proposed ?? "Validating proposed manifest…"}</pre><h4>Text diff</h4><pre>{proposed === undefined ? "Diff unavailable until validation succeeds." : textDiff(savedRaw, proposed)}</pre>{proposal.status === "pending" && proposed !== undefined && targetCurrent ? <><label>Edit full manifest<textarea value={drafts[proposal.id] ?? proposed} disabled={!actionable} onChange={(event) => setDrafts((current) => ({ ...current, [proposal.id]: event.target.value }))} /></label><Button type="button" disabled={!actionable} onClick={() => void perform(proposal, "accept")}>Accept</Button><Button type="button" disabled={!actionable} onClick={() => void perform(proposal, "reject")}>Reject</Button><Button type="button" disabled={!actionable} onClick={() => void perform(proposal, "edit")}>Save proposal edit</Button></> : null}</article>;
+    return <article key={proposalKey}><h3 tabIndex={-1} ref={(node) => { if (node) proposalHeadings.current.set(proposal.id, node); else proposalHeadings.current.delete(proposal.id); }}>{proposal.summary}</h3><p>Status: {proposal.status}</p><p>Pending revision: {proposal.revision}</p><p>Target hash: {proposal.target_hash ?? "missing manifest"}</p>{targetCurrent ? <><h4>Target manifest</h4><pre>{savedRaw}</pre></> : <><p role="status">Proposal target no longer matches the saved course. It cannot be applied.</p><h4>Current saved manifest (not the proposal target)</h4><pre>{savedRaw}</pre></>}<h4>Proposed manifest</h4><pre>{proposed ?? "Validating proposed manifest…"}</pre><h4>Text diff</h4><pre>{proposed === undefined ? "Diff unavailable until validation succeeds." : textDiff(savedRaw, proposed)}</pre>{proposal.status === "pending" && proposed !== undefined && targetCurrent ? <><label>Edit full manifest<textarea value={drafts[proposal.id] ?? proposed} disabled={!actionable} onChange={(event) => setDrafts((current) => ({ ...current, [proposal.id]: event.target.value }))} /></label><Button type="button" disabled={!actionable} onClick={(event) => void perform(proposal, "accept", event.currentTarget)}>Accept</Button><Button type="button" disabled={!actionable} onClick={(event) => void perform(proposal, "reject", event.currentTarget)}>Reject</Button><Button type="button" disabled={!actionable} onClick={(event) => void perform(proposal, "edit", event.currentTarget)}>Save proposal edit</Button></> : null}</article>;
   })}{notice ? <p role="status">{notice}</p> : null}</section>;
 }

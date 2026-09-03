@@ -186,6 +186,49 @@ describe("ProposalReview", () => {
     expect(onProposal).toHaveBeenCalledWith(expect.objectContaining({ status: "accepted" }));
   });
 
+  it("restores keyboard focus within the reviewed proposal after Reject refreshes it", async () => {
+    const rejected = { ...proposal, status: "rejected" as const };
+    const rejectProposal = vi.fn().mockResolvedValue(rejected);
+    const client = {
+      validateCourse: vi.fn().mockResolvedValue({ formatted_json: "{}\n" }),
+      editProposal: vi.fn(),
+      acceptProposal: vi.fn(),
+      rejectProposal,
+    };
+    let view: ReturnType<typeof render>;
+    const renderReview = (reviewedProposal: typeof proposal | typeof rejected = proposal) => (
+      <ProposalReview
+        proposals={[reviewedProposal]}
+        savedRaw={savedRaw}
+        savedEtag={savedEtag}
+        client={client}
+        clean
+        recovery={false}
+        savePending={false}
+        onRefresh={onRefresh}
+        onProposal={vi.fn()}
+        onConflict={vi.fn()}
+        onAcceptedCourse={vi.fn()}
+      />
+    );
+    const onRefresh = vi.fn().mockImplementation(async () => {
+      view.rerender(renderReview(rejected));
+      return { committed: true };
+    });
+    view = render(renderReview());
+    const reject = await screen.findByRole("button", { name: "Reject" });
+
+    reject.focus();
+    expect(reject).toHaveFocus();
+    fireEvent.click(reject);
+
+    await screen.findByText("Status: rejected");
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Improve the sequence" })).toHaveFocus(),
+    );
+    expect(rejectProposal).toHaveBeenCalledOnce();
+  });
+
   it("omits global decoy proposals and marks a changed target stale", async () => {
     const decoy = {
       ...proposal,
