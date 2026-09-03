@@ -519,24 +519,26 @@ describe("Author Save and stale recovery", () => {
   });
 
   it("does not create a missing manifest until the explicit Save click", () => {
+    const validate = vi.fn(
+      () =>
+        new Promise<{ manifest: unknown; formatted_json: string }>(() => {}),
+    );
+    const put = vi.fn();
     render(
       <SaveConflict
         manifest={{ schema_version: 1 }}
         etag=""
         exists={false}
         dirty={false}
-        validate={vi.fn(
-          () =>
-            new Promise<{ manifest: unknown; formatted_json: string }>(
-              () => {},
-            ),
-        )}
-        put={vi.fn()}
+        validate={validate}
+        put={put}
         getLatest={vi.fn()}
         onSaved={vi.fn()}
       />,
     );
     expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled();
+    expect(validate).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
   });
 
   it("does not overwrite a newer local edit when its save response arrives late", async () => {

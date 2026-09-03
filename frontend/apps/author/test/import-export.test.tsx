@@ -94,7 +94,7 @@ describe("Author import and export", () => {
     await waitFor(() => expect(imported).toHaveBeenCalledTimes(2));
   });
 
-  it("keeps a dirty selected AuthorApp draft and baseline untouched when server structural import validation rejects unexpected fields", async () => {
+  it("rejects structurally invalid and unexpected schema-v1 imports without changing a dirty selected draft or baseline", async () => {
     const manifest = {
       schema_version: 1,
       id: "course",
@@ -158,19 +158,25 @@ describe("Author import and export", () => {
       raw: "{}",
       etag: '"saved-etag"',
     });
-    app.validateCourse.mockRejectedValue(
-      Object.assign(new Error("invalid"), {
-        details: {
-          issues: [
-            {
-              path: "/unexpected",
-              code: "schema_validation",
-              message: "Unexpected field.",
-            },
-          ],
-        },
-      }),
-    );
+    app.validateCourse.mockImplementation((candidate) => {
+      const hasUnexpected =
+        typeof candidate === "object" &&
+        candidate !== null &&
+        "unexpected" in candidate;
+      return Promise.reject(
+        Object.assign(new Error(hasUnexpected ? "unexpected" : "invalid v1"), {
+          details: {
+            issues: [
+              {
+                path: hasUnexpected ? "/unexpected" : "/modules",
+                code: "schema_validation",
+                message: hasUnexpected ? "Unexpected field." : "Modules are required.",
+              },
+            ],
+          },
+        }),
+      );
+    });
     render(<AuthorApp />);
     fireEvent.change(await screen.findByLabelText("Course title"), {
       target: { value: "Dirty title" },
@@ -178,20 +184,62 @@ describe("Author import and export", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Select surface surface" }),
     );
+    const structurallyInvalid = { ...manifest, modules: "not an array" };
     fireEvent.change(screen.getByLabelText("Import course file"), {
       target: {
         files: [
           new File(
-            [JSON.stringify({ ...manifest, unexpected: true })],
+            [JSON.stringify(structurallyInvalid)],
             "bad.json",
           ),
         ],
       },
     });
-    expect(await screen.findByText("invalid")).toBeInTheDocument();
+    expect(await screen.findByText("invalid v1")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Import course file"), {
+      target: {
+        files: [
+          new File(
+            [JSON.stringify({ ...manifest, unexpected: true })],
+            "unexpected.json",
+          ),
+        ],
+      },
+    });
+    expect(await screen.findByText("unexpected")).toBeInTheDocument();
+    expect(app.validateCourse.mock.calls[0]?.[0]).toEqual(structurallyInvalid);
+    expect(app.validateCourse.mock.calls[1]?.[0]).toEqual({
+      ...manifest,
+      unexpected: true,
+    });
     expect(screen.getByLabelText("Path")).toHaveValue("saved.md");
+    expect(
+      screen.getByRole("button", { name: "Select surface surface" }),
+    ).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Unsaved local draft.")).toBeInTheDocument();
     expect(app.putCourse).not.toHaveBeenCalled();
+    app.validateCourse.mockResolvedValue({
+      manifest,
+      formatted_json: '{\n  "title": "Dirty title"\n}\n',
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
+    await waitFor(() => expect(app.validateCourse).toHaveBeenCalledTimes(3));
+    expect(app.validateCourse.mock.calls[2]?.[0]).toMatchObject({
+      title: "Dirty title",
+      modules: [{ phases: [{ surfaces: [{ path: "saved.md" }] }] }],
+    });
+    app.putCourse.mockResolvedValue({
+      manifest,
+      raw: '{}\n',
+      etag: '"next-etag"',
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save course" }));
+    await waitFor(() => expect(app.putCourse).toHaveBeenCalledOnce());
+    expect(app.putCourse).toHaveBeenCalledWith(
+      '{\n  "title": "Dirty title"\n}\n',
+      '"saved-etag"',
+      expect.any(AbortSignal),
+    );
   });
 
   it("does not replace a newer draft when import validation completes after its operation epoch changes", async () => {

@@ -300,6 +300,11 @@ describe("Author reconnect and unload recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
     await waitFor(() => expect(appMocks.validateCourse).toHaveBeenCalledOnce());
     const signal = appMocks.validateCourse.mock.calls[0]?.[2] as AbortSignal;
+    expect(appMocks.validateCourse).toHaveBeenCalledWith(
+      expect.anything(),
+      "structural",
+      signal,
+    );
     appMocks.runtime.mockReturnValue({
       status: "disconnected",
       runtime: null,
@@ -331,18 +336,42 @@ describe("Author reconnect and unload recovery", () => {
     let resolve:
       | ((value: { manifest: unknown; formatted_json: string }) => void)
       | undefined;
-    appMocks.validateCourse.mockImplementation(
-      () =>
+    appMocks.validateCourse
+      .mockImplementationOnce(
+        () =>
         new Promise((done) => {
           resolve = done;
         }),
-    );
+      )
+      .mockResolvedValue({
+        manifest: { ...course, title: "Dirty local" },
+        formatted_json: '{\n  "title": "Dirty local"\n}\n',
+      });
+    const importedModule = course.modules[0]!;
+    const importedPhase = importedModule.phases[0]!;
+    const imported = {
+      ...course,
+      title: "Imported title",
+      modules: [
+        {
+          ...importedModule,
+          phases: [
+            {
+              ...importedPhase,
+              surfaces: [
+                { ...importedPhase.surfaces[0]!, path: "imported.md" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
     const view = await startDirtyApp();
     fireEvent.change(screen.getByLabelText("Import course file"), {
       target: {
         files: [
           new File(
-            [JSON.stringify({ ...course, title: "Imported" })],
+            [JSON.stringify(imported)],
             "courseweave.json",
           ),
         ],
@@ -350,6 +379,11 @@ describe("Author reconnect and unload recovery", () => {
     });
     await waitFor(() => expect(appMocks.validateCourse).toHaveBeenCalledOnce());
     const signal = appMocks.validateCourse.mock.calls[0]?.[2] as AbortSignal;
+    expect(appMocks.validateCourse).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Imported title" }),
+      "structural",
+      signal,
+    );
     appMocks.runtime.mockReturnValue({
       status: "disconnected",
       runtime: null,
@@ -373,12 +407,27 @@ describe("Author reconnect and unload recovery", () => {
     view.rerender(<AuthorApp />);
     await waitFor(() => expect(appMocks.getCourse).toHaveBeenCalledTimes(2));
     resolve?.({
-      manifest: { ...course, title: "Imported" },
-      formatted_json: '{"title":"Imported"}\n',
+      manifest: imported,
+      formatted_json: '{"title":"Imported title"}\n',
     });
+    await waitFor(() => expect(signal.aborted).toBe(true));
     await Promise.resolve();
     expect(screen.getByLabelText("Path")).toHaveValue("lesson.md");
+    expect(
+      screen.getByRole("button", { name: "Select surface surface" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(appMocks.getCourse).toHaveBeenCalledTimes(2);
     expect(appMocks.putCourse).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
+    await waitFor(() => expect(appMocks.validateCourse).toHaveBeenCalledTimes(2));
+    expect(appMocks.validateCourse.mock.calls[1]?.[0]).toMatchObject({
+      title: "Dirty local",
+      modules: [
+        {
+          phases: [{ surfaces: [{ path: "lesson.md" }] }],
+        },
+      ],
+    });
   });
 
   it("invalidates pending runnable diagnostics across reconnect without replaying or repopulating preview issues", async () => {
@@ -396,6 +445,11 @@ describe("Author reconnect and unload recovery", () => {
     );
     await waitFor(() => expect(appMocks.validateCourse).toHaveBeenCalledOnce());
     const signal = appMocks.validateCourse.mock.calls[0]?.[2] as AbortSignal;
+    expect(appMocks.validateCourse).toHaveBeenCalledWith(
+      expect.anything(),
+      "runnable",
+      signal,
+    );
     appMocks.runtime.mockReturnValue({
       status: "disconnected",
       runtime: null,
@@ -434,6 +488,61 @@ describe("Author reconnect and unload recovery", () => {
     await Promise.resolve();
     expect(screen.queryByText("Late missing.")).not.toBeInTheDocument();
     expect(appMocks.putCourse).not.toHaveBeenCalled();
+  });
+
+  it("keeps the fresh reviewed ETag for a later explicit Save after reconnect", async () => {
+    resetApp();
+    const canonical = '{\n  "title": "Dirty local"\n}\n';
+    appMocks.validateCourse.mockResolvedValue({
+      manifest: { ...course, title: "Dirty local" },
+      formatted_json: canonical,
+    });
+    appMocks.putCourse.mockResolvedValue({
+      manifest: { ...course, title: "Dirty local" },
+      raw: canonical,
+      etag: '"saved"',
+    });
+    const view = await startDirtyApp();
+    appMocks.runtime.mockReturnValue({
+      status: "disconnected",
+      runtime: null,
+      retry: appMocks.retry,
+    });
+    view.rerender(<AuthorApp />);
+    appMocks.getCourse.mockResolvedValueOnce({
+      manifest: { ...course, title: "Remote" },
+      raw: '{\n  "title": "Remote"\n}\n',
+      etag: '"reviewed"',
+    });
+    appMocks.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "fresh-etag",
+        sourceId: "author-etag",
+      },
+      retry: appMocks.retry,
+    });
+    view.rerender(<AuthorApp />);
+    await screen.findByText(/remote version changed/i);
+    expect(appMocks.getCourse).toHaveBeenCalledTimes(2);
+    expect(appMocks.getCourse.mock.calls[1]?.[0]).toBeInstanceOf(AbortSignal);
+    expect(appMocks.putCourse).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Keep my draft after review" }),
+    );
+    expect(screen.queryByLabelText("Remote conflict")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Path")).toHaveValue("lesson.md");
+    fireEvent.click(screen.getByRole("button", { name: "Save course" }));
+    await waitFor(() => expect(appMocks.putCourse).toHaveBeenCalledOnce());
+    expect(appMocks.putCourse).toHaveBeenCalledWith(
+      canonical,
+      '"reviewed"',
+      expect.any(AbortSignal),
+    );
+    expect(appMocks.validateCourse).toHaveBeenCalledTimes(2);
+    expect(appMocks.putCourse).toHaveBeenCalledTimes(1);
   });
 
   it("aborts the stale conflict latest GET and lets only fresh authoritative refetch create the conflict", async () => {
