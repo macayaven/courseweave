@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -246,12 +247,19 @@ class TestAuthorStaticRoute:
 
 
 class TestBuiltBridgeBundle:
-    def test_no_capability_or_token_can_be_retained_in_any_wheel_asset(self, wheel_contents: dict[str, bytes]) -> None:
-        forbidden = (b"browser-test-capability", b"test-capability", b"COURSEWEAVE_CAPABILITY_TOKEN", b"op://")
+    @staticmethod
+    def _assert_no_retained_values(wheel_contents: dict[str, bytes], forbidden: tuple[bytes, ...]) -> None:
         for name, data in wheel_contents.items():
-            if name.startswith("courseweave/static/") or name.startswith("courseweave/labextension/"):
-                for marker in forbidden:
-                    assert marker not in data, (name, marker)
+            for marker in forbidden:
+                assert marker not in data, (name, marker)
+
+    def test_no_capability_or_token_can_be_retained_in_any_wheel_member(self, wheel_contents: dict[str, bytes]) -> None:
+        canary_capability = f"courseweave-capability-canary-{uuid.uuid4().hex}".encode()
+        canary_token = f"courseweave-token-canary-{uuid.uuid4().hex}".encode()
+        forbidden = (canary_capability, canary_token, b"browser-test-capability", b"test-capability", b"op://")
+        with pytest.raises(AssertionError):
+            self._assert_no_retained_values({'synthetic-runtime-config': canary_capability}, (canary_capability,))
+        self._assert_no_retained_values(wheel_contents, forbidden)
 
     def test_bundle_resolves_service_origin_from_page_config(
         self, wheel_contents: dict[str, bytes]

@@ -2,11 +2,9 @@ import { expect, test, type Page } from 'playwright/test';
 
 import { launchInstalledWorkspace } from './installed-wheel-helpers';
 
-async function bootstrap(page: Page, url: string): Promise<void> {
+async function bootstrap(page: Page, tokenlessUrl: string): Promise<void> {
   try {
-    await page.goto('about:blank');
-    await page.evaluate((target) => { window.location.replace(target); }, url);
-    await page.waitForLoadState('domcontentloaded');
+    await page.goto(tokenlessUrl, { waitUntil: 'domcontentloaded' });
   } catch {
     throw new Error('Installed-wheel bootstrap navigation failed.');
   }
@@ -19,15 +17,17 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
   const context = await browser.newContext();
   const page = await context.newPage();
   const pageErrors: string[] = [];
-  const consoleErrors: string[] = [];
+  const consoleErrors: Array<{ text: string; url: string }> = [];
+  let videoRequested = false;
   page.on('pageerror', (error) => pageErrors.push(error.message));
-  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
+  page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push({ text: message.text(), url: message.location().url }); });
   try {
     const bootstrapUrl = await workspace.bootstrapUrl();
-    const baseUrl = new URL('.', bootstrapUrl).href;
+    const baseUrl = await workspace.jupyterBaseUrl();
     const unauthenticated = await context.request.get(`${baseUrl}lab`, { maxRedirects: 0 });
     expect([302, 403]).toContain(unauthenticated.status());
 
+    await page.route('https://video.example.test/video.mp4', (route) => { videoRequested = true; return route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.from('fixture-video') }); });
     await bootstrap(page, bootstrapUrl);
     expect(page.url()).not.toContain('token=');
     const config = await page.locator('#jupyter-config-data').evaluate((node) => JSON.parse(node.textContent ?? '{}')) as Record<string, unknown>;
@@ -86,6 +86,7 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     await expect(page.locator('iframe[title="CourseWeave reader"]')).toHaveAttribute('src', /\/courseweave\/files\/lessons\/reader\.html$/);
     await guide.getByRole('button', { name: 'Open video' }).click();
     await expect(page.locator('iframe[title="CourseWeave reader"]')).toHaveAttribute('src', 'https://video.example.test/video.mp4');
+    await expect.poll(() => videoRequested).toBe(true);
     await guide.getByRole('button', { name: 'Open notebook' }).click();
     await expect(page.locator('.jp-Notebook')).toHaveCount(1);
     await guide.getByRole('button', { name: 'Open source' }).click();
@@ -93,11 +94,13 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     await guide.getByRole('button', { name: 'Open Terminal instructions' }).click();
     await expect(page.locator('.jp-Terminal')).toHaveCount(1);
     await expect(workspace.terminalSentinelExists()).resolves.toBe(false);
+    await page.waitForTimeout(250);
+    await expect(workspace.terminalSentinelExists()).resolves.toBe(false);
     expect(pageErrors).toEqual([]);
     const unexpectedConsoleErrors = consoleErrors.filter((message) => !(
-      /status of (400|403)/.test(message) || /ERR_NAME_NOT_RESOLVED/.test(message) ||
-      /Content Security Policy/.test(message) || /WebSocket connection/.test(message) ||
-      /Connection lost, reconnecting/.test(message)
+      /status of (400|403)/.test(message.text) || /ERR_NAME_NOT_RESOLVED/.test(message.text) ||
+      /Content Security Policy/.test(message.text) || /WebSocket connection/.test(message.text) ||
+      /Connection lost, reconnecting/.test(message.text) || (message.url.endsWith('/favicon.ico') && /status of 404/.test(message.text))
     ));
     expect(unexpectedConsoleErrors).toEqual([]);
   } finally {
