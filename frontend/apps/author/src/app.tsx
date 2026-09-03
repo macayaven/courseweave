@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { type AuthorManifest } from "@courseweave/ui";
+import { type AuthorManifest, type Proposal, type ProviderStatus } from "@courseweave/ui";
 import { AuthorApiError, createAuthorClient, type CourseResponse } from "./api";
 import {
   createDraft,
@@ -27,6 +27,8 @@ import {
   type ValidationIssue,
 } from "./validation";
 import { useAuthorRuntime } from "./runtime";
+import { CurriculumThread } from "./curriculum-thread";
+import { ProposalReview } from "./proposal-review";
 
 type Client = ReturnType<typeof createAuthorClient>;
 type CheckState = {
@@ -223,12 +225,14 @@ function AuthorEditor({
   client,
   connected,
   connectionEpoch,
+  sourceId,
   onCourseSaved,
 }: {
   course: CourseResponse;
   client: Client;
   connected: boolean;
   connectionEpoch: number;
+  sourceId: string;
   onCourseSaved(course: CourseResponse): void;
 }) {
   const [state, setState] = useState<AuthorDocumentState>(() =>
@@ -245,6 +249,9 @@ function AuthorEditor({
     issues: [],
   });
   const [notice, setNotice] = useState("");
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [provider, setProvider] = useState<ProviderStatus>("unknown");
+  const [proposalSavePending, setProposalSavePending] = useState(false);
   const [remote, setRemote] = useState<SavedCourse | null>(null);
   const [reconnectCanonical, setReconnectCanonical] = useState<{
     generation: number;
@@ -267,6 +274,19 @@ function AuthorEditor({
     checks.current.structural?.abort();
     checks.current.runnable?.abort();
   }, [epoch]);
+  useEffect(() => {
+    if (!connected) return;
+    const getProposals = client.getProposals;
+    if (typeof getProposals !== "function") return;
+    const controller = new AbortController();
+    void Promise.resolve(getProposals(controller.signal))
+      .then((items) => {
+        if (!controller.signal.aborted && Array.isArray(items))
+          setProposals(items as Proposal[]);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [client, connected]);
   useEffect(() => {
     if (course.etag === baseline.etag) return;
     if (dirty) {
@@ -405,6 +425,14 @@ function AuthorEditor({
     onCourseSaved(next);
     setNotice("Saved exact canonical course bytes.");
   };
+  const refreshAuthorData = useCallback(async () => {
+    const [nextCourse, nextProposals] = await Promise.all([
+      client.getCourse(),
+      client.getProposals(),
+    ]);
+    setProposals(nextProposals as Proposal[]);
+    onCourseSaved(nextCourse);
+  }, [client, onCourseSaved]);
   const phase = selectedPhase(state);
   return (
     <>
@@ -453,7 +481,13 @@ function AuthorEditor({
         dirty={dirty}
         validate={(m, signal) => validate(m, "structural", signal)}
         put={(raw, tag, signal) =>
-          client.putCourse(raw, tag, signal).then(savedCourse)
+          {
+            setProposalSavePending(true);
+            return client
+              .putCourse(raw, tag, signal)
+              .then(savedCourse)
+              .finally(() => setProposalSavePending(false));
+          }
         }
         getLatest={(signal) => client.getCourse(signal).then(savedCourse)}
         onSaved={saved}
@@ -470,15 +504,39 @@ function AuthorEditor({
         connectionEpoch={connectionEpoch}
         onRemoteSaved={setRemote}
       />
-      <section aria-label="Curriculum teacher">
-        <h2>Curriculum teacher</h2>
-        <p>
-          Teacher provider unavailable. Editing and preview remain available.
-        </p>
-        <p role="status">
-          {dirty ? "Unsaved local draft." : "Draft matches the loaded course."}
-        </p>
-      </section>
+      <CurriculumThread
+        client={client}
+        sourceId={sourceId}
+        clean={!dirty && !proposalSavePending}
+        recovery={!connected}
+        onProvider={setProvider}
+        onProposal={() => undefined}
+        onRefresh={refreshAuthorData}
+      />
+      <ProposalReview
+        proposals={proposals}
+        savedManifest={baseline.manifest}
+        client={{
+          validateCourse: (manifest, signal) =>
+            client.validateCourse(manifest, "structural", signal),
+          editProposal: (id, body, signal) => client.editProposal(id, body, signal) as Promise<Proposal>,
+          acceptProposal: (id, body, signal) => client.acceptProposal(id, body, signal) as Promise<Proposal>,
+          rejectProposal: (id, body, signal) => client.rejectProposal(id, body, signal) as Promise<Proposal>,
+        }}
+        clean={!dirty}
+        recovery={!connected}
+        savePending={proposalSavePending}
+        onRefresh={refreshAuthorData}
+        onConflict={() => setNotice("Proposal changed; review the saved course before continuing.")}
+        onAcceptedCourse={() => setNotice("Accepted proposal refreshed from the saved course.")}
+      />
+      <p role="status">
+        {provider === "not_configured" || provider === "provider_error"
+          ? "Teacher provider unavailable. Editing and preview remain available."
+          : dirty
+            ? "Unsaved local draft."
+            : "Draft matches the loaded course."}
+      </p>
     </>
   );
 }
@@ -563,6 +621,7 @@ export function AuthorApp() {
         client={client.current}
         connected={connected}
         connectionEpoch={connectionEpoch.current}
+        sourceId={runtime.runtime?.sourceId ?? ""}
         onCourseSaved={setCourse}
       />
       {!connected ? (

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import socket
 from pathlib import Path
@@ -220,3 +221,120 @@ def test_validation_boundary_rejects_bad_auth_cors_and_large_body_without_state_
     assert (tmp_path / "courseweave.json").stat().st_mtime_ns == before["mtime"]
     assert store.get_state().model_dump(mode="json") == before["state"]
     assert store.list_proposals() == before["proposals"]
+
+
+def test_author_manifest_review_rejects_exact_bytes_then_edits_and_accepts_once(tmp_path: Path) -> None:
+    before = manifest_bytes(parse_manifest_data(manifest(), tmp_path))
+    (tmp_path / "courseweave.json").write_bytes(before)
+    store = CourseStore(tmp_path)
+    proposed = manifest()
+    proposed["title"] = "Teacher title"
+    pending = store.create_proposal(
+        {
+            "id": "author-review",
+            "type": "manifest_replace",
+            "origin": "teacher_suggested",
+            "summary": "Improve course title",
+            "target": "courseweave.json",
+            "payload": {"manifest": proposed},
+            "target_hash": hashlib.sha256(before).hexdigest(),
+        },
+        "seed-author-review",
+    )
+    app = client(tmp_path)
+
+    rejected = app.post(
+        f"/api/proposals/{pending.id}/reject",
+        headers={**AUTH, "Idempotency-Key": "reject-author-review"},
+        json={"expected_revision": pending.revision},
+    )
+    assert rejected.status_code == 200
+    assert (tmp_path / "courseweave.json").read_bytes() == before
+
+    second = store.create_proposal(
+        {
+            "id": "author-accept",
+            "type": "manifest_replace",
+            "origin": "teacher_suggested",
+            "summary": "Improve course title",
+            "target": "courseweave.json",
+            "payload": {"manifest": proposed},
+            "target_hash": hashlib.sha256(before).hexdigest(),
+        },
+        "seed-author-accept",
+    )
+    edited = manifest()
+    edited["title"] = "Author edited title"
+    update = app.post(
+        f"/api/proposals/{second.id}/edit",
+        headers={**AUTH, "Idempotency-Key": "edit-author-review"},
+        json={
+            "expected_revision": second.revision,
+            "request": {
+                "payload": {"manifest": edited},
+                "target_hash": hashlib.sha256(before).hexdigest(),
+            },
+        },
+    )
+    assert update.status_code == 200
+    revision = update.json()["revision"]
+    accepted = app.post(
+        f"/api/proposals/{second.id}/accept",
+        headers={**AUTH, "Idempotency-Key": "accept-author-review"},
+        json={"expected_revision": revision},
+    )
+    replay = app.post(
+        f"/api/proposals/{second.id}/accept",
+        headers={**AUTH, "Idempotency-Key": "accept-author-review"},
+        json={"expected_revision": revision},
+    )
+    assert accepted.status_code == replay.status_code == 200
+    assert accepted.json() == replay.json()
+    history = store.proposal_history(second.id)
+    assert [item.status for item in history] == ["superseded", "accepted"]
+    assert len([item for item in store.get_state().audit if item.proposal_id == second.id and item.status == "accepted"]) == 1
+    assert (tmp_path / "courseweave.json").read_bytes() == manifest_bytes(parse_manifest_data(edited, tmp_path))
+
+
+def test_author_proposal_accept_refuses_a_direct_save_that_changed_the_target(tmp_path: Path) -> None:
+    before = manifest_bytes(parse_manifest_data(manifest(), tmp_path))
+    (tmp_path / "courseweave.json").write_bytes(before)
+    store = CourseStore(tmp_path)
+    proposed = manifest()
+    proposed["title"] = "Stale proposal"
+    pending = store.create_proposal(
+        {
+            "id": "author-stale",
+            "type": "manifest_replace",
+            "origin": "teacher_suggested",
+            "summary": "Stale proposal",
+            "target": "courseweave.json",
+            "payload": {"manifest": proposed},
+            "target_hash": hashlib.sha256(before).hexdigest(),
+        },
+        "seed-author-stale",
+    )
+    app = client(tmp_path)
+    current = app.get("/api/course", headers=AUTH)
+    direct = manifest()
+    direct["title"] = "Direct author save"
+    saved = app.put(
+        "/api/course",
+        headers={
+            **AUTH,
+            "If-Match": current.headers["etag"],
+            "Idempotency-Key": "direct-author-save",
+            "X-CourseWeave-Origin": "student_requested",
+        },
+        content=manifest_bytes(parse_manifest_data(direct, tmp_path)),
+    )
+    assert saved.status_code == 200
+
+    stale = app.post(
+        f"/api/proposals/{pending.id}/accept",
+        headers={**AUTH, "Idempotency-Key": "accept-stale-author-review"},
+        json={"expected_revision": pending.revision},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["code"] == "target_changed"
+    assert (tmp_path / "courseweave.json").read_bytes() == manifest_bytes(parse_manifest_data(direct, tmp_path))
