@@ -4,8 +4,9 @@ import { createServer, type Socket } from 'node:net';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { kill as signalProcess } from 'node:process';
 import { fileURLToPath } from 'node:url';
+
+import { OwnedProcessTracker, stopOwnedProcess } from './process-cleanup';
 
 type LaunchMode = 'learn' | 'author';
 
@@ -64,6 +65,7 @@ async function run(command: string, args: string[], options: { cwd?: string; env
   const child = spawn(command, args, {
     cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'], detached: true
   });
+  const processTracker = child.pid === undefined ? undefined : new OwnedProcessTracker(child.pid);
   const capture = (chunk: Buffer) => {
     if (output.length < OUTPUT_LIMIT) output += chunk.toString().slice(0, OUTPUT_LIMIT - output.length);
   };
@@ -83,7 +85,7 @@ async function run(command: string, args: string[], options: { cwd?: string; env
       child.once('exit', (code) => finish(code === 0 ? undefined : new Error(`Installed-wheel setup command failed: ${command}`)));
     });
   } catch (error) {
-    await stop(child);
+    await stopOwnedProcess(child, processTracker);
     throw error;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
@@ -149,7 +151,10 @@ async function bootstrapSocket(path: string): Promise<{ secret: Promise<string>;
   };
 }
 
-async function tokenlessBootstrap(secret: Promise<string>): Promise<{ url: string; jupyterToken(): string | null; close(): Promise<void> }> {
+async function tokenlessBootstrap(
+  secret: Promise<string>,
+  onBootstrap?: () => void
+): Promise<{ url: string; jupyterToken(): string | null; close(): Promise<void> }> {
   let server: HttpServer | null = null;
   let jupyterToken: string | null = null;
   let used = false;
@@ -177,6 +182,7 @@ async function tokenlessBootstrap(secret: Promise<string>): Promise<{ url: strin
         fetches.add(controller);
         fetchTimer = setTimeout(() => controller?.abort(), 10_000);
         const upstream = await fetch(target, { redirect: 'manual', signal: controller.signal });
+        onBootstrap?.();
         const destination = new URL(target); destination.search = ''; destination.hash = '';
         const cookies = typeof upstream.headers.getSetCookie === 'function' ? upstream.headers.getSetCookie() : [];
         await upstream.body?.cancel();
@@ -250,97 +256,6 @@ function assertNoNode(venv: string): void {
   if (result.error?.code !== 'ENOENT' || result.status !== null) throw new Error('The installed Jupyter child PATH resolves Node.');
 }
 
-function processGroupAlive(processGroup: number): boolean {
-  try { signalProcess(-processGroup, 0); return true; }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw new Error(`Owned CourseWeave process-group check failed (${(error as NodeJS.ErrnoException).code ?? 'unknown'}).`);
-  }
-}
-
-type OwnedProcess = { pid: number; parentPid: number; processGroup: number };
-
-function processAlive(pid: number): boolean {
-  try { signalProcess(pid, 0); return true; }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw new Error(`Owned CourseWeave process check failed (${(error as NodeJS.ErrnoException).code ?? 'unknown'}).`);
-  }
-}
-
-function ownedProcessTree(rootPid: number): OwnedProcess[] {
-  const result = spawnSync('ps', ['-axo', 'pid=,ppid=,pgid='], { encoding: 'utf8' });
-  if (result.status !== 0 || result.error !== undefined) throw new Error('Could not inspect the owned CourseWeave process tree.');
-  const rows = result.stdout.split('\n').flatMap((line) => {
-    const fields = line.trim().split(/\s+/).map(Number);
-    return fields.length === 3 && fields.every(Number.isSafeInteger)
-      ? [{ pid: fields[0]!, parentPid: fields[1]!, processGroup: fields[2]! }]
-      : [];
-  });
-  const selected = new Set([rootPid]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const row of rows) {
-      if (!selected.has(row.pid) && selected.has(row.parentPid)) {
-        selected.add(row.pid);
-        changed = true;
-      }
-    }
-  }
-  return rows.filter((row) => selected.has(row.pid));
-}
-
-async function waitForProcessExit(processIds: readonly number[], timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (processIds.some(processAlive) && Date.now() < deadline) {
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-  }
-  return !processIds.some(processAlive);
-}
-
-function signalOwnedProcesses(processes: readonly OwnedProcess[], signal: NodeJS.Signals): void {
-  for (const { pid } of processes) {
-    try { signalProcess(pid, signal); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error('Owned CourseWeave process signal failed.');
-    }
-  }
-}
-
-async function waitForProcessGroupExit(processGroup: number, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (processGroupAlive(processGroup) && Date.now() < deadline) {
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
-  }
-  return !processGroupAlive(processGroup);
-}
-
-async function stop(child: ChildProcess): Promise<number[]> {
-  if (child.pid === undefined) return [];
-  const processGroup = child.pid;
-  const ownedProcesses = ownedProcessTree(child.pid);
-  const ownedProcessIds = ownedProcesses.map(({ pid }) => pid);
-  const signalOwnedGroup = (signal: NodeJS.Signals) => {
-    try { signalProcess(-processGroup, signal); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error('Owned CourseWeave supervisor signal failed.');
-    }
-  };
-  if (!processAlive(child.pid)) return ownedProcessIds;
-  child.kill('SIGTERM');
-  if (!(await waitForProcessExit(ownedProcessIds, 10_000))) {
-    signalOwnedProcesses(ownedProcesses, 'SIGTERM');
-  }
-  if (!(await waitForProcessExit(ownedProcessIds, 5_000))) {
-    signalOwnedGroup('SIGKILL');
-    signalOwnedProcesses(ownedProcesses, 'SIGKILL');
-    if (!(await waitForProcessExit(ownedProcessIds, 10_000))) throw new Error('Owned CourseWeave process tree survived bounded cleanup.');
-  }
-  if (processGroupAlive(processGroup) && !(await waitForProcessGroupExit(processGroup, 1_000))) throw new Error('Owned CourseWeave process group survived bounded cleanup.');
-  return ownedProcessIds;
-}
-
 export async function launchInstalledWorkspace(mode: LaunchMode, options: { emptyCourse?: boolean } = {}) {
   const owned = await mkdtemp(join(tmpdir(), 'courseweave-installed-wheel-'));
   const courseRoot = join(owned, 'course');
@@ -354,7 +269,7 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
   let bootstrapProxy: Awaited<ReturnType<typeof tokenlessBootstrap>> | null = null;
   let setupOutput = '';
   let launchOutput = '';
-  let ownedProcessIds: number[] = [];
+  let launchTracker: OwnedProcessTracker | undefined;
   try {
     await mkdir(courseRoot, { recursive: true });
     await mkdir(join(owned, 'home'));
@@ -384,6 +299,8 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
     const port = await availablePort();
     launchProcess = spawn(join(venv, 'bin', 'courseweave'), [mode === 'learn' ? 'launch' : 'author', '--course-root', courseRoot, '--port', String(port)], { env: environment, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     const child = launchProcess;
+    if (child.pid === undefined) throw new Error('Installed CourseWeave supervisor did not start.');
+    launchTracker = new OwnedProcessTracker(child.pid);
     const capture = (chunk: Buffer) => {
       if (launchOutput.length < OUTPUT_LIMIT) launchOutput += chunk.toString().slice(0, OUTPUT_LIMIT - launchOutput.length);
     };
@@ -391,11 +308,11 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
     child.stderr?.on('data', capture);
     child.once('error', () => { void handoff?.close().catch(() => undefined); });
     child.once('exit', () => { void handoff?.close().catch(() => undefined); });
-    bootstrapProxy = await tokenlessBootstrap(handoff.secret);
+    bootstrapProxy = await tokenlessBootstrap(handoff.secret, () => launchTracker?.refresh());
     let closePromise: Promise<void> | null = null;
     const close = () => {
       closePromise ??= (async () => {
-        const stopPromise = stop(child).then((processIds) => { ownedProcessIds = processIds; });
+        const stopPromise = stopOwnedProcess(child, launchTracker, { failOnForcedTermination: true });
         const results = await Promise.allSettled([stopPromise, handoff?.close(), bootstrapProxy?.close()]);
         const stopResult = results[0];
         if (stopResult.status === 'rejected') {
@@ -430,6 +347,7 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
       courseManifestExists: async () => access(join(courseRoot, 'courseweave.json')).then(() => true, () => false),
       coursePrivateStateExists: async () => access(join(courseRoot, '.courseweave')).then(() => true, () => false),
       terminalSentinelExists: async () => access(join(courseRoot, 'terminal-argv-must-not-run')).then(() => true, () => false),
+      trackOwnedProcesses: () => { launchTracker?.refresh(); },
       courseFiles: async () => {
         const files: string[] = [];
         for (const name of await readdir(courseRoot, { recursive: true })) {
@@ -438,14 +356,13 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
         return files.sort();
       },
       cleanupState: async () => ({
-        processGroupAlive: child.pid === undefined ? false : processGroupAlive(child.pid),
-        ownedProcessesAlive: ownedProcessIds.some(processAlive),
+        ownedProcessesAlive: (launchTracker?.live().length ?? 0) > 0,
         ownedRootExists: await access(owned).then(() => true, () => false)
       }),
       close,
     };
   } catch (error) {
-    const results = await Promise.allSettled([launchProcess === null ? Promise.resolve() : stop(launchProcess), handoff?.close(), bootstrapProxy?.close()]);
+    const results = await Promise.allSettled([launchProcess === null ? Promise.resolve() : stopOwnedProcess(launchProcess, launchTracker), handoff?.close(), bootstrapProxy?.close()]);
     if (results[0]?.status === 'fulfilled') await rm(owned, { recursive: true, force: true });
     if (results[0]?.status === 'rejected') throw new Error('Owned CourseWeave supervisor cleanup failed.');
     throw error;

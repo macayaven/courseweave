@@ -1,6 +1,11 @@
 import { expect, test, type Page } from 'playwright/test';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { failingBootstrapProxy, launchInstalledWorkspace } from './installed-wheel-helpers';
+import { OwnedProcessTracker, stopOwnedProcess } from './process-cleanup';
 
 const TINY_MP4 = Buffer.from(
   'AAAAJGZ0eXBpc29tAAACAGlzb21pc282aXNvMmF2YzFtcDQxAAAC7W1vb3YAAABsbXZoZAAAAAAAAAAAAAAAAAAAA+gAAAAAAAEAAAEAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAHvdHJhawAAAFx0a2hkAAAAAwAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAQAAAAEAAAAAABi21kaWEAAAAgbWRoZAAAAAAAAAAAAAAAAAAAMgAAAAAAVcQAAAAAAC1oZGxyAAAAAAAAAAB2aWRlAAAAAAAAAAAAAAAAVmlkZW9IYW5kbGVyAAAAATZtaW5mAAAAFHZtaGQAAAABAAAAAAAAAAAAAAAkZGluZgAAABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAAD2c3RibAAAAKpzdHNkAAAAAAAAAAEAAACaYXZjMQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAQABAASAAAAEgAAAAAAAAAARVMYXZjNjIuMjguMTAwIGxpYngyNjQAAAAAAAAAAAAAABj//wAAADRhdmNDAWQACv/hABdnZAAKrNlewEQAAAMABAAAAwDIPEiWWAEABmjr48siwP34+AAAAAAQcGFzcAAAAAEAAAABAAAAEHN0dHMAAAAAAAAAAAAAABBzdHNjAAAAAAAAAAAAAAAUc3RzegAAAAAAAAAAAAAAAAAAABBzdGNvAAAAAAAAAAAAAAAobXZleAAAACB0cmV4AAAAAAAAAAEAAAABAAAAAAAAAAAAAAAAAAAAYnVkdGEAAABabWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAtaWxzdAAAACWpdG9vAAAAHWRhdGEAAAABAAAAAExhdmY2Mi4xMi4xMDAAAACIbW9vZgAAABBtZmhkAAAAAAAAAAEAAABwdHJhZgAAACR0ZmhkAAAAOQAAAAEAAAAAAAADEQAAAgAAAALFAQEAAAAAABR0ZmR0AQAAAAAAAAAAAAAAAAAAMHRydW4AAAoFAAAAAwAAAJACAAAAAAACxQAABAAAAAAMAAAGAAAAAAwAAAIAAAAC5W1kYXQAAAKuBgX//6rcRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY1IHIzMjIyIGIzNTYwNWEgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDI1IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MSByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgzOjB4MTEzIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0xIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS0yIHRocmVhZHM9MSBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRzPTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29uc3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTMgYl9weXJhbWlkPTIgYl9hZGFwdD0xIGJfYmlhcz0wIGRpcmVjdD0xIHdlaWdodGI9MSBvcGVuX2dvcD0wIHdlaWdodHA9MiBrZXlpbnQ9MjUwIGtleWludF9taW49MjUgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAPZYiEADP//vbsvgU2FMjBAAAACEGaImxCv/7AAAAACAGeQXkK/8SBAAAAQ21mcmEAAAArdGZyYQEAAAAAAAABAAAAAAAAAAEAAAAAAAAEAAAAAAAAAAMRAQEBAAAAEG1mcm8AAAAAAAAAQw==',
@@ -50,6 +55,46 @@ test('a failed bootstrap keeps its one-time token out of navigation errors', asy
   }
 });
 
+test('cleanup fails closed when a separately sessioned descendant outlives its supervisor', async () => {
+  const owned = await mkdtemp(join(tmpdir(), 'courseweave-cleanup-proof-'));
+  const ready = join(owned, 'ready');
+  const release = join(owned, 'release');
+  let supervisor: ChildProcess | undefined;
+  let tracker: OwnedProcessTracker | undefined;
+  let descendantPid = 0;
+  try {
+    const script = `
+      const { existsSync, writeFileSync } = require('node:fs');
+      const { spawn } = require('node:child_process');
+      const descendant = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 2000)'], { detached: true, stdio: 'ignore' });
+      descendant.unref();
+      writeFileSync(process.argv[1], String(descendant.pid));
+      const timer = setInterval(() => {
+        if (existsSync(process.argv[2])) { clearInterval(timer); process.exit(0); }
+      }, 10);
+    `;
+    supervisor = spawn(process.execPath, ['-e', script, ready, release], { detached: true, stdio: 'ignore' });
+    if (supervisor.pid === undefined) throw new Error('Cleanup proof supervisor did not start.');
+    tracker = new OwnedProcessTracker(supervisor.pid);
+    await expect.poll(async () => Number(await readFile(ready, 'utf8').catch(() => '0'))).toBeGreaterThan(0);
+    descendantPid = Number(await readFile(ready, 'utf8'));
+    expect(tracker.refresh().some((process) => process.pid === descendantPid)).toBe(true);
+    const supervisorExit = new Promise<void>((resolveExit) => supervisor!.once('exit', () => resolveExit()));
+    await writeFile(release, 'exit\n', 'utf8');
+    await supervisorExit;
+    expect(tracker.live().some((process) => process.pid === descendantPid)).toBe(true);
+    await expect(stopOwnedProcess(supervisor, tracker)).rejects.toThrow(
+      'CourseWeave supervisor exited before its owned descendants.'
+    );
+    await expect.poll(() => tracker!.live(), { timeout: 5_000 }).toEqual([]);
+  } finally {
+    if (supervisor !== undefined && tracker !== undefined) {
+      await stopOwnedProcess(supervisor, tracker).catch(() => undefined);
+    }
+    await rm(owned, { recursive: true, force: true });
+  }
+});
+
 test('fresh installed wheel opens an authenticated Learn workspace without Node in its runtime PATH', async ({ browser, request }, testInfo) => {
   const workspace = await launchInstalledWorkspace('learn');
   const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
@@ -57,12 +102,27 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
   const pageErrors: string[] = [];
   const consoleMessages: Array<{ type: string; text: string; url: string }> = [];
   const publishedContexts: Array<Record<string, unknown>> = [];
+  const contextResponses: Array<{ method: string; status: number; url: string; sourceId: string | null; order: number }> = [];
+  let responseOrder = 0;
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('console', (message) => consoleMessages.push({ type: message.type(), text: message.text(), url: message.location().url }));
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().endsWith('/courseweave/context')) {
       try { publishedContexts.push(request.postDataJSON() as Record<string, unknown>); } catch { /* asserted by the missing-XSRF probe */ }
     }
+  });
+  page.on('response', (response) => {
+    const request = response.request();
+    const url = new URL(response.url());
+    if (!url.pathname.endsWith('/context')) return;
+    let sourceId = url.searchParams.get('source_id');
+    if (request.method() === 'POST') {
+      try {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        sourceId = typeof body.source_id === 'string' ? body.source_id : null;
+      } catch { sourceId = null; }
+    }
+    contextResponses.push({ method: request.method(), status: response.status(), url: response.url(), sourceId, order: responseOrder++ });
   });
   try {
     const bootstrapUrl = await workspace.bootstrapUrl();
@@ -147,7 +207,7 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     await expect.poll(() => page.frames().some((frame) => /\/courseweave\/files\/lessons\/reader\.html$/.test(frame.url()))).toBe(true);
     const htmlFrame = page.frames().find((frame) => /\/courseweave\/files\/lessons\/reader\.html$/.test(frame.url()));
     await htmlFrame!.evaluate(() => document.body.removeAttribute('data-jupyter-api-token'));
-    expect((await htmlFrame!.locator('body').innerText()).includes('Reader fixture')).toBe(true);
+    await expect(htmlFrame!.locator('body')).toContainText('Reader fixture');
     await guide.getByRole('button', { name: 'Open video' }).click();
     await expect(reader).toHaveAttribute('src', 'https://video.example.test/video.mp4');
     await expect(reader).toHaveAttribute('sandbox', '');
@@ -162,6 +222,7 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     await expect(page.locator('.jp-CodeMirrorEditor')).toHaveCount(1);
     await guide.getByRole('button', { name: 'Open Terminal instructions' }).click({ timeout: 10_000 });
     await expect(page.locator('.jp-Terminal')).toHaveCount(1);
+    workspace.trackOwnedProcesses();
     const terminalInstructions = page.locator('[data-courseweave-terminal-instructions]');
     const expectedInstructions = JSON.stringify({ cwd: '.', argv: ['/usr/bin/touch', 'terminal-argv-must-not-run'] }, null, 2);
     await expect(terminalInstructions).toContainText(expectedInstructions);
@@ -177,12 +238,31 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     expect(pageErrors).toEqual([]);
     const expectedConsoleError = (message: { type: string; text: string; url: string }) => {
       if (message.type !== 'error') return false;
-      const path = (() => { try { return new URL(message.url).pathname; } catch { return ''; } })();
+      let parsed: URL | null = null;
+      try { parsed = new URL(message.url); } catch { /* not an expected browser error */ }
+      const path = parsed?.pathname ?? '';
+      const sourceId = parsed?.searchParams.get('source_id') ?? null;
+      const matchingContext404s = contextResponses.filter((response) =>
+        response.method === 'GET' && response.status === 404 && response.url === parsed?.href
+      );
+      const firstPublishedContext = contextResponses.find((response) =>
+        response.method === 'POST' && response.status === 200 && response.sourceId === sourceId
+      );
+      const startupContext404 = parsed !== null
+        && parsed.origin === config.courseweaveServiceUrl
+        && path === '/api/context'
+        && [...parsed.searchParams.keys()].join(',') === 'source_id'
+        && publishedContexts.some((body) => body.source_id === sourceId)
+        && matchingContext404s.length > 0
+        && firstPublishedContext !== undefined
+        && matchingContext404s.every((missing) => missing.order < firstPublishedContext.order)
+        && message.text === 'Failed to load resource: the server responded with a status of 404 (Not Found)';
       return ((/status of (400|403)/.test(message.text) && [
         '/courseweave/courseweave/runtime', '/courseweave/courseweave/course',
         '/courseweave/courseweave/context'
       ].includes(path))
-        || (/status of 404/.test(message.text) && path.endsWith('/favicon.ico')));
+        || (/status of 404/.test(message.text) && path.endsWith('/favicon.ico'))
+        || startupContext404);
     };
     const unexpectedConsoleErrors = consoleMessages.filter((message) => message.type === 'error' && !expectedConsoleError(message));
     expect(unexpectedConsoleErrors).toEqual([]);
@@ -198,7 +278,7 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
   } finally {
     const cleanup = await Promise.allSettled([context.close(), workspace.close()]);
     if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;
-    await expect(workspace.cleanupState()).resolves.toEqual({ processGroupAlive: false, ownedProcessesAlive: false, ownedRootExists: false });
+    await expect(workspace.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
   }
 });
 
@@ -239,6 +319,6 @@ test('fresh installed wheel opens Author without materializing an empty course b
   } finally {
     const cleanup = await Promise.allSettled([page.close(), workspace.close()]);
     if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;
-    await expect(workspace.cleanupState()).resolves.toEqual({ processGroupAlive: false, ownedProcessesAlive: false, ownedRootExists: false });
+    await expect(workspace.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
   }
 });
