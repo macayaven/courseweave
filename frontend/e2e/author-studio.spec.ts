@@ -338,6 +338,7 @@ test("denies a duplicate proposal validation after its one expectation is consum
   const api = proposalFixture(manifest);
   expectValidationRequest(api, "structural", manifest);
   await mountAuthor(page, api);
+  await expectValidationCompletion(api);
   expect(api.validationRequests).toEqual([{ manifest, mode: "structural" }]);
 
   const outcome = await page.evaluate(async (body) => {
