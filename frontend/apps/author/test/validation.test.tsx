@@ -652,4 +652,127 @@ describe("Author validation presentation", () => {
       pointerToControlId("/modules/1/phases/0/surfaces/0/path", "issue"),
     );
   });
+  it("resolves an issue against an imported current tree rather than the initial draft", async () => {
+    const initial: AuthorManifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Course",
+      description: "",
+      entry_module_id: "one",
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [
+        {
+          id: "one",
+          title: "One",
+          description: "",
+          phases: [
+            {
+              id: "phase",
+              title: "Phase",
+              kind: "read",
+              teacher_mode: "reading_companion",
+              completion: { type: "manual" },
+              capabilities: {
+                chat: false,
+                hint_level: "none",
+                share_selection: false,
+                share_cell: false,
+                share_output: false,
+                create_profile_proposal: false,
+                create_course_proposal: false,
+                create_workspace_proposal: false,
+              },
+              surfaces: [
+                {
+                  id: "one",
+                  type: "markdown",
+                  role: "primary",
+                  path: "one.md",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const imported: AuthorManifest = {
+      ...initial,
+      modules: [
+        ...initial.modules,
+        {
+          ...initial.modules[0]!,
+          id: "two",
+          title: "Two",
+          phases: [
+            {
+              ...initial.modules[0]!.phases[0]!,
+              surfaces: [
+                {
+                  id: "new",
+                  type: "markdown",
+                  role: "primary",
+                  path: "new.md",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    appMocks.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: appMocks.retry,
+    });
+    appMocks.getCourse.mockResolvedValue({
+      manifest: initial,
+      raw: "{}",
+      etag: '"etag"',
+    });
+    appMocks.validateCourse
+      .mockResolvedValueOnce({ manifest: imported, formatted_json: "{}\n" })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("invalid"), {
+          details: {
+            issues: [
+              {
+                path: "/modules/1/phases/0/surfaces/0/path",
+                code: "missing_artifact",
+                message: "Imported path.",
+              },
+            ],
+          },
+        }),
+      );
+    render(<AuthorApp />);
+    fireEvent.change(await screen.findByLabelText("Import course file"), {
+      target: { files: [new File([JSON.stringify(imported)], "import.json")] },
+    });
+    await screen.findByText(/Imported local draft is ready/i);
+    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
+    await screen.findByText("Imported path.");
+    fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
+    const control = await screen.findByLabelText("Path");
+    expect(control).toHaveValue("new.md");
+    expect(control).toHaveFocus();
+    expect(control).toHaveAttribute(
+      "id",
+      pointerToControlId("/modules/1/phases/0/surfaces/0/path"),
+    );
+    expect(control).toHaveAttribute(
+      "aria-describedby",
+      pointerToControlId("/modules/1/phases/0/surfaces/0/path", "issue"),
+    );
+  });
 });
