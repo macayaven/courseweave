@@ -146,6 +146,13 @@ describe('SurfaceReader', () => {
     expect(reader.getAttribute('sandbox')).not.toContain('allow-top-navigation');
   });
 
+  it('does not duplicate a surface already owned by the trusted parent reader', () => {
+    render(<SurfaceReader surface={htmlSurface} htmlSource="https://lab.test/files/lesson.html" serviceOrigin="https://lab.test" parentOwnsReader />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Opened in the CourseWeave main-area reader.');
+    expect(document.querySelector('iframe')).toBeNull();
+  });
+
   it('does not request an iframe for a missing, mismatched, or unsupported local source', () => {
     const { rerender } = render(<SurfaceReader surface={htmlSurface} htmlSource={null} serviceOrigin="https://courseweave.test" />);
     expect(screen.getByRole('status')).toHaveTextContent('This course surface is unavailable.');

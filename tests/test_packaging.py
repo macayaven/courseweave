@@ -142,6 +142,10 @@ class TestWheelContents:
         index = wheel_contents["courseweave/static/learn/index.html"].decode()
         referenced = re.findall(r"/learn/assets/([^\"']+\.(?:js|css))", index)
         assert referenced
+        assert all(
+            re.fullmatch(r"index-[A-Za-z0-9_-]{8,}\.(?:js|css)", asset)
+            for asset in referenced
+        )
         for asset in referenced:
             assert f"courseweave/static/learn/assets/{asset}" in wheel_contents
         actual = sorted(name.rsplit("/", 1)[1] for name in wheel_contents if name.startswith("courseweave/static/learn/assets/"))
@@ -159,6 +163,9 @@ class TestWheelContents:
                 r"/author/assets/([A-Za-z0-9._-]+\.(?:js|css))", reference
             )
             assert match is not None, reference
+            assert re.fullmatch(
+                r"index-[A-Za-z0-9_-]{8,}\.(?:js|css)", match.group(1)
+            )
             assert (
                 f"courseweave/static/author/assets/{match.group(1)}" in wheel_contents
             )
@@ -211,7 +218,12 @@ class TestAuthorStaticRoute:
     def test_wheel_contains_federated_entry(
         self, wheel_contents: dict[str, bytes]
     ) -> None:
-        assert any(REMOTE_ENTRY_RE.fullmatch(name) for name in wheel_contents)
+        entries = [name for name in wheel_contents if REMOTE_ENTRY_RE.fullmatch(name)]
+        assert len(entries) == 1, entries
+        metadata = json.loads(
+            wheel_contents["courseweave/labextension/package.json"]
+        )
+        assert entries[0].endswith(metadata["jupyterlab"]["_build"]["load"])
 
     def test_wheel_contains_labextension_schema(
         self, wheel_contents: dict[str, bytes]

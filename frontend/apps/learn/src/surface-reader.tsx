@@ -24,7 +24,10 @@ function trustedVideoSource(value: string | undefined): string | null {
   }
 }
 
-export function SurfaceReader({ surface, htmlSource, serviceOrigin }: { surface: CourseSurface | null; htmlSource?: string | null; serviceOrigin: string }) {
+export function SurfaceReader({ surface, htmlSource, serviceOrigin, parentOwnsReader = false }: { surface: CourseSurface | null; htmlSource?: string | null; serviceOrigin: string; parentOwnsReader?: boolean }) {
+  if (parentOwnsReader && (surface?.type === 'html' || surface?.type === 'video')) {
+    return <p role="status">Opened in the CourseWeave main-area reader.</p>;
+  }
   if (surface?.type === 'html') {
     const source = trustedHtmlSource(htmlSource, serviceOrigin);
     return source === null ? unavailable() : <iframe className="cw-surface-reader__media" title={surface.label ?? surface.id} src={source} sandbox="allow-scripts" referrerPolicy="no-referrer" />;

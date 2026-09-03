@@ -301,6 +301,20 @@ class ReaderWidget extends Widget {
     this.title.label = 'Course reader';
     this.title.closable = true;
   }
+
+  navigate(source: string, localHtml: boolean): void {
+    // Jupyter rejects an opaque-origin navigation to its authenticated /files
+    // handler. Local course HTML therefore keeps its Jupyter origin but cannot
+    // execute script; remote video remains an opaque scripted media document.
+    this.iframe.setAttribute(
+      'sandbox',
+      localHtml
+        ? 'allow-same-origin allow-forms allow-presentation'
+        : 'allow-scripts allow-forms allow-presentation'
+    );
+    this.iframe.referrerPolicy = localHtml ? 'origin' : 'no-referrer';
+    this.iframe.src = source;
+  }
 }
 
 class IframeWidget extends Widget {
@@ -457,7 +471,7 @@ export class CourseSurfaceFactory {
         this.reader = new ReaderWidget();
         this.options.shell.add(this.reader, 'main', { type: 'CourseWeave' });
       }
-      this.reader.iframe.src = source;
+      this.reader.navigate(source, surface.type === 'html');
       this.metadata.set(this.reader, { activePath: surface.type === 'html' ? surface.path ?? null : null, surfaceKind: surface.type, terminalSurfaceId: null, explicitModuleId: coordinate.moduleId, explicitPhaseId: coordinate.phaseId });
       this.activate(this.reader);
       return { htmlSource: source, jupyterBaseUrl: this.jupyterBaseUrl, terminalSurfaceId: null };

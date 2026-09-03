@@ -37,6 +37,7 @@
   "jupyterlab": {
     "extension": true,
     "schemaDir": "schema",
+    "webpackConfig": "webpack.config.cjs",
     "outputDir": "../../../src/courseweave/labextension"
   }
 }

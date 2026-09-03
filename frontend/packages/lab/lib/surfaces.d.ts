@@ -64,6 +64,7 @@ interface CourseSurfaceFactoryOptions {
     jupyterOrigin: string;
     baseUrl: string;
     beforeAuthorAttach?: (widget: Widget, iframe: HTMLIFrameElement) => void;
+    writeClipboard?: (text: string) => Promise<void>;
 }
 export interface SurfaceOpenResult {
     htmlSource: string | null;
@@ -100,6 +101,7 @@ export declare class CourseSurfaceFactory {
     private dashboard;
     private author;
     private readonly terminals;
+    private readonly terminalFlights;
     private readonly metadata;
     private readonly jupyterBaseUrl;
     constructor(options: CourseSurfaceFactoryOptions);
@@ -107,6 +109,7 @@ export declare class CourseSurfaceFactory {
     private lookup;
     private activate;
     private nativeDocument;
+    private createTerminal;
     open(coordinate: SurfaceCoordinate): Promise<SurfaceOpenResult>;
     openDashboard(): Widget;
     openAuthor(): Widget;

@@ -37,9 +37,10 @@
   "jupyterlab": {
     "extension": true,
     "schemaDir": "schema",
+    "webpackConfig": "webpack.config.cjs",
     "outputDir": "../../../src/courseweave/labextension",
     "_build": {
-      "load": "static/remoteEntry.e60a6437da0f4936.js",
+      "load": "static/remoteEntry.8932641eb1d91f29.js",
       "extension": "./extension"
     }
   }

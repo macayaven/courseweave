@@ -267,13 +267,17 @@ describe('CourseSurfaceFactory', () => {
     expect(html.htmlSource).toBe('https://lab.test/base/files/lessons/a%20b.html');
     expect(html.jupyterBaseUrl).toBe('https://lab.test/base/');
     expect(iframe.src).toBe(html.htmlSource);
-    expect(iframe.referrerPolicy).toBe('no-referrer');
-    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-presentation');
+    expect(iframe.referrerPolicy).toBe('origin');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-same-origin allow-forms allow-presentation');
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-scripts');
 
     const video = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'video' });
     expect(video.htmlSource).toBe('https://video.test/watch?v=1');
     expect(video.jupyterBaseUrl).toBe('https://lab.test/base/');
     expect(iframe.src).toBe(video.htmlSource);
+    expect(iframe.referrerPolicy).toBe('no-referrer');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-forms allow-presentation');
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin');
     expect(shell.add).toHaveBeenCalledOnce();
   });
 
