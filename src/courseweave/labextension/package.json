@@ -11,6 +11,7 @@
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "scripts": {
+    "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -b .",
     "build:lib": "tsc -b .",
     "build:labextension": "uv run --frozen jupyter-builder build .",
@@ -19,19 +20,26 @@
   "dependencies": {
     "@jupyterlab/application": "~4.6.3",
     "@jupyterlab/coreutils": "~6.6.3",
+    "@jupyterlab/docmanager": "~4.6.3",
+    "@jupyterlab/fileeditor": "~4.6.3",
+    "@jupyterlab/notebook": "~4.6.3",
+    "@jupyterlab/services": "~7.6.3",
     "@jupyterlab/settingregistry": "~4.6.3",
+    "@jupyterlab/terminal": "~4.6.3",
     "@lumino/widgets": "~2.8.0"
   },
   "devDependencies": {
     "@jupyter/builder": "~1.2.2",
-    "@jupyterlab/core-meta": "~4.6.3"
+    "@jupyterlab/core-meta": "~4.6.3",
+    "jsdom": "26.1.0",
+    "vitest": "4.1.11"
   },
   "jupyterlab": {
     "extension": true,
     "schemaDir": "schema",
     "outputDir": "../../../src/courseweave/labextension",
     "_build": {
-      "load": "static/remoteEntry.14e44d43d5da6619.js",
+      "load": "static/remoteEntry.e60a6437da0f4936.js",
       "extension": "./extension"
     }
   }

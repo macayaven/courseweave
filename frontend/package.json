@@ -13,6 +13,7 @@
     "test": "pnpm --filter @courseweave/lab test && pnpm --filter @courseweave/learn test && pnpm --filter @courseweave/author test",
     "build": "pnpm --filter @courseweave/lab run build && pnpm --filter @courseweave/learn run build && pnpm --filter @courseweave/author run build",
     "test:e2e": "pnpm exec playwright test --config playwright.config.ts",
+    "test:e2e:installed-wheel": "COURSEWEAVE_INSTALLED_WHEEL=1 pnpm exec playwright test --config playwright.config.ts",
     "test:e2e:author": "pnpm exec playwright test --config playwright.author.config.ts"
   },
   "devDependencies": {

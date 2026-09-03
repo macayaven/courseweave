@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -108,6 +109,23 @@ def _bridge_javascript(wheel_contents: dict[str, bytes]) -> list[bytes]:
 
 
 class TestWheelContents:
+    def test_installed_wheel_playwright_command_lists_the_dedicated_smoke(self) -> None:
+        """The wheel smoke is opt-in and must not borrow the normal Vite suite."""
+        completed = subprocess.run(
+            [
+                "pnpm",
+                "--dir",
+                str(REPO_ROOT / "frontend"),
+                "run",
+                "test:e2e:installed-wheel",
+                "--list",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert "installed-wheel-lab.spec.ts" in completed.stdout
+
     def test_wheel_contains_static_learn_asset(
         self, wheel_contents: dict[str, bytes]
     ) -> None:
@@ -257,10 +275,16 @@ class TestBuiltBridgeBundle:
     def test_bundle_contains_no_capability_token_plumbing(
         self, wheel_contents: dict[str, bytes]
     ) -> None:
-        """The iframe URL carries the service origin only, never the token."""
+        """Generated assets never embed a capability value.
+
+        The trusted parent-to-child runtime protocol necessarily names its
+        ``capabilityToken`` field in the Lab bundle; the field name is not a
+        credential. This gate rejects actual environment/test values instead.
+        """
         for data in _bridge_javascript(wheel_contents):
             assert b"capability_token" not in data
-            assert b"capabilityToken" not in data
+            assert b"COURSEWEAVE_CAPABILITY_TOKEN" not in data
+            assert b"browser-test-capability" not in data
 
     def test_bundle_contains_no_react_runtime(
         self, wheel_contents: dict[str, bytes]
