@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SaveConflict } from "../src/save-conflict";
 
 const app = vi.hoisted(() => ({
@@ -121,23 +121,109 @@ describe("Author Save and stale recovery", () => {
       screen.getByText("Draft matches the loaded course."),
     ).toBeInTheDocument();
   });
+  it("keeps a later real edit and selection when an in-flight PUT succeeds", async () => {
+    const manifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Saved",
+      description: "",
+      entry_module_id: "module",
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [
+        {
+          id: "module",
+          title: "Module",
+          description: "",
+          phases: [
+            {
+              id: "phase",
+              title: "Phase",
+              kind: "read",
+              teacher_mode: "reading_companion",
+              completion: { type: "manual" },
+              capabilities: {
+                chat: false,
+                hint_level: "none",
+                share_selection: false,
+                share_cell: false,
+                share_output: false,
+                create_profile_proposal: false,
+                create_course_proposal: false,
+                create_workspace_proposal: false,
+              },
+              surfaces: [
+                {
+                  id: "surface",
+                  type: "markdown",
+                  role: "primary",
+                  path: "saved.md",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    app.getCourse.mockReset(); app.validateCourse.mockReset(); app.putCourse.mockReset();
+    let complete: ((value: unknown) => void) | undefined;
+    app.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: app.retry,
+    });
+    app.getCourse.mockResolvedValue({ manifest, raw: "{}", etag: '"old"' });
+    app.validateCourse.mockResolvedValue({
+      manifest,
+      formatted_json: '{\n  "title": "Saved"\n}\n',
+    });
+    app.putCourse.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    render(<AuthorApp />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select surface surface" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save course" }));
+    await waitFor(() => expect(app.putCourse).toHaveBeenCalledOnce());
+    fireEvent.change(screen.getByLabelText("Path"), {
+      target: { value: "newer.md" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select module Module" }),
+    );
+    complete?.({ manifest, raw: "{}", etag: '"saved"' });
+    await Promise.resolve();
+    expect(screen.getByLabelText("Module title")).toBeInTheDocument();
+    expect(app.putCourse).toHaveBeenCalledOnce();
+    expect(screen.getByText("Unsaved local draft.")).toBeInTheDocument();
+  });
   it("validates before one exact save and leaves a stale draft for an explicit later decision", async () => {
-    const validate = vi
-      .fn()
-      .mockResolvedValue({
-        manifest: { schema_version: 1 },
-        formatted_json: '{\n  "schema_version": 1\n}\n',
-      });
+    const validate = vi.fn().mockResolvedValue({
+      manifest: { schema_version: 1 },
+      formatted_json: '{\n  "schema_version": 1\n}\n',
+    });
     const put = vi
       .fn()
       .mockRejectedValue(Object.assign(new Error("stale"), { status: 409 }));
-    const latest = vi
-      .fn()
-      .mockResolvedValue({
-        manifest: { schema_version: 1, title: "Remote" },
-        raw: '{\n  "title": "Remote"\n}\n',
-        etag: '"remote"',
-      });
+    const latest = vi.fn().mockResolvedValue({
+      manifest: { schema_version: 1, title: "Remote" },
+      raw: '{\n  "title": "Remote"\n}\n',
+      etag: '"remote"',
+    });
     const saved = vi.fn();
     render(
       <SaveConflict
@@ -204,13 +290,11 @@ describe("Author Save and stale recovery", () => {
           },
         ),
     );
-    const put = vi
-      .fn()
-      .mockResolvedValue({
-        manifest: { schema_version: 1, title: "Saved" },
-        raw: '{\n  "title": "Saved"\n}\n',
-        etag: '"saved"',
-      });
+    const put = vi.fn().mockResolvedValue({
+      manifest: { schema_version: 1, title: "Saved" },
+      raw: '{\n  "title": "Saved"\n}\n',
+      etag: '"saved"',
+    });
     const saved = vi.fn();
     const props = {
       manifest: { schema_version: 1 },
@@ -239,22 +323,18 @@ describe("Author Save and stale recovery", () => {
   it("pairs local and remote canonical JSON, exports local bytes, and clears conflict after confirmed Use latest", async () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const saved = vi.fn();
-    const validate = vi
-      .fn()
-      .mockResolvedValue({
-        manifest: { schema_version: 1 },
-        formatted_json: '{\n  "title": "Local"\n}\n',
-      });
+    const validate = vi.fn().mockResolvedValue({
+      manifest: { schema_version: 1 },
+      formatted_json: '{\n  "title": "Local"\n}\n',
+    });
     const put = vi
       .fn()
       .mockRejectedValue(Object.assign(new Error("stale"), { status: 409 }));
-    const getLatest = vi
-      .fn()
-      .mockResolvedValue({
-        manifest: { schema_version: 1 },
-        raw: '{\n  "title": "Remote"\n}\n',
-        etag: '"remote"',
-      });
+    const getLatest = vi.fn().mockResolvedValue({
+      manifest: { schema_version: 1 },
+      raw: '{\n  "title": "Remote"\n}\n',
+      etag: '"remote"',
+    });
     render(
       <SaveConflict
         manifest={{ schema_version: 1 }}
