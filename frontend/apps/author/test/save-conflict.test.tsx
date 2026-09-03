@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { SaveConflict } from "../src/save-conflict";
 
 const app = vi.hoisted(() => ({
@@ -26,7 +32,7 @@ vi.mock("../src/api", () => ({
 vi.mock("../src/runtime", () => ({ useAuthorRuntime: app.runtime }));
 import { AuthorApp } from "../src/app";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("Author Save and stale recovery", () => {
   it("saves current canonical bytes, updates the baseline, and preserves a newer semantic selection", async () => {
     const manifest = {
@@ -171,7 +177,9 @@ describe("Author Save and stale recovery", () => {
         },
       ],
     };
-    app.getCourse.mockReset(); app.validateCourse.mockReset(); app.putCourse.mockReset();
+    app.getCourse.mockReset();
+    app.validateCourse.mockReset();
+    app.putCourse.mockReset();
     let complete: ((value: unknown) => void) | undefined;
     app.runtime.mockReturnValue({
       status: "ready",
@@ -210,6 +218,83 @@ describe("Author Save and stale recovery", () => {
     expect(screen.getByLabelText("Module title")).toBeInTheDocument();
     expect(app.putCourse).toHaveBeenCalledOnce();
     expect(screen.getByText("Unsaved local draft.")).toBeInTheDocument();
+  });
+  it("shows paired current canonical conflict bytes, exports local bytes, and only applies Use latest after confirmation", async () => {
+    app.getCourse.mockReset();
+    app.validateCourse.mockReset();
+    app.putCourse.mockReset();
+    const local = {
+      schema_version: 1,
+      id: "course",
+      title: "Local",
+      description: "",
+      entry_module_id: null,
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [],
+    };
+    const remote = { ...local, title: "Remote" };
+    const localRaw = '{\n  "title": "Local"\n}\n';
+    const remoteRaw = '{\n  "title": "Remote"\n}\n';
+    app.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: app.retry,
+    });
+    app.getCourse
+      .mockResolvedValueOnce({ manifest: local, raw: localRaw, etag: '"old"' })
+      .mockResolvedValueOnce({
+        manifest: remote,
+        raw: remoteRaw,
+        etag: '"remote"',
+      });
+    app.validateCourse.mockResolvedValue({
+      manifest: local,
+      formatted_json: localRaw,
+    });
+    app.putCourse.mockRejectedValue(
+      Object.assign(new Error("stale"), { status: 409 }),
+    );
+    const create = vi.fn<(blob: Blob) => string>(() => "blob:local");
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL: create, revokeObjectURL: revoke });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      () => undefined,
+    );
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<AuthorApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "Save course" }));
+    expect(await screen.findByText("Local canonical JSON")).toBeInTheDocument();
+    expect(screen.getByText("Remote canonical JSON")).toBeInTheDocument();
+    expect(app.putCourse).toHaveBeenCalledOnce();
+    expect(app.getCourse).toHaveBeenCalledTimes(2);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Export local courseweave.json" }),
+    );
+    const blob = create.mock.calls[0]?.[0] as Blob;
+    const bytes = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(blob);
+    });
+    expect(bytes).toBe(localRaw);
+    expect(revoke).toHaveBeenCalledWith("blob:local");
+    fireEvent.click(screen.getByRole("button", { name: "Use latest" }));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Local canonical JSON")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Course title")).toHaveValue("Remote");
+    expect(app.putCourse).toHaveBeenCalledOnce();
   });
   it("validates before one exact save and leaves a stale draft for an explicit later decision", async () => {
     const validate = vi.fn().mockResolvedValue({
