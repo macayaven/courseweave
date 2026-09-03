@@ -171,6 +171,53 @@ function preserveSelection(
       };
 }
 
+function selectionForPointer(
+  state: AuthorDocumentState,
+  pointer: string,
+): AuthorDocumentState["selection"] | null {
+  if (
+    /^\/(id|title|description|entry_module_id|policies\/(content_sharing|durable_mutation|terminal_execution|conversation_memory|max_shared_chars|workspace_write_globs\/\d+))$/.test(
+      pointer,
+    )
+  )
+    return { type: "course" };
+  const moduleMatch = pointer.match(/^\/modules\/(\d+)(?:\/(.*))?$/);
+  if (moduleMatch === null) return null;
+  const module = state.draft.modules[Number(moduleMatch[1])];
+  const rest = moduleMatch[2] ?? "";
+  if (module === undefined) return null;
+  if (/^(id|title|description)$/.test(rest))
+    return { type: "module", moduleKey: module.clientKey };
+  const phaseMatch = rest.match(/^phases\/(\d+)(?:\/(.*))?$/);
+  if (phaseMatch === null) return null;
+  const phase = module.phases[Number(phaseMatch[1])];
+  const phaseRest = phaseMatch[2] ?? "";
+  if (phase === undefined) return null;
+  if (
+    /^(id|title|kind|teacher_mode|capabilities\/(chat|share_selection|share_cell|share_output|create_profile_proposal|create_course_proposal|create_workspace_proposal|hint_level)|completion\/(type|record_id|path))$/.test(
+      phaseRest,
+    )
+  )
+    return {
+      type: "phase",
+      moduleKey: module.clientKey,
+      phaseKey: phase.clientKey,
+    };
+  const surfaceMatch = phaseRest.match(
+    /^surfaces\/(\d+)\/(id|type|role|path|url|label|cwd|location|start_seconds|end_seconds|argv\/\d+|match\/(cell_ids|cell_tags)\/\d+)$/,
+  );
+  if (surfaceMatch === null) return null;
+  const surface = phase.surfaces[Number(surfaceMatch[1])];
+  return surface === undefined
+    ? null
+    : {
+        type: "surface",
+        moduleKey: module.clientKey,
+        phaseKey: phase.clientKey,
+        surfaceKey: surface.clientKey,
+      };
+}
+
 function AuthorEditor({
   course,
   client,
@@ -236,30 +283,15 @@ function AuthorEditor({
     setState((current) => draftReducer(current, action));
   }, []);
   const focusIssues = useCallback((all: readonly ValidationIssue[]) => {
-    const issue = all.find((candidate) =>
-      /^\/modules\/\d+\/phases\/\d+\/surfaces\/\d+\/(path|cwd|url)$/.test(
-        candidate.path,
-      ),
+    const issue = all.find(
+      (candidate) => selectionForPointer(state, candidate.path) !== null,
     );
     if (!issue) return false;
-    const [, moduleIndex, phaseIndex, surfaceIndex] =
-      issue.path.match(/^\/modules\/(\d+)\/phases\/(\d+)\/surfaces\/(\d+)\//) ??
-      [];
+    const selection = selectionForPointer(state, issue.path);
+    if (selection === null) return false;
     setState((current) => {
-      const module = current.draft.modules[Number(moduleIndex)];
-      const phase = module?.phases[Number(phaseIndex)];
-      const surface = phase?.surfaces[Number(surfaceIndex)];
-      return module && phase && surface
-        ? {
-            ...current,
-            selection: {
-              type: "surface",
-              moduleKey: module.clientKey,
-              phaseKey: phase.clientKey,
-              surfaceKey: surface.clientKey,
-            },
-          }
-        : current;
+      const next = selectionForPointer(current, issue.path);
+      return next === null ? current : { ...current, selection: next };
     });
     setFocusPath(issue.path);
     return true;

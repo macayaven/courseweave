@@ -77,11 +77,13 @@ function ArrayFields({
   itemLabel,
   values,
   onChange,
+  pointer,
 }: {
   label: string;
   itemLabel: string;
   values: string[];
   onChange(values: string[]): void;
+  pointer?: string;
 }) {
   const items = values.length > 0 ? values : [""];
   return (
@@ -92,6 +94,11 @@ function ArrayFields({
           <label>
             {itemLabel} {index + 1}
             <input
+              id={
+                pointer === undefined
+                  ? undefined
+                  : pointerToControlId(`${pointer}/${index}`)
+              }
               aria-label={`${itemLabel} ${index + 1}`}
               value={value}
               onChange={(event) => {
@@ -127,6 +134,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
       <label>
         Course ID
         <input
+          id={pointerToControlId("/id")}
           value={course.id}
           onChange={(event) =>
             dispatch({ type: "course.update", patch: { id: text(event) } })
@@ -136,6 +144,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
       <label>
         Course title
         <input
+          id={pointerToControlId("/title")}
           value={course.title}
           onChange={(event) =>
             dispatch({ type: "course.update", patch: { title: text(event) } })
@@ -145,6 +154,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
       <label>
         Course description
         <textarea
+          id={pointerToControlId("/description")}
           value={course.description}
           onChange={(event) =>
             dispatch({
@@ -157,6 +167,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
       <label>
         Entry module
         <select
+          id={pointerToControlId("/entry_module_id")}
           value={course.entryModuleKey ?? ""}
           onChange={(event) =>
             dispatch({ type: "entry.select", moduleKey: text(event) || null })
@@ -175,6 +186,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
         <label>
           Content sharing
           <select
+            id={pointerToControlId("/policies/content_sharing")}
             value={course.policies.content_sharing}
             onChange={(event) =>
               dispatch({
@@ -189,6 +201,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
         <label>
           Durable mutation
           <select
+            id={pointerToControlId("/policies/durable_mutation")}
             value={course.policies.durable_mutation}
             onChange={(event) =>
               dispatch({
@@ -209,6 +222,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
         <label>
           Terminal execution
           <select
+            id={pointerToControlId("/policies/terminal_execution")}
             value={course.policies.terminal_execution}
             onChange={(event) =>
               dispatch({
@@ -223,6 +237,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
         <label>
           Conversation memory
           <select
+            id={pointerToControlId("/policies/conversation_memory")}
             value={course.policies.conversation_memory}
             onChange={(event) =>
               dispatch({
@@ -237,6 +252,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
         <label>
           Max shared characters
           <input
+            id={pointerToControlId("/policies/max_shared_chars")}
             type="number"
             value={course.policies.max_shared_chars}
             onChange={(event) =>
@@ -251,6 +267,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
           label="Workspace write globs"
           itemLabel="Workspace write glob"
           values={course.policies.workspace_write_globs}
+          pointer="/policies/workspace_write_globs"
           onChange={(workspace_write_globs) =>
             dispatch({
               type: "policy.update",
@@ -271,12 +288,18 @@ function ModuleInspector({
     (candidate) => candidate.clientKey === moduleKey,
   );
   if (module === undefined) return null;
+  const moduleIndex = state.draft.modules.findIndex(
+    (candidate) => candidate.clientKey === moduleKey,
+  );
+  const id = (field: string) =>
+    pointerToControlId(`/modules/${moduleIndex}/${field}`);
   return (
     <fieldset>
       <legend>Module</legend>
       <label>
         Module ID
         <input
+          id={id("id")}
           value={module.id}
           onChange={(event) =>
             dispatch({
@@ -290,6 +313,7 @@ function ModuleInspector({
       <label>
         Module title
         <input
+          id={id("title")}
           value={module.title}
           onChange={(event) =>
             dispatch({
@@ -303,6 +327,7 @@ function ModuleInspector({
       <label>
         Module description
         <textarea
+          id={id("description")}
           value={module.description}
           onChange={(event) =>
             dispatch({
@@ -319,9 +344,11 @@ function ModuleInspector({
 function CapabilitiesFields({
   phase,
   change,
+  pointer,
 }: {
   phase: DraftPhase;
   change(patch: Partial<AuthorCapabilities>): void;
+  pointer: string;
 }) {
   const booleanFields: [
     keyof Omit<AuthorCapabilities, "hint_level">,
@@ -342,6 +369,7 @@ function CapabilitiesFields({
         <label key={field}>
           {label}
           <input
+            id={pointerToControlId(`${pointer}/${field}`)}
             type="checkbox"
             checked={phase.capabilities[field]}
             onChange={(event) =>
@@ -353,6 +381,7 @@ function CapabilitiesFields({
       <label>
         Hint level
         <select
+          id={pointerToControlId(`${pointer}/hint_level`)}
           value={phase.capabilities.hint_level}
           onChange={(event) =>
             change({
@@ -373,9 +402,11 @@ function CapabilitiesFields({
 function CompletionFields({
   completion,
   change,
+  pointer,
 }: {
   completion: AuthorCompletion;
   change(completion: AuthorCompletion): void;
+  pointer: string;
 }) {
   const changeType = (type: AuthorCompletion["type"]) => {
     if (type === "manual") change({ type });
@@ -389,6 +420,7 @@ function CompletionFields({
       <label>
         Completion type
         <select
+          id={pointerToControlId(`${pointer}/type`)}
           value={completion.type}
           onChange={(event) =>
             changeType(text(event) as AuthorCompletion["type"])
@@ -405,6 +437,7 @@ function CompletionFields({
         <label>
           Completion record ID
           <input
+            id={pointerToControlId(`${pointer}/record_id`)}
             value={completion.record_id}
             onChange={(event) =>
               change({ ...completion, record_id: text(event) })
@@ -416,6 +449,7 @@ function CompletionFields({
         <label>
           Artifact path
           <input
+            id={pointerToControlId(`${pointer}/path`)}
             value={completion.path}
             onChange={(event) => change({ ...completion, path: text(event) })}
           />
@@ -437,6 +471,13 @@ function PhaseInspector({
     (candidate) => candidate.clientKey === phaseKey,
   );
   if (phase === undefined) return null;
+  const moduleIndex = state.draft.modules.findIndex(
+    (candidate) => candidate.clientKey === moduleKey,
+  );
+  const phaseIndex =
+    module?.phases.findIndex((candidate) => candidate.clientKey === phaseKey) ??
+    -1;
+  const pointer = `/modules/${moduleIndex}/phases/${phaseIndex}`;
   const update = (
     change: Partial<
       Pick<
@@ -451,6 +492,7 @@ function PhaseInspector({
       <label>
         Phase ID
         <input
+          id={pointerToControlId(`${pointer}/id`)}
           value={phase.id}
           onChange={(event) => update({ id: text(event) })}
         />
@@ -458,6 +500,7 @@ function PhaseInspector({
       <label>
         Phase title
         <input
+          id={pointerToControlId(`${pointer}/title`)}
           value={phase.title}
           onChange={(event) => update({ title: text(event) })}
         />
@@ -465,6 +508,7 @@ function PhaseInspector({
       <label>
         Phase kind
         <select
+          id={pointerToControlId(`${pointer}/kind`)}
           value={phase.kind}
           onChange={(event) =>
             update({ kind: text(event) as AuthorPhase["kind"] })
@@ -480,6 +524,7 @@ function PhaseInspector({
       <label>
         Teacher mode
         <select
+          id={pointerToControlId(`${pointer}/teacher_mode`)}
           value={phase.teacher_mode}
           onChange={(event) =>
             update({ teacher_mode: text(event) as AuthorPhase["teacher_mode"] })
@@ -494,12 +539,14 @@ function PhaseInspector({
       </label>
       <CapabilitiesFields
         phase={phase}
+        pointer={`${pointer}/capabilities`}
         change={(capabilities) =>
           update({ capabilities: { ...phase.capabilities, ...capabilities } })
         }
       />
       <CompletionFields
         completion={phase.completion}
+        pointer={`${pointer}/completion`}
         change={(completion) => update({ completion })}
       />
     </fieldset>
@@ -630,12 +677,14 @@ function SurfaceFields({
           label="Cell IDs"
           itemLabel="Cell ID"
           values={surface.match?.cell_ids ?? []}
+          pointer={`${pointer}/match/cell_ids`}
           onChange={(cell_ids) => updateMatch("cell_ids", cell_ids)}
         />
         <ArrayFields
           label="Cell tags"
           itemLabel="Cell tag"
           values={surface.match?.cell_tags ?? []}
+          pointer={`${pointer}/match/cell_tags`}
           onChange={(cell_tags) => updateMatch("cell_tags", cell_tags)}
         />
       </>
@@ -657,6 +706,7 @@ function SurfaceFields({
           label="Arguments"
           itemLabel="Argument"
           values={surface.argv}
+          pointer={`${pointer}/argv`}
           onChange={(argv) => update({ argv })}
         />
         <label>
