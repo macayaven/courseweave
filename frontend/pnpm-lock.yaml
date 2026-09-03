@@ -91,6 +91,9 @@ importers:
       '@jupyterlab/coreutils':
         specifier: ~6.6.3
         version: 6.6.3
+      '@jupyterlab/services':
+        specifier: ~7.6.3
+        version: 7.6.3(react@18.3.1)
       '@jupyterlab/settingregistry':
         specifier: ~4.6.3
         version: 4.6.3(react@18.3.1)
@@ -104,6 +107,12 @@ importers:
       '@jupyterlab/core-meta':
         specifier: ~4.6.3
         version: 4.6.3
+      jsdom:
+        specifier: 26.1.0
+        version: 26.1.0
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@26.4.1)(jsdom@26.1.0)(vite@8.2.2(@types/node@26.4.1)(terser@5.51.2))
 
   packages/ui:
     dependencies:

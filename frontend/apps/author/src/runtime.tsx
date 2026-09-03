@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { expectedParentOrigin } from '@courseweave/ui/parent-origin';
 
 export interface AuthorRuntime {
   serviceOrigin: string;
@@ -6,12 +7,16 @@ export interface AuthorRuntime {
   sourceId: string;
 }
 
+export type TrustedAuthorRuntime = AuthorRuntime & {
+  expectedParentOrigin: string;
+};
+
 export type AuthorRuntimeState =
   | { status: 'connecting'; runtime: null }
-  | { status: 'ready'; runtime: AuthorRuntime }
+  | { status: 'ready'; runtime: TrustedAuthorRuntime }
   | { status: 'disconnected'; runtime: null };
 
-function parseRuntime(value: unknown, origin: string): AuthorRuntime | null {
+function parseRuntime(value: unknown, parentOrigin: string): TrustedAuthorRuntime | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const data = value as Record<string, unknown>;
   const expectedKeys = ['capabilityToken', 'serviceOrigin', 'sourceId', 'type'];
@@ -22,6 +27,7 @@ function parseRuntime(value: unknown, origin: string): AuthorRuntime | null {
     || typeof data.capabilityToken !== 'string'
     || typeof data.sourceId !== 'string'
     || data.capabilityToken.length === 0
+    || data.capabilityToken.length > 4096
     || data.capabilityToken.trim() !== data.capabilityToken
     || data.sourceId.length === 0
     || data.sourceId.length > 240
@@ -29,8 +35,13 @@ function parseRuntime(value: unknown, origin: string): AuthorRuntime | null {
   ) return null;
   try {
     const serviceOrigin = new URL(data.serviceOrigin);
-    if (!['http:', 'https:'].includes(serviceOrigin.protocol) || serviceOrigin.origin !== data.serviceOrigin || serviceOrigin.origin !== origin) return null;
-    return { serviceOrigin: serviceOrigin.origin, capabilityToken: data.capabilityToken, sourceId: data.sourceId };
+    if (!['http:', 'https:'].includes(serviceOrigin.protocol) || serviceOrigin.origin !== data.serviceOrigin) return null;
+    return {
+      serviceOrigin: serviceOrigin.origin,
+      capabilityToken: data.capabilityToken,
+      sourceId: data.sourceId,
+      expectedParentOrigin: parentOrigin
+    };
   } catch {
     return null;
   }
@@ -38,16 +49,29 @@ function parseRuntime(value: unknown, origin: string): AuthorRuntime | null {
 
 export function useAuthorRuntime(): AuthorRuntimeState & { retry(): void } {
   const [state, setState] = useState<AuthorRuntimeState>({ status: 'connecting', runtime: null });
-  const accepted = useRef<AuthorRuntime | null>(null);
+  const accepted = useRef<TrustedAuthorRuntime | null>(null);
+  const parentOrigin = useRef<string | null>(null);
   const retry = useCallback(() => {
     accepted.current = null;
+    const expected = expectedParentOrigin();
+    parentOrigin.current = expected;
+    if (expected === null) {
+      setState({ status: 'disconnected', runtime: null });
+      return;
+    }
     setState({ status: 'connecting', runtime: null });
-    window.parent.postMessage({ type: 'courseweave.runtime.request.v1' }, '*');
+    window.parent.postMessage({ type: 'courseweave.runtime.request.v1' }, expected);
   }, []);
   useEffect(() => {
     const listener = (event: MessageEvent<unknown>) => {
-      if (event.source !== window.parent || accepted.current !== null) return;
-      const runtime = parseRuntime(event.data, event.origin);
+      const expected = parentOrigin.current;
+      if (
+        event.source !== window.parent
+        || accepted.current !== null
+        || expected === null
+        || event.origin !== expected
+      ) return;
+      const runtime = parseRuntime(event.data, expected);
       if (runtime !== null) {
         accepted.current = runtime;
         setState({ status: 'ready', runtime });

@@ -10,7 +10,7 @@
   "description": "CourseWeave frontend workspace.",
   "scripts": {
     "typecheck": "pnpm -r --filter @courseweave/lab --filter @courseweave/ui --filter @courseweave/learn --filter @courseweave/author run typecheck",
-    "test": "pnpm --filter @courseweave/learn test && pnpm --filter @courseweave/author test",
+    "test": "pnpm --filter @courseweave/lab test && pnpm --filter @courseweave/learn test && pnpm --filter @courseweave/author test",
     "build": "pnpm --filter @courseweave/lab run build && pnpm --filter @courseweave/learn run build && pnpm --filter @courseweave/author run build",
     "test:e2e": "pnpm exec playwright test --config playwright.config.ts",
     "test:e2e:author": "pnpm exec playwright test --config playwright.author.config.ts"

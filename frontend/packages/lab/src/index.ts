@@ -15,6 +15,8 @@ import {
 import { PageConfig } from '@jupyterlab/coreutils';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { Widget } from '@lumino/widgets';
+import { parseLaunchConfiguration, type LaunchMode } from './protocol';
+import { CourseWeaveRelayClient, RuntimeBroker, createCourseWeaveIframe } from './runtime';
 
 /**
  * Runtime plugin identity. JupyterLab-server derives the settings plugin ID
@@ -84,44 +86,46 @@ async function resolveServiceOrigin(
 }
 
 /**
+ * Preserve the Task 0 activation-order guard while removing its broad message
+ * listener. RuntimeBroker installs the only listener after an owned iframe
+ * exists; this preflight makes fallback/manual origins fail closed first.
+ */
+function installOriginGuard(serviceOrigin: string): void {
+  try {
+    const parsed = new URL(serviceOrigin);
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+      || parsed.username.length > 0
+      || parsed.password.length > 0
+      || parsed.origin !== serviceOrigin
+    ) throw new Error();
+  } catch {
+    throw new Error('CourseWeave bridge service origin is invalid.');
+  }
+}
+
+/**
  * The sandboxed guide iframe. `allow-scripts` and `allow-same-origin` let the
  * embedded learner application talk to its own service origin (the capability
  * token never appears in the iframe URL).
  */
 class CourseWeaveGuide extends Widget {
-  constructor(serviceOrigin: string) {
+  readonly iframe: HTMLIFrameElement;
+
+  constructor(serviceOrigin: string, mode: LaunchMode) {
     const node = document.createElement('div');
     node.classList.add('cw-Guide');
 
-    const iframe = document.createElement('iframe');
-    iframe.className = 'cw-Guide-iframe';
-    iframe.title = 'CourseWeave guide';
-    iframe.src = `${serviceOrigin}/learn/`;
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
-    iframe.setAttribute('referrerpolicy', 'no-referrer');
+    const iframe = createCourseWeaveIframe(serviceOrigin, mode);
     node.appendChild(iframe);
 
     super({ node });
+    this.iframe = iframe;
     this.id = GUIDE_WIDGET_ID;
     this.title.label = 'CourseWeave';
     this.title.caption = 'CourseWeave guide rail';
     this.addClass('cw-Guide-host');
   }
-}
-
-/**
- * Accept postMessages only from the CourseWeave service origin. Messages from
- * any other origin are dropped before any handling (spec §12: "ignores
- * messages from unexpected iframe origins"). Task 0 only establishes the
- * guarded listener; the command allowlist arrives with the full bridge.
- */
-function installOriginGuard(serviceOrigin: string): void {
-  window.addEventListener('message', (event: MessageEvent) => {
-    if (event.origin !== serviceOrigin) {
-      return;
-    }
-    // Command handling for allowlisted bridge commands lands in a later task.
-  });
 }
 
 const plugin: JupyterFrontEndPlugin<void> = {
@@ -139,25 +143,43 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // Resolve the service origin BEFORE anything can create a guide: there
     // must be no window in which the command would open a default-origin
     // guide while a custom origin is still resolving.
-    const serviceOrigin = await resolveServiceOrigin(registry);
+    const launch = parseLaunchConfiguration(PageConfig.getOption);
+    const serviceOrigin = launch?.serviceOrigin ?? await resolveServiceOrigin(registry);
+    const launchMode = launch?.launchMode ?? 'learn';
+    const relay = launch === null ? null : new CourseWeaveRelayClient(serviceOrigin);
     let guide: CourseWeaveGuide | null = null;
+    let broker: RuntimeBroker | null = null;
 
     const openGuide = (): void => {
       let current = guide;
       if (current === null || current.isDisposed) {
-        current = new CourseWeaveGuide(serviceOrigin);
+        current = new CourseWeaveGuide(serviceOrigin, launchMode);
         const widget = current;
         // Clear the tracked reference when the widget is closed/disposed so
         // the command recreates the guide instead of touching a disposed
         // widget.
         widget.disposed.connect(() => {
           if (guide === widget) {
+            broker?.dispose();
+            broker = null;
             guide = null;
           }
         });
         guide = current;
         current.title.closable = true;
         shell.add(current, 'right', { rank: 900 });
+        const childWindow = current.iframe.contentWindow;
+        if (launch !== null && relay !== null && childWindow !== null) {
+          broker = new RuntimeBroker({
+            hostWindow: window,
+            childWindow,
+            serviceOrigin,
+            runtimeId: launch.runtimeId,
+            sourceId: crypto.randomUUID(),
+            relay
+          });
+          broker.start();
+        }
       }
       shell.activateById(current.id);
     };

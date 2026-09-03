@@ -1,56 +1,121 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RuntimeProbe } from '../src/runtime';
+import { expectedParentOrigin } from '@courseweave/ui/parent-origin';
+import { useRuntimeBootstrap } from '../src/runtime';
 
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
+const VALID_RUNTIME = {
+  type: 'courseweave.runtime.v1',
+  serviceOrigin: 'https://courseweave.test',
+  capabilityToken: 'runtime-test-token',
+  sourceId: 'notebook-a'
+} as const;
 
-function dispatchRuntime(data: unknown, origin = 'https://courseweave.test'): void {
-  const event = new MessageEvent('message', { data, source: window.parent });
+function setReferrer(value: string): void {
+  Object.defineProperty(document, 'referrer', { configurable: true, value });
+}
+
+function dispatchRuntime(
+  data: unknown,
+  origin = 'https://lab.test',
+  source: MessageEventSource | null = window.parent
+): void {
+  const event = new MessageEvent('message', { data, source });
   Object.defineProperty(event, 'origin', { value: origin });
   act(() => window.dispatchEvent(event));
 }
 
-describe('useRuntimeBootstrap', () => {
-  it('emits only the versioned runtime request and accepts one valid parent reply', () => {
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  setReferrer('');
+});
+
+describe('Learn parent-origin trust bootstrap', () => {
+  it.each([
+    ['https://lab.test/', 'https://lab.test'],
+    ['http://127.0.0.1:8888/', 'http://127.0.0.1:8888'],
+    ['https://[::1]:9443/', 'https://[::1]:9443']
+  ])('accepts an origin-only browser referrer %s', (referrer, expected) => {
+    expect(expectedParentOrigin(referrer)).toBe(expected);
+  });
+
+  it.each([
+    '',
+    ' not-a-url ',
+    'ftp://lab.test/',
+    'https://user:secret@lab.test/',
+    'https://lab.test/tree/course',
+    'https://lab.test/?workspace=course',
+    'https://lab.test/#course',
+    ' https://lab.test/ '
+  ])('fails closed for rejected referrer %j', (referrer) => {
+    expect(expectedParentOrigin(referrer)).toBeNull();
+  });
+
+  it('targets only the derived parent origin and persists it in the accepted runtime', () => {
+    setReferrer('https://lab.test/');
     const postMessage = vi.spyOn(window.parent, 'postMessage');
-    render(<RuntimeProbe />);
-    expect(postMessage).toHaveBeenCalledWith({ type: 'courseweave.runtime.request.v1' }, '*');
+    const view = renderHook(() => useRuntimeBootstrap());
 
-    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token', sourceId: 'notebook-a' });
-    expect(screen.getByText('ready')).toBeInTheDocument();
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: 'courseweave.runtime.request.v1' },
+      'https://lab.test'
+    );
+    dispatchRuntime(VALID_RUNTIME);
+
+    expect(view.result.current.status).toBe('ready');
+    expect(view.result.current.runtime).toMatchObject({
+      serviceOrigin: 'https://courseweave.test',
+      sourceId: 'notebook-a',
+      expectedParentOrigin: 'https://lab.test'
+    });
   });
 
-  it('rejects malformed, wrong-source, non-canonical, origin-mismatched, whitespace-token, and unexpected-field replies', () => {
-    render(<RuntimeProbe />);
-    window.dispatchEvent(new MessageEvent('message', { data: { type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'x', sourceId: 'notebook-a' } }));
-    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test/', capabilityToken: 'x', sourceId: 'notebook-a' });
-    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'x', sourceId: 'notebook-a' }, 'https://other.test');
-    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: '  x  ', sourceId: 'notebook-a' });
-    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'x', sourceId: '' });
-    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'x', sourceId: 'notebook-a', unexpected: true });
-    expect(screen.getByText('connecting')).toBeInTheDocument();
+  it('enters recovery without posting when the referrer is absent or malformed', () => {
+    const postMessage = vi.spyOn(window.parent, 'postMessage');
+    const view = renderHook(() => useRuntimeBootstrap());
+    expect(postMessage).not.toHaveBeenCalled();
+    expect(view.result.current).toMatchObject({ status: 'recovery', runtime: null });
   });
 
-  it('keeps an accepted valid token out of browser persistence', () => {
-    render(<RuntimeProbe />);
-    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token', sourceId: 'notebook-a' });
-    expect(screen.getByText('ready')).toBeInTheDocument();
-    expect(location.href).not.toContain('runtime-test-token');
-    expect(JSON.stringify(history.state)).not.toContain('runtime-test-token');
+  it('rejects forged source, forged parent origin, malformed service origin, secrets, IDs, and extra keys', () => {
+    setReferrer('https://lab.test/');
+    const view = renderHook(() => useRuntimeBootstrap());
+
+    dispatchRuntime(VALID_RUNTIME, 'https://lab.test', {} as MessageEventSource);
+    dispatchRuntime(VALID_RUNTIME, 'https://attacker.test');
+    dispatchRuntime({ ...VALID_RUNTIME, serviceOrigin: 'https://courseweave.test/' });
+    dispatchRuntime({ ...VALID_RUNTIME, serviceOrigin: 'file:///tmp/course' });
+    dispatchRuntime({ ...VALID_RUNTIME, capabilityToken: ' x ' });
+    dispatchRuntime({ ...VALID_RUNTIME, capabilityToken: 'x'.repeat(4097) });
+    dispatchRuntime({ ...VALID_RUNTIME, sourceId: '' });
+    dispatchRuntime({ ...VALID_RUNTIME, sourceId: 'x'.repeat(241) });
+    dispatchRuntime({ ...VALID_RUNTIME, unexpected: true });
+
+    expect(view.result.current.status).toBe('connecting');
+  });
+
+  it('accepts at most one runtime reply per retry epoch', () => {
+    setReferrer('https://lab.test/');
+    const view = renderHook(() => useRuntimeBootstrap());
+    dispatchRuntime(VALID_RUNTIME);
+    dispatchRuntime({ ...VALID_RUNTIME, sourceId: 'forged-replacement' });
+    expect(view.result.current.runtime?.sourceId).toBe('notebook-a');
+
+    act(() => view.result.current.retry());
+    dispatchRuntime({ ...VALID_RUNTIME, sourceId: 'notebook-b' });
+    expect(view.result.current.runtime?.sourceId).toBe('notebook-b');
+  });
+
+  it('keeps an accepted capability out of browser persistence', () => {
+    setReferrer('https://lab.test/');
+    const view = renderHook(() => useRuntimeBootstrap());
+    dispatchRuntime(VALID_RUNTIME);
+    expect(view.result.current.status).toBe('ready');
+    expect(location.href).not.toContain(VALID_RUNTIME.capabilityToken);
+    expect(JSON.stringify(history.state)).not.toContain(VALID_RUNTIME.capabilityToken);
     expect(localStorage.getItem('capabilityToken')).toBeNull();
     expect(sessionStorage.getItem('capabilityToken')).toBeNull();
-  });
-
-  it('removes the runtime listener after unmount', () => {
-    const removeEventListener = vi.spyOn(window, 'removeEventListener');
-    const view = render(<RuntimeProbe />);
-    view.unmount();
-    dispatchRuntime({ type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken: 'runtime-test-token', sourceId: 'notebook-a' });
-    expect(removeEventListener).toHaveBeenCalledWith('message', expect.any(Function));
-    expect(view.container).toBeEmptyDOMElement();
   });
 });

@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LearnApp, LearnHeader, type LearnHeaderProps } from '../src/app';
 import { IconButton } from '@courseweave/ui';
@@ -12,10 +12,20 @@ const props: LearnHeaderProps = {
   timeBudget: 45
 };
 
+const LAB_ORIGIN = 'https://lab.test';
+
+beforeEach(() => {
+  Object.defineProperty(document, 'referrer', {
+    configurable: true,
+    value: `${LAB_ORIGIN}/`
+  });
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  Object.defineProperty(document, 'referrer', { configurable: true, value: '' });
 });
 
 function dispatchRuntime(capabilityToken = 'runtime-test-token'): void {
@@ -23,7 +33,7 @@ function dispatchRuntime(capabilityToken = 'runtime-test-token'): void {
     data: { type: 'courseweave.runtime.v1', serviceOrigin: 'https://courseweave.test', capabilityToken, sourceId: 'notebook-a' },
     source: window.parent
   });
-  Object.defineProperty(reply, 'origin', { value: 'https://courseweave.test' });
+  Object.defineProperty(reply, 'origin', { value: LAB_ORIGIN });
   act(() => window.dispatchEvent(reply));
 }
 
