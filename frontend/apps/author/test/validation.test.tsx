@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { useReducer } from "react";
 import type { AuthorManifest } from "@courseweave/ui";
 import {
@@ -790,5 +796,280 @@ describe("Author validation presentation", () => {
       "aria-describedby",
       pointerToControlId(firstPath, "issue"),
     );
+  });
+  it("resolves a post-CRUD pointer to the surviving Outline entity after nested indices change", async () => {
+    const manifest: AuthorManifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Course",
+      description: "",
+      entry_module_id: "deleted-module",
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: [],
+      },
+      modules: [
+        {
+          id: "deleted-module",
+          title: "Deleted module",
+          description: "",
+          phases: [
+            {
+              id: "deleted-phase",
+              title: "Deleted phase",
+              kind: "read",
+              teacher_mode: "reading_companion",
+              completion: { type: "manual" },
+              capabilities: {
+                chat: false,
+                hint_level: "none",
+                share_selection: false,
+                share_cell: false,
+                share_output: false,
+                create_profile_proposal: false,
+                create_course_proposal: false,
+                create_workspace_proposal: false,
+              },
+              surfaces: [
+                {
+                  id: "deleted-surface",
+                  type: "markdown",
+                  role: "primary",
+                  path: "deleted.md",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    appMocks.getCourse.mockReset();
+    appMocks.validateCourse.mockReset();
+    appMocks.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: appMocks.retry,
+    });
+    appMocks.getCourse.mockResolvedValue({
+      manifest,
+      raw: "{}",
+      etag: '"etag"',
+    });
+    render(<AuthorApp />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Select module Deleted module" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Duplicate module Deleted module" }),
+    );
+    fireEvent.change(screen.getByLabelText("Module title"), {
+      target: { value: "Target module" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move module Target module up" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move module Target module down" }),
+    );
+    const targetModuleKey = screen
+      .getByRole("button", { name: "Select module Target module" })
+      .getAttribute("data-outline-key");
+    expect(targetModuleKey).toMatch(/^draft-/);
+    fireEvent.click(screen.getByRole("button", { name: "Add module" }));
+    fireEvent.change(screen.getByLabelText("New module ID"), {
+      target: { value: "decoy-module" },
+    });
+    fireEvent.change(screen.getByLabelText("New module title"), {
+      target: { value: "Decoy module" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create module" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move module Decoy module up" }),
+    );
+
+    const targetModule = screen
+      .getByRole("button", { name: "Select module Target module" })
+      .closest("li");
+    expect(targetModule).not.toBeNull();
+    fireEvent.click(
+      within(targetModule!).getByRole("button", {
+        name: "Select phase Deleted phase",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Duplicate phase Deleted phase" }),
+    );
+    fireEvent.change(screen.getByLabelText("Phase title"), {
+      target: { value: "Target phase" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move phase Target phase up" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move phase Target phase down" }),
+    );
+    const targetPhaseKey = within(targetModule!)
+      .getByRole("button", { name: "Select phase Target phase" })
+      .getAttribute("data-outline-key");
+    expect(targetPhaseKey).toMatch(/^draft-/);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select module Target module" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add phase" }));
+    fireEvent.change(screen.getByLabelText("Phase title"), {
+      target: { value: "Decoy phase" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move phase Decoy phase up" }),
+    );
+
+    const targetPhase = within(targetModule!)
+      .getByRole("button", { name: "Select phase Target phase" })
+      .closest("li");
+    expect(targetPhase).not.toBeNull();
+    fireEvent.click(
+      within(targetPhase!).getByRole("button", { name: /^Select surface / }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Duplicate surface / }),
+    );
+    fireEvent.change(screen.getByLabelText("Surface ID"), {
+      target: { value: "target-surface" },
+    });
+    fireEvent.change(screen.getByLabelText("Path"), {
+      target: { value: "target.md" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move surface target-surface up" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move surface target-surface down" }),
+    );
+    const targetSurfaceKey = within(targetPhase!)
+      .getByRole("button", { name: "Select surface target-surface" })
+      .getAttribute("data-outline-key");
+    expect(targetSurfaceKey).toMatch(/^draft-/);
+    fireEvent.click(
+      within(targetModule!).getByRole("button", {
+        name: "Select phase Target phase",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add surface" }));
+    fireEvent.change(screen.getByLabelText("Surface ID"), {
+      target: { value: "decoy-surface" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move surface decoy-surface up" }),
+    );
+
+    fireEvent.click(
+      within(targetPhase!).getByRole("button", {
+        name: /^Select surface deleted-surface/,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Delete surface deleted-surface/ }),
+    );
+    fireEvent.click(
+      within(targetModule!).getByRole("button", {
+        name: "Select phase Deleted phase",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete phase Deleted phase" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select module Deleted module" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete module Deleted module" }),
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Select module Deleted module" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Select phase Deleted phase" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Select surface deleted-surface/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("deleted.md")).not.toBeInTheDocument();
+
+    const path = "/modules/1/phases/1/surfaces/1/path";
+    appMocks.validateCourse.mockRejectedValueOnce(
+      Object.assign(new Error("invalid"), {
+        details: {
+          issues: [
+            {
+              path,
+              code: "missing_artifact",
+              message: "Target path is missing.",
+            },
+          ],
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
+    await screen.findByText("Target path is missing.");
+    expect(appMocks.validateCourse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modules: [
+          expect.anything(),
+          expect.objectContaining({
+            title: "Target module",
+            phases: [
+              expect.anything(),
+              expect.objectContaining({
+                title: "Target phase",
+                surfaces: [
+                  expect.anything(),
+                  expect.objectContaining({
+                    id: "target-surface",
+                    path: "target.md",
+                  }),
+                ],
+              }),
+            ],
+          }),
+        ],
+      }),
+      "structural",
+      expect.any(AbortSignal),
+    );
+
+    expect(screen.queryByLabelText("Path")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
+    const control = await screen.findByLabelText("Path");
+    const selectedSurface = screen.getByRole("button", {
+      name: "Select surface target-surface",
+    });
+    expect(selectedSurface).toHaveAttribute("aria-pressed", "true");
+    expect(selectedSurface).toHaveAttribute(
+      "data-outline-key",
+      targetSurfaceKey!,
+    );
+    expect(
+      screen.getByRole("button", { name: "Select module Target module" }),
+    ).toHaveAttribute("data-outline-key", targetModuleKey!);
+    expect(
+      screen.getByRole("button", { name: "Select phase Target phase" }),
+    ).toHaveAttribute("data-outline-key", targetPhaseKey!);
+    expect(control).toHaveValue("target.md");
+    expect(control).toHaveAttribute("id", pointerToControlId(path));
+    expect(control).toHaveAttribute(
+      "aria-describedby",
+      pointerToControlId(path, "issue"),
+    );
+    expect(control).toHaveFocus();
   });
 });
