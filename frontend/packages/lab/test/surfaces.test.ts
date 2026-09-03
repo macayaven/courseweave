@@ -22,10 +22,12 @@ vi.mock('@lumino/widgets', () => ({
 import {
   CourseSurfaceFactory,
   COURSEWEAVE_COMMANDS,
+  COURSEWEAVE_PALETTE_CATEGORY,
   SurfaceRequestBroker,
   coordinateForCoursePath,
   localReaderUrl,
   parseCourseSnapshot,
+  registerCoursePalette,
   registerCourseCommands,
   type CourseSnapshot
 } from '../src/surfaces';
@@ -123,6 +125,22 @@ describe('CourseSurfaceFactory', () => {
     expect(actions.openDashboard).toHaveBeenCalledOnce();
     expect(actions.openAuthor).toHaveBeenCalledOnce();
     expect(actions.requestShare.mock.calls).toEqual([['selection'], ['cell'], ['output']]);
+  });
+
+  it('adds every registered CourseWeave command to one palette category without duplicates', () => {
+    const commandIds = Object.values(COURSEWEAVE_COMMANDS);
+    const items: Array<{ command: string; category: string }> = [];
+
+    registerCoursePalette({ addItem: (item) => {
+      items.push(item);
+      return { dispose: vi.fn() };
+    } });
+
+    expect(items).toEqual(commandIds.map((command) => ({
+      command,
+      category: COURSEWEAVE_PALETTE_CATEGORY
+    })));
+    expect(new Set(items.map(({ command }) => command)).size).toBe(items.length);
   });
 
   it('parses only the relay fields needed for exact course allowlisting', () => {

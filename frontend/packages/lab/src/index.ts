@@ -11,6 +11,7 @@ import {
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
+import { ICommandPalette } from '@jupyterlab/apputils';
 import { PageConfig } from '@jupyterlab/coreutils';
 import { IDocumentManager } from '@jupyterlab/docmanager';
 import { IEditorTracker } from '@jupyterlab/fileeditor';
@@ -26,6 +27,7 @@ import {
   CourseSurfaceFactory,
   SurfaceRequestBroker,
   parseCourseSnapshot,
+  registerCoursePalette,
   registerCourseCommands,
   type CourseSnapshot
 } from './surfaces';
@@ -144,11 +146,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
   description:
     'CourseWeave guide, dashboard, native course surfaces, context, and explicit Share bridge.',
   autoStart: true,
-  requires: [ILabShell, IDocumentManager, IEditorTracker, INotebookTracker, ITerminalTracker],
+  requires: [ILabShell, ICommandPalette, IDocumentManager, IEditorTracker, INotebookTracker, ITerminalTracker],
   optional: [ISettingRegistry],
   activate: async (
     app: JupyterFrontEnd,
     shell: ILabShell,
+    palette: ICommandPalette,
     documents: IDocumentManager,
     editor: IEditorTracker,
     notebook: INotebookTracker,
@@ -341,6 +344,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       openAuthor,
       requestShare: () => openGuide()
     });
+    registerCoursePalette(palette);
 
     installOriginGuard(serviceOrigin);
     try {
