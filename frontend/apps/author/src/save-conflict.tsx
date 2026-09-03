@@ -65,6 +65,8 @@ export function SaveConflict({
   const generation = useRef(0);
   const draftGeneration = useRef(requestGeneration);
   const controller = useRef<AbortController | null>(null);
+  const saveButton = useRef<HTMLButtonElement>(null);
+  const restoreSaveFocus = useRef(false);
   useEffect(() => () => controller.current?.abort(), []);
   // Generation and connection changes must revoke authority synchronously.  The
   // cleanup effects below remain for actual transport cancellation.
@@ -86,6 +88,11 @@ export function SaveConflict({
   useEffect(() => {
     controller.current?.abort();
   }, [requestGeneration, connectionEpoch]);
+  useEffect(() => {
+    if (!restoreSaveFocus.current || status === "conflict") return;
+    restoreSaveFocus.current = false;
+    saveButton.current?.focus();
+  }, [status]);
   const save = async () => {
     controller.current?.abort();
     const current = new AbortController();
@@ -156,7 +163,8 @@ export function SaveConflict({
     anchor.click();
     URL.revokeObjectURL(href);
   };
-  const clearConflict = () => {
+  const clearConflict = (restoreFocus = false) => {
+    restoreSaveFocus.current = restoreFocus;
     setLatest(null);
     setStatus("idle");
   };
@@ -164,6 +172,7 @@ export function SaveConflict({
     <section aria-label="Save and recovery">
       <h2>Save and recovery</h2>
       <button
+        ref={saveButton}
         type="button"
         disabled={disabled || status === "saving"}
         onClick={() => void save()}
@@ -198,7 +207,7 @@ export function SaveConflict({
           <button
             type="button"
             onClick={() => {
-              clearConflict();
+              clearConflict(true);
               onReviewed?.(latest);
             }}
           >
@@ -212,7 +221,7 @@ export function SaveConflict({
                   "Replace your local draft with the latest saved course?",
                 )
               ) {
-                clearConflict();
+                clearConflict(true);
                 onSaved(latest);
               }
             }}

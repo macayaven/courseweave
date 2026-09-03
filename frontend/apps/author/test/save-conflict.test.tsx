@@ -39,6 +39,82 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("Author Save and stale recovery", () => {
+  it("restores keyboard conflict resolution focus to Save after Keep my draft", async () => {
+    const reviewed = vi.fn();
+    const put = vi.fn();
+    render(
+      <SaveConflict
+        manifest={{ schema_version: 1 }}
+        etag={'"old"'}
+        exists
+        dirty
+        validate={vi.fn()}
+        put={put}
+        getLatest={vi.fn()}
+        onSaved={vi.fn()}
+        onReviewed={reviewed}
+        remote={{
+          manifest: { schema_version: 1 },
+          raw: '{\n  "title": "Remote"\n}\n',
+          etag: '"remote"',
+        }}
+        canonicalFromDraft={{
+          generation: 0,
+          raw: '{\n  "title": "Local"\n}\n',
+        }}
+      />,
+    );
+    const keep = await screen.findByRole("button", {
+      name: "Keep my draft after review",
+    });
+    keep.focus();
+    fireEvent.click(keep);
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Remote conflict")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Save course" })).toHaveFocus();
+    expect(reviewed).toHaveBeenCalledOnce();
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("restores keyboard conflict resolution focus to Save after confirmed Use latest", async () => {
+    const saved = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <SaveConflict
+        manifest={{ schema_version: 1 }}
+        etag={'"old"'}
+        exists
+        dirty
+        validate={vi.fn()}
+        put={vi.fn()}
+        getLatest={vi.fn()}
+        onSaved={saved}
+        remote={{
+          manifest: { schema_version: 1, title: "Remote" },
+          raw: '{\n  "title": "Remote"\n}\n',
+          etag: '"remote"',
+        }}
+        canonicalFromDraft={{
+          generation: 0,
+          raw: '{\n  "title": "Local"\n}\n',
+        }}
+      />,
+    );
+    const latest = await screen.findByRole("button", { name: "Use latest" });
+    latest.focus();
+    fireEvent.click(latest);
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Remote conflict")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Save course" })).toHaveFocus();
+    expect(saved).toHaveBeenCalledWith({
+      manifest: { schema_version: 1, title: "Remote" },
+      raw: '{\n  "title": "Remote"\n}\n',
+      etag: '"remote"',
+    });
+  });
+
   it("does not duplicate a deferred explicit Save under StrictMode rerenders", async () => {
     app.getCourse.mockReset();
     app.validateCourse.mockReset();
