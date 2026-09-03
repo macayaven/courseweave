@@ -42,6 +42,7 @@ export type AuthorApiFixture = {
   validationRequests: ValidationRequest[];
   validationExpectations: ValidationRequest[];
   validationRoutesInFlight: number;
+  putRequests: JsonObject[];
   guideRequests: GuideRequest[];
   guideExpectations: GuideExpectation[];
   guideThreadId: string | null;
@@ -167,6 +168,7 @@ export function createAuthorApi(
     validationRequests: [],
     validationExpectations: [],
     validationRoutesInFlight: 0,
+    putRequests: [],
     guideRequests: [],
     guideExpectations: [],
     guideThreadId: null,
@@ -377,6 +379,7 @@ async function handleApi(route: Route, api: AuthorApiFixture): Promise<void> {
       return;
     }
     api.mutations.push(`put:${headers["idempotency-key"]}`);
+    api.putRequests.push(structuredClone(manifest));
     if (api.staleRemote !== null) {
       const remote = api.staleRemote;
       api.staleRemote = null;

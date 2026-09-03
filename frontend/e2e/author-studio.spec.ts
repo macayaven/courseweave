@@ -205,6 +205,49 @@ for (const example of ["minimal-course", "cli-course"] as const) {
   });
 }
 
+test("saves one exact manifest after keyboard-returning from an entity edit to Course fields", async ({ page }) => {
+  const source = loadExample("minimal-course");
+  const expected = structuredClone(source);
+  expected.title = "Integrated browser course";
+  (expected.policies as Record<string, unknown>).max_shared_chars = 4096;
+  const expectedPhase = ((expected.modules as Array<Record<string, unknown>>)[0]!.phases as Array<Record<string, unknown>>)[0]!;
+  expectedPhase.title = "Integrated entity edit";
+  const api = createAuthorApi(source);
+  const author = await mountAuthor(page, api);
+
+  await author.getByRole("button", { name: "Select phase Read the lesson" }).press("Enter");
+  const phaseTitle = author.getByLabel("Phase title");
+  await phaseTitle.fill("Integrated entity edit");
+  const courseSelection = author.getByRole("button", { name: "Select course Minimal Course" });
+  expect(await tabTo(page, courseSelection, "reverse")).toBeGreaterThan(0);
+  await expect(courseSelection).toBeFocused();
+  await expect(courseSelection).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Enter");
+  await expect(courseSelection).toHaveAttribute("aria-pressed", "true");
+
+  await author.getByLabel("Course title").fill("Integrated browser course");
+  await author.getByLabel("Max shared characters").fill("4096");
+  expectValidationRequest(api, "structural", expected);
+  await author.getByRole("button", { name: "Save course" }).press("Enter");
+  await expect(author.getByText("Saved exact canonical course bytes.", { exact: true })).toBeVisible();
+
+  expect(api.counts.puts).toBe(1);
+  expect(api.putRequests).toEqual([expected]);
+  expect(api.manifest).toEqual(expected);
+  expect(api.mutations).toHaveLength(1);
+  expect(api.mutations[0]).toMatch(/^put:/);
+  expect(api.validationRequests).toEqual([{ manifest: expected, mode: "structural" }]);
+
+  await reloadAuthor(page, author, api);
+  await expect(author.getByLabel("Course title")).toHaveValue("Integrated browser course");
+  await expect(author.getByLabel("Max shared characters")).toHaveValue("4096");
+  await expect(author.getByRole("button", { name: "Select course Integrated browser course" })).toHaveAttribute("aria-pressed", "true");
+  await author.getByRole("button", { name: "Select phase Integrated entity edit" }).press("Enter");
+  await expect(author.getByLabel("Phase title")).toHaveValue("Integrated entity edit");
+  expect(api.counts).toMatchObject({ courseGets: 2, proposalGets: 2, structuralValidations: 1, puts: 1 });
+  await expectNoBoundaryViolations(page, api);
+});
+
 test("denies an asset-shaped request that is absent from the production index", async ({ page }) => {
   const api = createAuthorApi(minimalManifest());
   await mountAuthor(page, api);
