@@ -32,7 +32,11 @@ describe('CourseWeave Lab protocol', () => {
       ['courseweaveLaunchMode', 'learn'],
       ['courseweaveCapabilityToken', capability]
     ]);
-    const config = parseLaunchConfiguration((key) => options.get(key) ?? '');
+    const config = parseLaunchConfiguration({
+      getOption(key) {
+        return options.get(key) ?? '';
+      }
+    });
     expect(config).toEqual({
       serviceOrigin: 'http://127.0.0.1:8765',
       runtimeId: 'runtime-123',
@@ -54,7 +58,30 @@ describe('CourseWeave Lab protocol', () => {
       courseweaveRuntimeId: runtimeId,
       courseweaveLaunchMode: launchMode
     };
-    expect(parseLaunchConfiguration((key) => values[key] ?? '')).toBeNull();
+    expect(parseLaunchConfiguration({
+      getOption(key) {
+        return values[key] ?? '';
+      }
+    })).toBeNull();
+  });
+
+  it('reads valid launch values through the PageConfig receiver', () => {
+    const pageConfig = {
+      values: {
+        courseweaveServiceUrl: 'https://courseweave.test',
+        courseweaveRuntimeId: 'runtime-123',
+        courseweaveLaunchMode: 'learn'
+      },
+      getOption(key: string) {
+        return this.values[key as keyof typeof this.values] ?? '';
+      }
+    };
+
+    expect(parseLaunchConfiguration(pageConfig)).toEqual({
+      serviceOrigin: 'https://courseweave.test',
+      runtimeId: 'runtime-123',
+      launchMode: 'learn'
+    });
   });
 
   it('accepts only the exact runtime relay payload for the configured service origin', () => {

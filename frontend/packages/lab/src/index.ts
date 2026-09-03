@@ -158,7 +158,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     // Resolve the service origin BEFORE anything can create a guide: there
     // must be no window in which the command would open a default-origin
     // guide while a custom origin is still resolving.
-    const launch = parseLaunchConfiguration(PageConfig.getOption);
+    const launch = parseLaunchConfiguration(PageConfig);
     const serviceOrigin = launch?.serviceOrigin ?? await resolveServiceOrigin(registry);
     const launchMode = launch?.launchMode ?? 'learn';
     const relay = launch === null ? null : new CourseWeaveRelayClient(serviceOrigin);
