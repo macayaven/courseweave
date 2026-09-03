@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import socket
 import stat
@@ -113,6 +114,12 @@ class CourseLock:
         # unconfirmed owned child; the final holder's close releases it.
         os.close(file_fd)
 
+    def __del__(self) -> None:
+        try:
+            self.release()
+        except BaseException:
+            pass
+
     def fileno(self) -> int:
         if self._fd is None:
             raise CourseLockError("CourseWeave runtime lock is not acquired.")
@@ -123,6 +130,27 @@ class CourseLock:
 
     def __exit__(self, *_exc: object) -> None:
         self.release()
+
+
+class _PrivateRuntimeDirectory:
+    """Explicit private Jupyter state with no garbage-collection cleanup."""
+
+    def __init__(self) -> None:
+        self.path = Path(tempfile.mkdtemp(prefix="courseweave-jupyter-"))
+        self.path.chmod(0o700)
+        self.name = str(self.path)
+        self._cleaned = False
+
+    def cleanup(self) -> None:
+        if self._cleaned:
+            return
+        directory_fd = os.open(self.path, _directory_flags())
+        try:
+            _validate_private_directory(directory_fd)
+        finally:
+            os.close(directory_fd)
+        shutil.rmtree(self.path)
+        self._cleaned = True
 
 
 def _runtime_root() -> Path:
@@ -419,7 +447,7 @@ class LaunchSupervisor:
         self._jupyter_process: Any | None = None
         self._jupyter_shutdown_attempted = False
         self._output_threads: list[threading.Thread] = []
-        self._temporary_directory: tempfile.TemporaryDirectory[str] | None = None
+        self._temporary_directory: _PrivateRuntimeDirectory | None = None
         self._child_environment: dict[str, str] | None = None
         self._requested_signal: int | None = None
         self._previous_handlers: dict[int, Any] = {}
@@ -449,9 +477,7 @@ class LaunchSupervisor:
 
             self.jupyter_token = self._secret_factory(32)
             self.runtime_id = self._secret_factory(32)
-            self._temporary_directory = tempfile.TemporaryDirectory(
-                prefix="courseweave-jupyter-"
-            )
+            self._temporary_directory = _PrivateRuntimeDirectory()
             runtime_root = Path(self._temporary_directory.name)
             config_dir = runtime_root / "config"
             jupyter_runtime_dir = runtime_root / "runtime"

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import hashlib
 import io
 import json
 import os
 import select
+import shutil
 import signal
 import socket
 import stat
 import subprocess
 import threading
+import time
 import urllib.request
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -450,6 +454,159 @@ def _supervisor_fixture(
     }
 
 
+def test_public_cli_retains_unconfirmed_child_runtime_and_lock_after_supervisor_gc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    course = tmp_path / "course"
+    course.mkdir()
+    host_runtime = tmp_path / "host-runtime"
+    host_runtime.mkdir()
+    events: list[str] = []
+    listener = _SupervisorSocket(events, 43123)
+    server = _SupervisorServer(events, listener)
+    errors: list[str] = []
+    runtime_paths: list[tuple[Path, Path]] = []
+    children: list[subprocess.Popen[bytes]] = []
+    supervisor_refs: list[weakref.ReferenceType[LaunchSupervisor]] = []
+    secrets = (
+        "retained-course-secret",
+        "retained-jupyter-secret",
+        "retained-runtime-id",
+    )
+
+    def process_factory(_argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        environment = kwargs["env"]
+        config_dir = Path(environment["JUPYTER_CONFIG_DIR"])
+        runtime_dir = Path(environment["JUPYTER_RUNTIME_DIR"])
+        runtime_paths.append((config_dir, runtime_dir))
+        script = (
+            "import os,stat,time; from pathlib import Path; "
+            "config=Path(os.environ['JUPYTER_CONFIG_DIR']); "
+            "runtime=Path(os.environ['JUPYTER_RUNTIME_DIR']); "
+            "assert config.is_dir() and runtime.is_dir(); "
+            "assert stat.S_IMODE(config.stat().st_mode)==0o700; "
+            "assert stat.S_IMODE(runtime.stat().st_mode)==0o700; "
+            "(runtime/'child-ready').write_text('ready', encoding='utf-8'); "
+            "os.close(1); os.close(2); "
+            "time.sleep(60)"
+        )
+        child = subprocess.Popen(
+            [os.sys.executable, "-c", script],
+            cwd=kwargs["cwd"],
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=kwargs["stdout"],
+            stderr=kwargs["stderr"],
+            shell=False,
+            start_new_session=False,
+            pass_fds=kwargs["pass_fds"],
+        )
+        children.append(child)
+        supervisor = supervisor_refs[0]()
+        assert supervisor is not None
+        supervisor._jupyter_shutdown_attempted = True
+        return child
+
+    def supervisor_factory(
+        course_root: Path, *, port: int, mode: str
+    ) -> LaunchSupervisor:
+        generated_secrets = iter(secrets)
+        supervisor = LaunchSupervisor(
+            course_root,
+            port=port,
+            mode=mode,  # type: ignore[arg-type]
+            lock_factory=lambda root: CourseLock(root, runtime_root=host_runtime),
+            listener_factory=lambda _port: listener,
+            api_server_factory=lambda _app, _port: server,
+            process_factory=process_factory,
+            browser_opener=lambda _url: False,
+            course_ready=lambda _url, _token: True,
+            jupyter_ready=lambda *_args: bool(
+                runtime_paths
+                and (runtime_paths[0][1] / "child-ready").is_file()
+            ),
+            jupyter_port_factory=lambda: 45123,
+            secret_factory=lambda _size: next(generated_secrets),
+            signal_api=_FakeSignals(),
+            sleep=lambda _delay: time.sleep(0.01),
+            error_sink=errors.append,
+            readiness_timeout=5.0,
+            shutdown_timeout=0.05,
+        )
+        supervisor_refs.append(weakref.ref(supervisor))
+        return supervisor
+
+    monkeypatch.setattr("courseweave.cli.LaunchSupervisor", supervisor_factory)
+    retained_root: Path | None = None
+    contender = CourseLock(course, runtime_root=host_runtime)
+    try:
+        result = CliRunner().invoke(
+            app, ["launch", "--course-root", str(course), "--port", "43123"]
+        )
+        assert result.exit_code == 1
+        del result
+        gc.collect()
+
+        assert len(supervisor_refs) == 1
+        assert supervisor_refs[0]() is None
+        assert len(runtime_paths) == 1
+        config_dir, runtime_dir = runtime_paths[0]
+        retained_root = config_dir.parent
+        assert runtime_dir.parent == retained_root
+        assert stat.S_IMODE(retained_root.stat().st_mode) == 0o700
+        assert course not in retained_root.parents
+        assert config_dir.is_dir()
+        assert runtime_dir.is_dir()
+        assert (runtime_dir / "child-ready").read_text(encoding="utf-8") == "ready"
+        for path in retained_root.rglob("*"):
+            if path.is_file():
+                contents = path.read_bytes()
+                assert all(secret.encode() not in contents for secret in secrets)
+
+        try:
+            with pytest.raises(CourseLockError, match="already running"):
+                contender.acquire()
+        finally:
+            contender.release()
+
+        assert len(children) == 1
+        children[0].terminate()
+        children[0].communicate(timeout=5.0)
+        assert children[0].returncode == -signal.SIGTERM
+
+        after_exit = CourseLock(course, runtime_root=host_runtime).acquire()
+        after_exit.release()
+        shutil.rmtree(retained_root)
+        assert not retained_root.exists()
+        retained_root = None
+
+        assert listener.close_calls == 1
+        assert "api.stop" in events
+        assert errors == [
+            "CourseWeave could not start the workspace. Check the course root, "
+            "requested port, and JupyterLab installation, then retry."
+        ]
+        assert not any(
+            thread.is_alive()
+            and thread.name.startswith(("courseweave-api", "courseweave-jupyter-"))
+            for thread in threading.enumerate()
+        )
+    finally:
+        contender.release()
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            try:
+                child.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.communicate(timeout=5.0)
+        if retained_root is not None and retained_root.exists():
+            shutil.rmtree(retained_root)
+        if host_runtime.exists():
+            shutil.rmtree(host_runtime)
+
+
 def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -492,6 +649,7 @@ def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_ch
     assert child_env["COURSEWEAVE_RUNTIME_ID"] == "owned-runtime-id"
     assert child_env["COURSEWEAVE_LAUNCH_MODE"] == "author"
     assert "COURSEWEAVE_UNTRUSTED_PARENT_VALUE" not in child_env
+    assert not Path(child_env["JUPYTER_RUNTIME_DIR"]).parent.exists()
     assert state["jupyter_calls"] == [
         (
             "http://127.0.0.1:45123/courseweave/",
