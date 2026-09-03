@@ -114,6 +114,67 @@ function videoUrl(value) {
         throw new Error('invalid video URL');
     return parsed.href;
 }
+function writeBrowserClipboard(text) {
+    const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+    if (clipboard === undefined || typeof clipboard.writeText !== 'function') {
+        return Promise.reject(new Error('Clipboard API unavailable.'));
+    }
+    return clipboard.writeText(text);
+}
+function terminalInstructions(surface, writeClipboard) {
+    if (surface.cwd === undefined || surface.argv === undefined || surface.argv.length === 0) {
+        throw new Error('Terminal instructions are missing.');
+    }
+    const payload = JSON.stringify({ cwd: surface.cwd, argv: surface.argv }, null, 2);
+    const panel = document.createElement('section');
+    panel.setAttribute('data-courseweave-terminal-instructions', '');
+    panel.setAttribute('aria-label', 'CourseWeave terminal launch instructions');
+    panel.style.padding = '8px 12px';
+    panel.style.background = 'var(--jp-layout-color1, #fff)';
+    panel.style.borderBottom = 'var(--jp-border-width, 1px) solid var(--jp-border-color2, #ddd)';
+    panel.style.maxHeight = '40%';
+    panel.style.overflow = 'auto';
+    const heading = document.createElement('strong');
+    heading.textContent = 'Terminal launch instructions';
+    panel.appendChild(heading);
+    const explanation = document.createElement('p');
+    explanation.textContent = 'CourseWeave does not run this command. Review and copy the structured values when ready.';
+    panel.appendChild(explanation);
+    const command = document.createElement('pre');
+    command.setAttribute('data-courseweave-terminal-command', '');
+    command.textContent = payload;
+    command.style.whiteSpace = 'pre-wrap';
+    command.style.userSelect = 'text';
+    panel.appendChild(command);
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.textContent = 'Copy launch instructions';
+    panel.appendChild(copy);
+    const status = document.createElement('span');
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    status.style.marginInlineStart = '8px';
+    panel.appendChild(status);
+    copy.addEventListener('click', () => {
+        status.textContent = 'Copying terminal launch instructions…';
+        void Promise.resolve().then(() => writeClipboard(payload)).then(() => {
+            status.textContent = 'Terminal launch instructions copied.';
+        }).catch(() => {
+            status.textContent = 'Copy failed. Select the instructions and copy them manually.';
+        });
+    });
+    return new widgets_1.Widget({ node: panel });
+}
+function mainAreaWidget(value) {
+    if (!(value instanceof widgets_1.Widget) && (!record(value) || !nonBlank(value.id))) {
+        throw new Error('Native terminal unavailable.');
+    }
+    const candidate = value;
+    if (!record(candidate.contentHeader) || typeof candidate.contentHeader.addWidget !== 'function' || candidate.isDisposed) {
+        throw new Error('Native terminal unavailable.');
+    }
+    return candidate;
+}
 function coordinateForCoursePath(course, path) {
     try {
         safeRelativePath(path);
@@ -220,6 +281,7 @@ class CourseSurfaceFactory {
         this.dashboard = null;
         this.author = null;
         this.terminals = new Map();
+        this.terminalFlights = new Map();
         this.metadata = new WeakMap();
         this.jupyterBaseUrl = canonicalJupyterBaseUrl(options.jupyterOrigin, options.baseUrl);
     }
@@ -250,6 +312,34 @@ class CourseSurfaceFactory {
         this.activate(widget);
         return widget;
     }
+    createTerminal(key, coordinate, surface) {
+        const instructions = terminalInstructions(surface, this.options.writeClipboard ?? writeBrowserClipboard);
+        const creation = this.options.commands.execute('terminal:create-new', {
+            name: `courseweave-${coordinate.moduleId}-${coordinate.phaseId}-${surface.id}`
+        }).then((created) => {
+            const widget = mainAreaWidget(created);
+            widget.contentHeader.addWidget(instructions);
+            this.terminals.set(key, widget);
+            widget.disposed.connect(() => {
+                instructions.dispose();
+                if (this.terminals.get(key) === widget)
+                    this.terminals.delete(key);
+            });
+            return widget;
+        }).catch((error) => {
+            instructions.dispose();
+            throw error;
+        });
+        this.terminalFlights.set(key, creation);
+        void creation.then(() => {
+            if (this.terminalFlights.get(key) === creation)
+                this.terminalFlights.delete(key);
+        }, () => {
+            if (this.terminalFlights.get(key) === creation)
+                this.terminalFlights.delete(key);
+        });
+        return creation;
+    }
     async open(coordinate) {
         const surface = this.lookup(coordinate);
         if (surface.type === 'markdown') {
@@ -270,18 +360,7 @@ class CourseSurfaceFactory {
             const key = `${coordinate.moduleId}/${coordinate.phaseId}/${surface.id}`;
             let widget = this.terminals.get(key);
             if (widget === undefined || widget.isDisposed) {
-                const created = await this.options.commands.execute('terminal:create-new', {
-                    name: `courseweave-${coordinate.moduleId}-${coordinate.phaseId}-${surface.id}`,
-                    ...(surface.cwd === undefined ? {} : { cwd: surface.cwd })
-                });
-                if (!(created instanceof widgets_1.Widget) && (!record(created) || !nonBlank(created.id)))
-                    throw new Error('Native terminal unavailable.');
-                widget = created;
-                this.terminals.set(key, widget);
-                widget.disposed.connect(() => {
-                    if (this.terminals.get(key) === widget)
-                        this.terminals.delete(key);
-                });
+                widget = await (this.terminalFlights.get(key) ?? this.createTerminal(key, coordinate, surface));
             }
             this.metadata.set(widget, { activePath: null, surfaceKind: 'terminal', terminalSurfaceId: surface.id, explicitModuleId: coordinate.moduleId, explicitPhaseId: coordinate.phaseId });
             this.activate(widget);
