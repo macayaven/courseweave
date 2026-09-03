@@ -145,6 +145,13 @@ interface SurfaceCommands {
   execute(command: string, args?: Record<string, unknown>): Promise<unknown>;
 }
 
+interface SurfaceMainAreaWidget extends Widget {
+  // MainAreaWidget's public extension point for notification/header widgets.
+  readonly contentHeader: {
+    addWidget(widget: Widget): void;
+  };
+}
+
 export interface SurfaceMetadata {
   activePath: string | null;
   surfaceKind: SurfaceType | null;
@@ -178,7 +185,7 @@ function writeBrowserClipboard(text: string): Promise<void> {
   return clipboard.writeText(text);
 }
 
-function terminalInstructions(surface: CourseSurface, writeClipboard: (text: string) => Promise<void>): HTMLElement {
+function terminalInstructions(surface: CourseSurface, writeClipboard: (text: string) => Promise<void>): Widget {
   if (surface.cwd === undefined || surface.argv === undefined || surface.argv.length === 0) {
     throw new Error('Terminal instructions are missing.');
   }
@@ -226,7 +233,18 @@ function terminalInstructions(surface: CourseSurface, writeClipboard: (text: str
       status.textContent = 'Copy failed. Select the instructions and copy them manually.';
     });
   });
-  return panel;
+  return new Widget({ node: panel });
+}
+
+function mainAreaWidget(value: unknown): SurfaceMainAreaWidget {
+  if (!(value instanceof Widget) && (!record(value) || !nonBlank(value.id))) {
+    throw new Error('Native terminal unavailable.');
+  }
+  const candidate = value as SurfaceMainAreaWidget;
+  if (!record(candidate.contentHeader) || typeof candidate.contentHeader.addWidget !== 'function' || candidate.isDisposed) {
+    throw new Error('Native terminal unavailable.');
+  }
+  return candidate;
 }
 
 export function coordinateForCoursePath(course: CourseSnapshot, path: string): { moduleId: string; phaseId: string } | null {
@@ -345,6 +363,7 @@ export class CourseSurfaceFactory {
   private dashboard: DashboardWidget | null = null;
   private author: IframeWidget | null = null;
   private readonly terminals = new Map<string, Widget>();
+  private readonly terminalFlights = new Map<string, Promise<SurfaceMainAreaWidget>>();
   private readonly metadata = new WeakMap<object, SurfaceMetadata>();
   private readonly jupyterBaseUrl: string;
 
@@ -379,6 +398,32 @@ export class CourseSurfaceFactory {
     return widget;
   }
 
+  private createTerminal(key: string, coordinate: SurfaceCoordinate, surface: CourseSurface): Promise<SurfaceMainAreaWidget> {
+    const instructions = terminalInstructions(surface, this.options.writeClipboard ?? writeBrowserClipboard);
+    const creation = this.options.commands.execute('terminal:create-new', {
+      name: `courseweave-${coordinate.moduleId}-${coordinate.phaseId}-${surface.id}`
+    }).then((created) => {
+      const widget = mainAreaWidget(created);
+      widget.contentHeader.addWidget(instructions);
+      this.terminals.set(key, widget);
+      widget.disposed.connect(() => {
+        instructions.dispose();
+        if (this.terminals.get(key) === widget) this.terminals.delete(key);
+      });
+      return widget;
+    }).catch((error: unknown) => {
+      instructions.dispose();
+      throw error;
+    });
+    this.terminalFlights.set(key, creation);
+    void creation.then(() => {
+      if (this.terminalFlights.get(key) === creation) this.terminalFlights.delete(key);
+    }, () => {
+      if (this.terminalFlights.get(key) === creation) this.terminalFlights.delete(key);
+    });
+    return creation;
+  }
+
   async open(coordinate: SurfaceCoordinate): Promise<SurfaceOpenResult> {
     const surface = this.lookup(coordinate);
     if (surface.type === 'markdown') {
@@ -398,17 +443,7 @@ export class CourseSurfaceFactory {
       const key = `${coordinate.moduleId}/${coordinate.phaseId}/${surface.id}`;
       let widget = this.terminals.get(key);
       if (widget === undefined || widget.isDisposed) {
-        const instructions = terminalInstructions(surface, this.options.writeClipboard ?? writeBrowserClipboard);
-        const created = await this.options.commands.execute('terminal:create-new', {
-          name: `courseweave-${coordinate.moduleId}-${coordinate.phaseId}-${surface.id}`
-        });
-        if (!(created instanceof Widget) && (!record(created) || !nonBlank(created.id))) throw new Error('Native terminal unavailable.');
-        widget = created as Widget;
-        (widget.node.querySelector<HTMLElement>('.jp-Terminal') ?? widget.node).prepend(instructions);
-        this.terminals.set(key, widget);
-        widget.disposed.connect(() => {
-          if (this.terminals.get(key) === widget) this.terminals.delete(key);
-        });
+        widget = await (this.terminalFlights.get(key) ?? this.createTerminal(key, coordinate, surface));
       }
       this.metadata.set(widget, { activePath: null, surfaceKind: 'terminal', terminalSurfaceId: surface.id, explicitModuleId: coordinate.moduleId, explicitPhaseId: coordinate.phaseId });
       this.activate(widget);

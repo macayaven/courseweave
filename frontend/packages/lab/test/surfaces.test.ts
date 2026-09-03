@@ -58,13 +58,31 @@ const course: CourseSnapshot = {
 };
 
 function widget(id: string) {
-  return {
+  const handlers: Array<() => void> = [];
+  const contentHeader = {
+    addWidget: vi.fn((child: Widget) => {
+      value.node.querySelector('[data-main-area-content-header]')!.appendChild(child.node);
+    })
+  };
+  const value = {
     id,
     isDisposed: false,
     node: document.createElement('div'),
     title: { label: '', caption: '', closable: false },
-    disposed: { connect: vi.fn() }
+    disposed: { connect: vi.fn((handler: () => void) => handlers.push(handler)) },
+    contentHeader,
+    dispose: vi.fn(() => {
+      value.isDisposed = true;
+      handlers.forEach((handler) => handler());
+    })
   };
+  const header = document.createElement('div');
+  header.setAttribute('data-main-area-content-header', '');
+  value.node.appendChild(header);
+  const terminalInternal = document.createElement('div');
+  terminalInternal.className = 'jp-Terminal';
+  value.node.appendChild(terminalInternal);
+  return value;
 }
 
 function harness(
@@ -146,6 +164,8 @@ describe('CourseSurfaceFactory', () => {
     });
     expect(JSON.stringify(commands.execute.mock.calls)).not.toContain('labs');
     expect(JSON.stringify(commands.execute.mock.calls)).not.toContain('python');
+    expect(nativeTerminal.contentHeader.addWidget).toHaveBeenCalledOnce();
+    expect(nativeTerminal.node.querySelector('.jp-Terminal')?.children).toHaveLength(0);
     expect(nativeTerminal.node.querySelectorAll('[data-courseweave-terminal-instructions]')).toHaveLength(1);
     const instructions = nativeTerminal.node.querySelector<HTMLElement>('[data-courseweave-terminal-instructions]')!;
     const payload = '{\n  "cwd": "labs",\n  "argv": [\n    "python",\n    "-m",\n    "lab"\n  ]\n}';
@@ -160,6 +180,55 @@ describe('CourseSurfaceFactory', () => {
     expect(second.terminalSurfaceId).toBe('terminal');
     expect(shell.activateById).toHaveBeenCalledTimes(2);
     expect(shell.activateById).toHaveBeenLastCalledWith('terminal-native');
+  });
+
+  it('single-flights concurrent terminal opens and activates the same composed widget for every caller', async () => {
+    let resolveCreation!: (value: ReturnType<typeof widget>) => void;
+    const { factory, commands, shell, nativeTerminal } = harness();
+    commands.execute.mockReturnValue(new Promise((resolve) => {
+      resolveCreation = resolve;
+    }));
+
+    const first = factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
+    const second = factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
+    expect(commands.execute).toHaveBeenCalledOnce();
+
+    resolveCreation(nativeTerminal);
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+    expect(nativeTerminal.contentHeader.addWidget).toHaveBeenCalledOnce();
+    expect(nativeTerminal.node.querySelectorAll('[data-courseweave-terminal-instructions]')).toHaveLength(1);
+    expect(shell.activateById.mock.calls).toEqual([['terminal-native'], ['terminal-native']]);
+  });
+
+  it('clears a failed terminal creation flight so a later open can retry', async () => {
+    const { factory, commands } = harness();
+    const replacement = widget('terminal-retry');
+    commands.execute.mockRejectedValueOnce(new Error('backend unavailable')).mockResolvedValueOnce(replacement);
+    const first = factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
+    const second = factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
+    await expect(Promise.all([first, second])).rejects.toThrow('backend unavailable');
+
+    await expect(factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' })).resolves.toMatchObject({
+      terminalSurfaceId: 'terminal'
+    });
+    expect(commands.execute).toHaveBeenCalledTimes(2);
+    expect(replacement.contentHeader.addWidget).toHaveBeenCalledOnce();
+  });
+
+  it('disposes owned instructions and recreates one composition after the native terminal closes', async () => {
+    const { factory, commands, nativeTerminal } = harness();
+    const replacement = widget('terminal-recreated');
+    commands.execute.mockResolvedValueOnce(nativeTerminal).mockResolvedValueOnce(replacement);
+    await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
+    const instructions = nativeTerminal.contentHeader.addWidget.mock.calls[0]![0] as Widget;
+
+    nativeTerminal.dispose();
+    expect(instructions.isDisposed).toBe(true);
+    await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
+
+    expect(commands.execute).toHaveBeenCalledTimes(2);
+    expect(replacement.contentHeader.addWidget).toHaveBeenCalledOnce();
+    expect(replacement.node.querySelectorAll('[data-courseweave-terminal-instructions]')).toHaveLength(1);
   });
 
   it('shows copy failure without forwarding instructions or executing anything', async () => {
