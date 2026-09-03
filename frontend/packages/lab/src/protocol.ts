@@ -11,11 +11,6 @@ export interface RuntimeRelayPayload {
   capabilityToken: string;
 }
 
-/** The narrow PageConfig boundary needed for activation-time launch parsing. */
-export interface PageConfigReader {
-  getOption(key: string): string;
-}
-
 function exactObject(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return typeof value === 'object'
     && value !== null
@@ -90,10 +85,10 @@ export function parseRuntimeRequest(value: unknown): { type: 'courseweave.runtim
     : null;
 }
 
-export function parseLaunchConfiguration(pageConfig: PageConfigReader): LaunchConfiguration | null {
-  const serviceOrigin = canonicalHttpOrigin(pageConfig.getOption('courseweaveServiceUrl'));
-  const runtimeId = pageConfig.getOption('courseweaveRuntimeId');
-  const launchMode = pageConfig.getOption('courseweaveLaunchMode');
+export function parseLaunchConfiguration(getOption: (key: string) => string): LaunchConfiguration | null {
+  const serviceOrigin = canonicalHttpOrigin(getOption('courseweaveServiceUrl'));
+  const runtimeId = getOption('courseweaveRuntimeId');
+  const launchMode = getOption('courseweaveLaunchMode');
   if (
     serviceOrigin === null
     || !boundedNonBlank(runtimeId, 240)
