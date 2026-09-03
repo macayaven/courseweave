@@ -67,10 +67,14 @@ function widget(id: string) {
   };
 }
 
-function harness(beforeAuthorAttach?: (widget: Widget, iframe: HTMLIFrameElement) => void) {
+function harness(
+  beforeAuthorAttach?: (widget: Widget, iframe: HTMLIFrameElement) => void,
+  writeClipboard = vi.fn().mockResolvedValue(undefined)
+) {
   const shell = { add: vi.fn(), activateById: vi.fn(), currentWidget: null };
   const documents = { openOrReveal: vi.fn((path: string, factory: string) => widget(`${factory}:${path}`)) };
-  const commands = { execute: vi.fn().mockResolvedValue(widget('terminal-native')) };
+  const nativeTerminal = widget('terminal-native');
+  const commands = { execute: vi.fn().mockResolvedValue(nativeTerminal) };
   const factory = new CourseSurfaceFactory({
     shell,
     documents,
@@ -78,10 +82,11 @@ function harness(beforeAuthorAttach?: (widget: Widget, iframe: HTMLIFrameElement
     serviceOrigin: 'https://courseweave.test',
     jupyterOrigin: 'https://lab.test',
     baseUrl: '/base/',
-    beforeAuthorAttach
+    beforeAuthorAttach,
+    writeClipboard
   });
   factory.setCourse(course);
-  return { factory, shell, documents, commands };
+  return { factory, shell, documents, commands, nativeTerminal, writeClipboard };
 }
 
 describe('CourseSurfaceFactory', () => {
@@ -128,28 +133,60 @@ describe('CourseSurfaceFactory', () => {
     expect(coordinateForCoursePath(duplicate, 'notebooks/lab.ipynb')).toBeNull();
   });
 
-  it('creates one stable native terminal without forwarding or interpreting manifest argv', async () => {
-    const { factory, commands, shell } = harness();
+  it('shows exact structured terminal instructions before activating one stable native terminal', async () => {
+    const { factory, commands, shell, nativeTerminal, writeClipboard } = harness();
+    shell.activateById.mockImplementation(() => {
+      expect(nativeTerminal.node.querySelector('[data-courseweave-terminal-instructions]')).not.toBeNull();
+    });
     const first = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
     const second = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
     expect(commands.execute).toHaveBeenCalledOnce();
     expect(commands.execute).toHaveBeenCalledWith('terminal:create-new', {
-      name: 'courseweave-m01-p01-terminal',
-      cwd: 'labs'
+      name: 'courseweave-m01-p01-terminal'
     });
+    expect(JSON.stringify(commands.execute.mock.calls)).not.toContain('labs');
     expect(JSON.stringify(commands.execute.mock.calls)).not.toContain('python');
+    expect(nativeTerminal.node.querySelectorAll('[data-courseweave-terminal-instructions]')).toHaveLength(1);
+    const instructions = nativeTerminal.node.querySelector<HTMLElement>('[data-courseweave-terminal-instructions]')!;
+    const payload = '{\n  "cwd": "labs",\n  "argv": [\n    "python",\n    "-m",\n    "lab"\n  ]\n}';
+    expect(instructions.querySelector('[data-courseweave-terminal-command]')?.textContent).toBe(payload);
+    expect(instructions.textContent).toContain('Terminal launch instructions');
+    const copy = instructions.querySelector<HTMLButtonElement>('button')!;
+    expect(copy.textContent).toBe('Copy launch instructions');
+    copy.click();
+    await vi.waitFor(() => expect(writeClipboard).toHaveBeenCalledWith(payload));
+    expect(instructions.querySelector('[role="status"]')?.textContent).toBe('Terminal launch instructions copied.');
     expect(first.terminalSurfaceId).toBe('terminal');
     expect(second.terminalSurfaceId).toBe('terminal');
+    expect(shell.activateById).toHaveBeenCalledTimes(2);
     expect(shell.activateById).toHaveBeenLastCalledWith('terminal-native');
   });
 
-  it('rejects an unsafe terminal cwd without creating a terminal', async () => {
-    const { factory, commands } = harness();
+  it('shows copy failure without forwarding instructions or executing anything', async () => {
+    const writeClipboard = vi.fn(() => {
+      throw new Error('clipboard denied');
+    });
+    const { factory, commands, nativeTerminal } = harness(undefined, writeClipboard);
+    await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
+    nativeTerminal.node.querySelector<HTMLButtonElement>('button')!.click();
+    await vi.waitFor(() => expect(nativeTerminal.node.querySelector('[role="status"]')?.textContent).toBe(
+      'Copy failed. Select the instructions and copy them manually.'
+    ));
+    expect(commands.execute).toHaveBeenCalledOnce();
+    expect(commands.execute).toHaveBeenCalledWith('terminal:create-new', {
+      name: 'courseweave-m01-p01-terminal'
+    });
+  });
+
+  it('rejects an unsafe terminal cwd before creating UI or a terminal', async () => {
+    const { factory, commands, shell } = harness();
     const unsafe = structuredClone(course);
     unsafe.modules[0]!.phases[0]!.surfaces.find((surface) => surface.type === 'terminal')!.cwd = '../outside';
     factory.setCourse(unsafe);
     await expect(factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' })).rejects.toThrow('unsafe course path');
     expect(commands.execute).not.toHaveBeenCalled();
+    expect(shell.add).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-courseweave-terminal-instructions]')).toBeNull();
   });
 
   it('uses one reusable sandboxed reader with jailed Jupyter files and validated HTTPS video URLs', async () => {

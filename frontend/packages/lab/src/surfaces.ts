@@ -161,12 +161,72 @@ interface CourseSurfaceFactoryOptions {
   jupyterOrigin: string;
   baseUrl: string;
   beforeAuthorAttach?: (widget: Widget, iframe: HTMLIFrameElement) => void;
+  writeClipboard?: (text: string) => Promise<void>;
 }
 
 export interface SurfaceOpenResult {
   htmlSource: string | null;
   jupyterBaseUrl: string;
   terminalSurfaceId: string | null;
+}
+
+function writeBrowserClipboard(text: string): Promise<void> {
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  if (clipboard === undefined || typeof clipboard.writeText !== 'function') {
+    return Promise.reject(new Error('Clipboard API unavailable.'));
+  }
+  return clipboard.writeText(text);
+}
+
+function terminalInstructions(surface: CourseSurface, writeClipboard: (text: string) => Promise<void>): HTMLElement {
+  if (surface.cwd === undefined || surface.argv === undefined || surface.argv.length === 0) {
+    throw new Error('Terminal instructions are missing.');
+  }
+  const payload = JSON.stringify({ cwd: surface.cwd, argv: surface.argv }, null, 2);
+  const panel = document.createElement('section');
+  panel.setAttribute('data-courseweave-terminal-instructions', '');
+  panel.setAttribute('aria-label', 'CourseWeave terminal launch instructions');
+  panel.style.padding = '8px 12px';
+  panel.style.background = 'var(--jp-layout-color1, #fff)';
+  panel.style.borderBottom = 'var(--jp-border-width, 1px) solid var(--jp-border-color2, #ddd)';
+  panel.style.maxHeight = '40%';
+  panel.style.overflow = 'auto';
+
+  const heading = document.createElement('strong');
+  heading.textContent = 'Terminal launch instructions';
+  panel.appendChild(heading);
+
+  const explanation = document.createElement('p');
+  explanation.textContent = 'CourseWeave does not run this command. Review and copy the structured values when ready.';
+  panel.appendChild(explanation);
+
+  const command = document.createElement('pre');
+  command.setAttribute('data-courseweave-terminal-command', '');
+  command.textContent = payload;
+  command.style.whiteSpace = 'pre-wrap';
+  command.style.userSelect = 'text';
+  panel.appendChild(command);
+
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.textContent = 'Copy launch instructions';
+  panel.appendChild(copy);
+
+  const status = document.createElement('span');
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  status.style.marginInlineStart = '8px';
+  panel.appendChild(status);
+
+  copy.addEventListener('click', () => {
+    status.textContent = 'Copying terminal launch instructions…';
+    void Promise.resolve().then(() => writeClipboard(payload)).then(() => {
+      status.textContent = 'Terminal launch instructions copied.';
+    }).catch(() => {
+      status.textContent = 'Copy failed. Select the instructions and copy them manually.';
+    });
+  });
+  return panel;
 }
 
 export function coordinateForCoursePath(course: CourseSnapshot, path: string): { moduleId: string; phaseId: string } | null {
@@ -338,12 +398,13 @@ export class CourseSurfaceFactory {
       const key = `${coordinate.moduleId}/${coordinate.phaseId}/${surface.id}`;
       let widget = this.terminals.get(key);
       if (widget === undefined || widget.isDisposed) {
+        const instructions = terminalInstructions(surface, this.options.writeClipboard ?? writeBrowserClipboard);
         const created = await this.options.commands.execute('terminal:create-new', {
-          name: `courseweave-${coordinate.moduleId}-${coordinate.phaseId}-${surface.id}`,
-          ...(surface.cwd === undefined ? {} : { cwd: surface.cwd })
+          name: `courseweave-${coordinate.moduleId}-${coordinate.phaseId}-${surface.id}`
         });
         if (!(created instanceof Widget) && (!record(created) || !nonBlank(created.id))) throw new Error('Native terminal unavailable.');
         widget = created as Widget;
+        (widget.node.querySelector<HTMLElement>('.jp-Terminal') ?? widget.node).prepend(instructions);
         this.terminals.set(key, widget);
         widget.disposed.connect(() => {
           if (this.terminals.get(key) === widget) this.terminals.delete(key);
