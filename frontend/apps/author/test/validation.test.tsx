@@ -52,6 +52,184 @@ import {
 afterEach(cleanup);
 
 describe("Author validation presentation", () => {
+  it("reveals every representative real Inspector pointer on its stable owning entity", async () => {
+    const capability = {
+      chat: false,
+      hint_level: "none" as const,
+      share_selection: false,
+      share_cell: false,
+      share_output: false,
+      create_profile_proposal: false,
+      create_course_proposal: false,
+      create_workspace_proposal: false,
+    };
+    const phase = (
+      id: string,
+      completion: AuthorManifest["modules"][number]["phases"][number]["completion"],
+      surfaces: AuthorManifest["modules"][number]["phases"][number]["surfaces"],
+    ) => ({
+      id,
+      title: id,
+      kind: "read" as const,
+      teacher_mode: "reading_companion" as const,
+      completion,
+      capabilities: capability,
+      surfaces,
+    });
+    const manifest: AuthorManifest = {
+      schema_version: 1,
+      id: "course",
+      title: "Course",
+      description: "",
+      entry_module_id: "one",
+      policies: {
+        content_sharing: "explicit_only",
+        durable_mutation: "proposal_or_direct_student_action",
+        terminal_execution: "student_only",
+        conversation_memory: "session_only",
+        max_shared_chars: 1,
+        workspace_write_globs: ["docs/**"],
+      },
+      modules: [
+        {
+          id: "one",
+          title: "One",
+          description: "",
+          phases: [
+            phase("notebook", { type: "manual" }, [
+              {
+                id: "nb",
+                type: "notebook",
+                role: "primary",
+                path: "n.ipynb",
+                match: { cell_ids: ["cell"], cell_tags: ["tag"] },
+              },
+              {
+                id: "term",
+                type: "terminal",
+                role: "exercise",
+                label: "Run",
+                argv: ["pnpm"],
+                cwd: ".",
+              },
+            ]),
+          ],
+        },
+        {
+          id: "two",
+          title: "Two",
+          description: "",
+          phases: [
+            phase(
+              "complete",
+              {
+                type: "artifact_exists",
+                record_id: "receipt",
+                path: "proof.txt",
+              },
+              [
+                {
+                  id: "two-path",
+                  type: "markdown",
+                  role: "primary",
+                  path: "two.md",
+                },
+              ],
+            ),
+          ],
+        },
+      ],
+    };
+    appMocks.runtime.mockReturnValue({
+      status: "ready",
+      runtime: {
+        serviceOrigin: "https://course.test",
+        capabilityToken: "token",
+        sourceId: "author",
+      },
+      retry: appMocks.retry,
+    });
+    appMocks.getCourse.mockResolvedValue({
+      manifest,
+      raw: "{}",
+      etag: '"etag"',
+    });
+    render(<AuthorApp />);
+    await screen.findByLabelText("Course title");
+    const cases: Array<[string, string, string]> = [
+      ["/title", "Course title", ""],
+      ["/policies/max_shared_chars", "Max shared characters", ""],
+      ["/modules/1/title", "Module title", "Select module Two"],
+      [
+        "/modules/1/phases/0/teacher_mode",
+        "Teacher mode",
+        "Select phase complete",
+      ],
+      [
+        "/modules/1/phases/0/completion/path",
+        "Artifact path",
+        "Select phase complete",
+      ],
+      [
+        "/modules/0/phases/0/surfaces/0/match/cell_ids/0",
+        "Cell ID 1",
+        "Select surface nb",
+      ],
+      [
+        "/modules/0/phases/0/surfaces/1/cwd",
+        "Working directory",
+        "Select surface term",
+      ],
+    ];
+    for (const [path, label, selection] of cases) {
+      const message = `Issue ${path}`;
+      appMocks.validateCourse.mockRejectedValueOnce(
+        Object.assign(new Error("invalid"), {
+          details: { issues: [{ path, code: "schema_validation", message }] },
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Validate structure" }),
+      );
+      await screen.findByText(message);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Focus first issue" }),
+      );
+      const control = await screen.findByLabelText(label);
+      expect(control).toHaveAttribute("id", pointerToControlId(path));
+      expect(control).toHaveAttribute(
+        "aria-describedby",
+        pointerToControlId(path, "issue"),
+      );
+      expect(control).toHaveFocus();
+      if (selection)
+        expect(screen.getByRole("button", { name: selection })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
+    }
+    const first = "/modules/0/phases/0/surfaces/0/path";
+    const second = "/modules/1/phases/0/surfaces/0/path";
+    appMocks.validateCourse.mockRejectedValueOnce(
+      Object.assign(new Error("invalid"), {
+        details: {
+          issues: [
+            { path: first, code: "missing_artifact", message: "First path." },
+            { path: second, code: "missing_artifact", message: "Second path." },
+          ],
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
+    await screen.findByText("Second path.");
+    expect(
+      document.getElementById(pointerToControlId(first, "issue")),
+    ).not.toBe(document.getElementById(pointerToControlId(second, "issue")));
+    fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
+    const firstControl = await screen.findByLabelText("Path");
+    expect(firstControl).toHaveAttribute("id", pointerToControlId(first));
+    expect(firstControl).toHaveFocus();
+  });
   it("registers deterministic JSON Pointer IDs on real course and policy controls", async () => {
     const manifest: AuthorManifest = {
       schema_version: 1,
