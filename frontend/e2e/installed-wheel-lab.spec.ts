@@ -1,6 +1,6 @@
 import { expect, test, type Page } from 'playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,6 +19,25 @@ async function bootstrap(page: Page, tokenlessUrl: string): Promise<void> {
   } catch {
     throw new Error('Installed-wheel bootstrap navigation failed.');
   }
+}
+
+const PALETTE_STEP_TIMEOUT_MS = 10_000;
+const DASHBOARD_COMMAND = 'Open CourseWeave Dashboard';
+
+async function invokePaletteCommand(page: Page, command: string, timeout = PALETTE_STEP_TIMEOUT_MS): Promise<void> {
+  await page.getByRole('menuitem', { name: 'View', exact: true }).click({ timeout });
+  await page.getByRole('menuitem', { name: 'Activate Command Palette', exact: true }).click({ timeout });
+  const palette = page.locator('.jp-ModalCommandPalette');
+  const input = palette.locator('.lm-CommandPalette-input');
+  await expect(palette).toBeVisible({ timeout });
+  await expect(input).toBeVisible({ timeout });
+  await input.focus({ timeout });
+  await expect(input).toBeFocused({ timeout });
+  await input.pressSequentially(command, { delay: 10, timeout });
+  await expect(input).toHaveValue(command, { timeout });
+  await expect(palette.getByRole('menuitem', { name: command, exact: true })).toBeVisible({ timeout });
+  await input.press('Enter', { timeout });
+  await expect(palette).toBeHidden({ timeout });
 }
 
 async function credentialSnapshot(page: Page, runtimeId: string) {
@@ -42,6 +61,79 @@ async function credentialSnapshot(page: Page, runtimeId: string) {
 }
 
 test.describe.configure({ timeout: 300_000, mode: 'serial' });
+
+test('focused command-palette proof requires native keyboard input and Enter', async ({ page }) => {
+  await page.setContent(`
+    <button role="menuitem" id="view">View</button>
+    <button role="menuitem" id="activate" hidden>Activate Command Palette</button>
+    <div class="jp-ModalCommandPalette" id="palette" hidden>
+      <input class="lm-CommandPalette-input" aria-label="SEARCH" />
+      <div class="lm-CommandPalette-item" role="menuitem">${DASHBOARD_COMMAND}</div>
+    </div>
+    <div id="courseweave-dashboard" hidden>Installed wheel rich course</div>
+    <script>
+      const command = ${JSON.stringify(DASHBOARD_COMMAND)};
+      const activate = document.querySelector('#activate');
+      const palette = document.querySelector('#palette');
+      const input = document.querySelector('.lm-CommandPalette-input');
+      const dashboard = document.querySelector('#courseweave-dashboard');
+      let keyboardQuery = '';
+      document.querySelector('#view').addEventListener('click', () => { activate.hidden = false; });
+      activate.addEventListener('click', () => {
+        palette.hidden = false;
+        input.focus();
+        input.select();
+      });
+      input.addEventListener('keydown', (event) => {
+        if (event.key.length === 1) keyboardQuery += event.key;
+        if (event.key === 'Enter' && keyboardQuery === command) {
+          dashboard.hidden = false;
+          palette.hidden = true;
+        }
+      });
+      input.addEventListener('input', () => {
+        if (input.value !== keyboardQuery) input.value = '';
+      });
+    </script>
+  `);
+
+  await invokePaletteCommand(page, DASHBOARD_COMMAND, 500);
+
+  await expect(page.locator('#courseweave-dashboard')).toBeVisible({ timeout: 500 });
+});
+
+test('a bounded palette failure still removes a confirmed-dead owned root in finally', async ({ page }) => {
+  const owned = await mkdtemp(join(tmpdir(), 'courseweave-bounded-palette-cleanup-'));
+  const supervisor = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1000)'], {
+    detached: true,
+    stdio: 'ignore'
+  });
+  if (supervisor.pid === undefined) throw new Error('Bounded cleanup proof supervisor did not start.');
+  const tracker = new OwnedProcessTracker(supervisor.pid);
+  let interactionError: unknown;
+  let cleanupError: unknown;
+
+  await new Promise<void>((resolveExit) => supervisor.once('exit', () => resolveExit()));
+  expect(tracker.live()).toEqual([]);
+  try {
+    await invokePaletteCommand(page, DASHBOARD_COMMAND, 100);
+  } catch (error) {
+    interactionError = error;
+  } finally {
+    const cleanup = await Promise.allSettled([page.close(), stopOwnedProcess(supervisor, tracker)]);
+    if (cleanup[1]?.status === 'fulfilled') {
+      await rm(owned, { recursive: true, force: true });
+    } else {
+      cleanupError = cleanup[1]?.reason;
+    }
+  }
+
+  expect(interactionError).toBeInstanceOf(Error);
+  expect((interactionError as Error).message).toContain('Timeout 100ms exceeded');
+  expect(cleanupError).toBeUndefined();
+  expect(tracker.live()).toEqual([]);
+  await expect(access(owned)).rejects.toThrow();
+});
 
 test('a failed bootstrap keeps its one-time token out of navigation errors', async ({ page }) => {
   const secret = ['installed', 'bootstrap', 'sentinel'].join('-');
@@ -178,13 +270,8 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     expect(guideReferrer).toMatch(/^https?:\/\/[^/]+\/$/);
     await expect(guide.locator('body')).toContainText('Installed wheel rich course');
     await expect(guide.getByRole('region', { name: 'Course dashboard' })).toContainText('Installed phase');
-    await page.getByRole('menuitem', { name: 'View' }).click({ timeout: 10_000 });
-    await page.getByRole('menuitem', { name: 'Activate Command Palette' }).click({ timeout: 10_000 });
-    const commandPalette = page.locator('.jp-ModalCommandPalette .lm-CommandPalette-input');
-    await expect(commandPalette).toBeVisible();
-    await commandPalette.fill('Open CourseWeave Dashboard');
-    await page.locator('.jp-ModalCommandPalette .lm-CommandPalette-item', { hasText: 'Open CourseWeave Dashboard' }).click();
-    await expect(page.locator('#courseweave-dashboard')).toContainText('Installed wheel rich course');
+    await invokePaletteCommand(page, DASHBOARD_COMMAND);
+    await expect(page.locator('#courseweave-dashboard')).toContainText('Installed wheel rich course', { timeout: PALETTE_STEP_TIMEOUT_MS });
     await expect.poll(() => publishedContexts.some((body) => body.sequence === 0 && typeof body.source_id === 'string')).toBe(true);
     const invalidationPromise = guide.locator('body').evaluate(() => new Promise<boolean>((resolve) => {
       const listener = (event: MessageEvent) => {
