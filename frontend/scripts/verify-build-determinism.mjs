@@ -6,7 +6,8 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const outputRoots = [
+export const outputRoots = [
+  'frontend/packages/lab/lib',
   'src/courseweave/labextension',
   'src/courseweave/static/learn',
   'src/courseweave/static/author'
@@ -51,7 +52,7 @@ function extractHead(destination) {
   });
 }
 
-async function inventory(root) {
+export async function inventory(root) {
   const result = [];
   for (const outputRoot of outputRoots) {
     const absoluteRoot = join(root, outputRoot);
@@ -71,24 +72,44 @@ async function inventory(root) {
   return result.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-const temporaryRoot = await mkdtemp(join(tmpdir(), 'courseweave-build-determinism-'));
-try {
-  const roots = [join(temporaryRoot, 'first'), join(temporaryRoot, 'second')];
-  for (const root of roots) {
-    await mkdir(root);
-    await extractHead(root);
-    await run('pnpm', ['install', '--frozen-lockfile'], join(root, 'frontend'));
-    await run('pnpm', ['build'], join(root, 'frontend'));
-  }
-  const [first, second] = await Promise.all(roots.map(inventory));
-  if (JSON.stringify(first) !== JSON.stringify(second)) {
-    const firstByPath = new Map(first.map((entry) => [entry.path, entry.sha256]));
-    const secondByPath = new Map(second.map((entry) => [entry.path, entry.sha256]));
-    const changed = [...new Set([...firstByPath.keys(), ...secondByPath.keys()])]
-      .filter((path) => firstByPath.get(path) !== secondByPath.get(path));
-    throw new Error(`Independent build inventories differ: ${changed.join(', ')}`);
-  }
-  console.log(`Deterministic build proof passed for ${first.length} generated files.`);
-} finally {
-  await rm(temporaryRoot, { recursive: true, force: true });
+function differingPaths(left, right) {
+  const leftByPath = new Map(left.map((entry) => [entry.path, entry.sha256]));
+  const rightByPath = new Map(right.map((entry) => [entry.path, entry.sha256]));
+  return [...new Set([...leftByPath.keys(), ...rightByPath.keys()])]
+    .filter((path) => leftByPath.get(path) !== rightByPath.get(path));
 }
+
+function requireSameInventory(left, right, message) {
+  const changed = differingPaths(left, right);
+  if (changed.length > 0) throw new Error(`${message}: ${changed.join(', ')}`);
+}
+
+export function verifyGeneratedInventories({ committed, first, second }) {
+  requireSameInventory(first, second, 'Independent build inventories differ');
+  requireSameInventory(committed, first, 'Committed generated output differs from fresh build');
+}
+
+export async function verifyBuildDeterminism() {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'courseweave-build-determinism-'));
+  try {
+    const roots = [join(temporaryRoot, 'first'), join(temporaryRoot, 'second')];
+    let committed;
+    for (const [index, root] of roots.entries()) {
+      await mkdir(root);
+      await extractHead(root);
+      if (index === 0) committed = await inventory(root);
+      await run('pnpm', ['install', '--frozen-lockfile'], join(root, 'frontend'));
+      for (const outputRoot of outputRoots) {
+        await rm(join(root, outputRoot), { recursive: true, force: true });
+      }
+      await run('pnpm', ['build'], join(root, 'frontend'));
+    }
+    const [first, second] = await Promise.all(roots.map(inventory));
+    verifyGeneratedInventories({ committed, first, second });
+    console.log(`Deterministic build proof passed for ${first.length} generated files.`);
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) await verifyBuildDeterminism();

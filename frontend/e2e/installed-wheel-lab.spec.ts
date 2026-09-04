@@ -62,7 +62,27 @@ async function credentialSnapshot(page: Page, runtimeId: string) {
   return { ...credential, storage: JSON.stringify(storage) };
 }
 
+function assertAuthorBrowserClean(
+  pageErrors: string[],
+  consoleMessages: Array<{ type: string; text: string; url: string }>
+): void {
+  if (pageErrors.length > 0 || consoleMessages.some((message) => message.type === 'error')) {
+    throw new Error('Installed Author reported unexpected browser errors.');
+  }
+}
+
 test.describe.configure({ timeout: 300_000, mode: 'serial' });
+
+test('Author browser telemetry rejects arbitrary page and error-level console failures', () => {
+  const message = 'Installed Author reported unexpected browser errors.';
+  expect(() => assertAuthorBrowserClean(['arbitrary page failure'], [])).toThrow(message);
+  expect(() => assertAuthorBrowserClean([], [
+    { type: 'error', text: 'arbitrary console failure', url: 'http://127.0.0.1/' }
+  ])).toThrow(message);
+  expect(() => assertAuthorBrowserClean([], [
+    { type: 'warning', text: 'non-error console message', url: 'http://127.0.0.1/' }
+  ])).not.toThrow();
+});
 
 test('focused command-palette proof requires native keyboard input and Enter', async ({ page }) => {
   await page.setContent(`
@@ -106,9 +126,9 @@ test('focused command-palette proof requires native keyboard input and Enter', a
   await expect(page.locator('#courseweave-dashboard')).toBeVisible({ timeout: 500 });
 });
 
-test('a bounded palette failure still removes a confirmed-dead owned root in finally', async ({ page }) => {
+test('a bounded palette failure still stops its live supervisor and removes its owned root in finally', async ({ page }) => {
   const owned = await mkdtemp(join(tmpdir(), 'courseweave-bounded-palette-cleanup-'));
-  const supervisor = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 1000)'], {
+  const supervisor = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 10000)'], {
     detached: true,
     stdio: 'ignore'
   });
@@ -117,8 +137,7 @@ test('a bounded palette failure still removes a confirmed-dead owned root in fin
   let interactionError: unknown;
   let cleanupError: unknown;
 
-  await new Promise<void>((resolveExit) => supervisor.once('exit', () => resolveExit()));
-  expect(tracker.live()).toEqual([]);
+  expect(tracker.live().some((process) => process.pid === supervisor.pid)).toBe(true);
   try {
     await invokePaletteCommand(page, DASHBOARD_COMMAND, 100);
   } catch (error) {
@@ -137,6 +156,48 @@ test('a bounded palette failure still removes a confirmed-dead owned root in fin
   expect(cleanupError).toBeUndefined();
   expect(tracker.live()).toEqual([]);
   await expect(access(owned)).rejects.toThrow();
+});
+
+test('cleanup fails closed when a supervisor exits after spawning an unobserved detached child', async () => {
+  const owned = await mkdtemp(join(tmpdir(), 'courseweave-unobserved-cleanup-proof-'));
+  const start = join(owned, 'start');
+  const ready = join(owned, 'ready');
+  let descendantPid = 0;
+  try {
+    const script = `
+      const { existsSync, writeFileSync } = require('node:fs');
+      const { spawn } = require('node:child_process');
+      const timer = setInterval(() => {
+        if (!existsSync(process.argv[1])) return;
+        clearInterval(timer);
+        const descendant = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 3000)'], { detached: true, stdio: 'ignore' });
+        descendant.unref();
+        writeFileSync(process.argv[2], String(descendant.pid));
+        process.exit(0);
+      }, 10);
+    `;
+    const supervisor = spawn(process.execPath, ['-e', script, start, ready], { detached: true, stdio: 'ignore' });
+    if (supervisor.pid === undefined) throw new Error('Unobserved cleanup proof supervisor did not start.');
+    const tracker = new OwnedProcessTracker(supervisor.pid);
+    const supervisorExit = new Promise<void>((resolveExit) => supervisor.once('exit', () => resolveExit()));
+    await writeFile(start, 'spawn\n', 'utf8');
+    await expect.poll(async () => Number(await readFile(ready, 'utf8').catch(() => '0'))).toBeGreaterThan(0);
+    descendantPid = Number(await readFile(ready, 'utf8'));
+    await supervisorExit;
+    expect(tracker.snapshot().some((process) => process.pid === descendantPid)).toBe(false);
+    expect(() => process.kill(descendantPid, 0)).not.toThrow();
+
+    await expect(stopOwnedProcess(supervisor, tracker)).rejects.toThrow(
+      'CourseWeave supervisor exited before its owned descendants.'
+    );
+  } finally {
+    if (descendantPid > 0) {
+      await expect.poll(() => {
+        try { process.kill(descendantPid, 0); return true; } catch { return false; }
+      }, { timeout: 5_000 }).toBe(false);
+    }
+    await rm(owned, { recursive: true, force: true });
+  }
 });
 
 test('a failed bootstrap keeps its one-time token out of navigation errors', async ({ page }) => {
@@ -414,6 +475,7 @@ test('fresh installed wheel opens Author without materializing an empty course b
     });
     expect(audit.retainedCredentials).toBe(0);
     expect(audit.filesScanned).toBeGreaterThan(0);
+    assertAuthorBrowserClean(pageErrors, consoleMessages);
   } finally {
     const cleanup = await Promise.allSettled([page.close(), workspace.close()]);
     if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;

@@ -101,12 +101,9 @@ export async function stopOwnedProcess(
 ): Promise<OwnedProcess[]> {
   if (child.pid === undefined) return [];
   const tracker = existingTracker ?? new OwnedProcessTracker(child.pid);
-  const initial = tracker.refresh();
+  tracker.refresh();
   if (child.exitCode !== null || child.signalCode !== null) {
-    if (initial.length > 0) {
-      throw new Error('CourseWeave supervisor exited before its owned descendants.');
-    }
-    return tracker.snapshot();
+    throw new Error('CourseWeave supervisor exited before its owned descendants.');
   }
   // Signal only through Node's handle for the unreaped direct child. Descendant
   // PIDs are observed, never signalled; production cleanup must reap them.
