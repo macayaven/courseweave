@@ -39,8 +39,177 @@ def test_help_lists_both_supervised_jupyter_modes_and_preserves_commands() -> No
     result = CliRunner().invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    for command in ("doctor", "serve", "launch", "author"):
+    for command in ("doctor", "serve", "launch", "author", "validate"):
         assert command in result.stdout
+
+
+def test_validate_reports_only_safe_counts_for_runnable_course_with_spaces(
+    tmp_path: Path,
+) -> None:
+    # Defect caught: validation rejects a quoted/spaced path, exposes course
+    # content, or writes learner/runtime state while checking the manifest.
+    source = Path(__file__).parents[1] / "examples" / "cli-course"
+    course = tmp_path / "runnable course with spaces"
+    shutil.copytree(source, course)
+    before = {
+        path.relative_to(course): path.read_bytes()
+        for path in course.rglob("*")
+        if path.is_file()
+    }
+
+    result = CliRunner().invoke(
+        app, ["validate", "--course-root", str(course)]
+    )
+
+    assert result.exit_code == 0
+    assert result.output == (
+        "Course manifest is valid: modules=1 phases=2 surfaces=2.\n"
+    )
+    assert "CLI Course" not in result.output
+    assert "lesson.md" not in result.output
+    assert not (course / ".courseweave").exists()
+    assert {
+        path.relative_to(course): path.read_bytes()
+        for path in course.rglob("*")
+        if path.is_file()
+    } == before
+
+
+@pytest.mark.parametrize("failure", ["schema", "unrunnable"])
+def test_validate_rejects_invalid_course_without_manifest_details(
+    tmp_path: Path, failure: str
+) -> None:
+    # Defect caught: CLI validation prints raw schema/path details or performs
+    # only structural validation instead of canonical runnable validation.
+    source = Path(__file__).parents[1] / "examples" / "cli-course"
+    course = tmp_path / f"invalid course {failure}"
+    shutil.copytree(source, course)
+    manifest_path = course / "courseweave.json"
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if failure == "schema":
+        data["credential-like-sentinel"] = "raw-manifest-secret"
+    else:
+        data["modules"][0]["phases"][0]["surfaces"][0]["path"] = (
+            "secret-missing-surface.md"
+        )
+    manifest_path.write_text(json.dumps(data), encoding="utf-8")
+    before = manifest_path.read_bytes()
+
+    result = CliRunner().invoke(
+        app, ["validate", "--course-root", str(course)]
+    )
+
+    assert result.exit_code == 1
+    assert result.output == "Course manifest is invalid or not runnable.\n"
+    assert "Traceback" not in result.output
+    assert "credential-like-sentinel" not in result.output
+    assert "raw-manifest-secret" not in result.output
+    assert "secret-missing-surface.md" not in result.output
+    assert manifest_path.read_bytes() == before
+    assert not (course / ".courseweave").exists()
+
+
+def test_validate_missing_manifest_is_safe_and_creates_no_course_files(
+    tmp_path: Path,
+) -> None:
+    # Defect caught: validation turns a missing manifest into an implicit draft
+    # or learner-state directory, or exposes the supplied course path.
+    course = tmp_path / "empty course secret-path-marker"
+    course.mkdir()
+
+    result = CliRunner().invoke(
+        app, ["validate", "--course-root", str(course)]
+    )
+
+    assert result.exit_code == 1
+    assert result.output == "Course manifest not found.\n"
+    assert "Traceback" not in result.output
+    assert "secret-path-marker" not in result.output
+    assert list(course.iterdir()) == []
+    assert not (course / "courseweave.json").exists()
+    assert not (course / ".courseweave").exists()
+
+
+def test_validate_rejects_unreadable_manifest_path_without_os_details(
+    tmp_path: Path,
+) -> None:
+    # Defect caught: an unusual manifest filesystem object escapes the
+    # validation boundary with an OS exception or identifying path details.
+    course = tmp_path / "course with unreadable manifest sentinel"
+    course.mkdir()
+    manifest_path = course / "courseweave.json"
+    manifest_path.mkdir()
+
+    result = CliRunner().invoke(
+        app, ["validate", "--course-root", str(course)]
+    )
+
+    assert result.exit_code == 1
+    assert result.output == "Course manifest could not be read.\n"
+    assert "Traceback" not in result.output
+    assert "unreadable manifest sentinel" not in result.output
+    assert manifest_path.is_dir()
+    assert not (course / ".courseweave").exists()
+
+
+@pytest.mark.parametrize("kind", ["missing", "file"])
+def test_validate_rejects_non_directory_root_with_constant_safe_error(
+    tmp_path: Path, kind: str
+) -> None:
+    # Defect caught: Typer's path conversion echoes a sensitive invalid path or
+    # the loader raises an unhandled filesystem exception with a traceback.
+    course = tmp_path / f"secret-invalid-root-{kind}"
+    if kind == "file":
+        course.write_text("unchanged", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app, ["validate", "--course-root", str(course)]
+    )
+
+    assert result.exit_code == 1
+    assert result.output == "Course root is not a directory.\n"
+    assert "Traceback" not in result.output
+    assert "secret-invalid-root" not in result.output
+    if kind == "missing":
+        assert not course.exists()
+    else:
+        assert course.read_text(encoding="utf-8") == "unchanged"
+
+
+def test_installed_console_entrypoint_exposes_and_executes_validate(
+    tmp_path: Path,
+) -> None:
+    # Defect caught: project metadata declares a console script whose installed
+    # executable does not expose or execute the validate command.
+    source = Path(__file__).parents[1] / "examples" / "cli-course"
+    course = tmp_path / "installed entrypoint course"
+    shutil.copytree(source, course)
+    entrypoint = Path(os.sys.executable).with_name("courseweave")
+    assert entrypoint.is_file()
+
+    help_result = subprocess.run(
+        [str(entrypoint), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    result = subprocess.run(
+        [str(entrypoint), "validate", "--course-root", str(course)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert help_result.returncode == 0
+    assert "validate" in help_result.stdout
+    assert result.returncode == 0
+    assert result.stdout == (
+        "Course manifest is valid: modules=1 phases=2 surfaces=2.\n"
+    )
+    assert result.stderr == ""
+    assert not (course / ".courseweave").exists()
 
 
 def test_course_lock_uses_canonical_host_runtime_key_and_stale_file_is_reusable(

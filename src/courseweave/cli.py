@@ -20,6 +20,11 @@ import uvicorn
 from courseweave import __version__
 from courseweave.api import create_app
 from courseweave.launch import LaunchSupervisor
+from courseweave.manifest import (
+    ManifestNotFoundError,
+    ManifestValidationError,
+    load_manifest,
+)
 from courseweave.providers import ProviderConfig
 
 ENV_CAPABILITY_TOKEN = "COURSEWEAVE_CAPABILITY_TOKEN"
@@ -29,6 +34,45 @@ app = typer.Typer(
     help="CourseWeave: local-first course platform.",
     no_args_is_help=True,
 )
+
+
+@app.command()
+def validate(
+    course_root: Path = typer.Option(
+        ...,
+        "--course-root",
+        resolve_path=True,
+        help="Root directory of the course repository.",
+    ),
+) -> None:
+    """Validate that a saved course manifest is runnable."""
+    if not course_root.is_dir():
+        typer.echo("Course root is not a directory.", err=True)
+        raise typer.Exit(1)
+
+    try:
+        manifest = load_manifest(course_root, runnable=True)
+    except ManifestNotFoundError:
+        typer.echo("Course manifest not found.", err=True)
+        raise typer.Exit(1) from None
+    except ManifestValidationError:
+        typer.echo("Course manifest is invalid or not runnable.", err=True)
+        raise typer.Exit(1) from None
+    except OSError:
+        typer.echo("Course manifest could not be read.", err=True)
+        raise typer.Exit(1) from None
+
+    phase_count = sum(len(module.phases) for module in manifest.modules)
+    surface_count = sum(
+        len(phase.surfaces)
+        for module in manifest.modules
+        for phase in module.phases
+    )
+    typer.echo(
+        "Course manifest is valid: "
+        f"modules={len(manifest.modules)} "
+        f"phases={phase_count} surfaces={surface_count}."
+    )
 
 
 @app.command()
