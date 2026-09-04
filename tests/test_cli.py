@@ -152,6 +152,34 @@ def test_validate_rejects_unreadable_manifest_path_without_os_details(
     assert not (course / ".courseweave").exists()
 
 
+def test_validate_handles_root_inspection_os_error_without_details(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Defect caught: root inspection raises before the manifest error boundary
+    # and exposes an OS exception containing a sensitive path or detail.
+    course = tmp_path / "secret-inspection-root"
+    original_is_dir = Path.is_dir
+
+    def failing_is_dir(path: Path) -> bool:
+        if path == course.resolve():
+            raise PermissionError(
+                "secret-inspection-detail",
+                str(course),
+            )
+        return original_is_dir(path)
+
+    monkeypatch.setattr(Path, "is_dir", failing_is_dir)
+    result = CliRunner().invoke(
+        app, ["validate", "--course-root", str(course)]
+    )
+
+    assert result.exit_code == 1
+    assert result.output == "Course root could not be inspected.\n"
+    assert "Traceback" not in result.output
+    assert "PermissionError" not in result.output
+    assert "secret-inspection" not in result.output
+
+
 @pytest.mark.parametrize("kind", ["missing", "file"])
 def test_validate_rejects_non_directory_root_with_constant_safe_error(
     tmp_path: Path, kind: str

@@ -46,7 +46,13 @@ def validate(
     ),
 ) -> None:
     """Validate that a saved course manifest is runnable."""
-    if not course_root.is_dir():
+    try:
+        root_is_directory = course_root.is_dir()
+    except OSError:
+        typer.echo("Course root could not be inspected.", err=True)
+        raise typer.Exit(1) from None
+
+    if not root_is_directory:
         typer.echo("Course root is not a directory.", err=True)
         raise typer.Exit(1)
 
