@@ -1,5 +1,6 @@
 import { access, chmod, lstat, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { createServer, type Socket } from 'node:net';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -13,8 +14,15 @@ type LaunchMode = 'learn' | 'author';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const noNodePath = (venv: string) => `${join(venv, 'bin')}:/usr/bin:/bin`;
 
-function runtimeEnvironment(owned: string, venv: string, browser: string, socket: string): NodeJS.ProcessEnv {
+function runtimeEnvironment(
+  owned: string,
+  venv: string,
+  browser: string,
+  socket: string,
+  extra: Record<string, string> = {},
+): NodeJS.ProcessEnv {
   return {
+    ...extra,
     PATH: noNodePath(venv), HOME: join(owned, 'home'), TMPDIR: join(owned, 'tmp'),
     LANG: 'C', LC_ALL: 'C', BROWSER: browser, COURSEWEAVE_TEST_BOOTSTRAP_SOCKET: socket,
   };
@@ -91,6 +99,74 @@ async function run(command: string, args: string[], options: { cwd?: string; env
     if (timer !== undefined) clearTimeout(timer);
   }
   return output;
+}
+
+type CommittedCourseExpectation = {
+  head: string;
+  tree: string;
+  manifestSha256: string;
+};
+
+type CommittedCourseSnapshot = CommittedCourseExpectation & { status: string };
+
+async function committedCourseSnapshot(sourceRoot: string): Promise<CommittedCourseSnapshot> {
+  const git = async (args: string[]) => (await run('git', ['-C', sourceRoot, ...args])).trim();
+  return {
+    head: await git(['rev-parse', 'HEAD']),
+    tree: await git(['rev-parse', 'HEAD^{tree}']),
+    status: await git(['status', '--porcelain=v1', '--untracked-files=all']),
+    manifestSha256: createHash('sha256').update(await readFile(join(sourceRoot, 'courseweave.json'))).digest('hex'),
+  };
+}
+
+export async function prepareCommittedCourseCopy(
+  sourceRoot: string,
+  expected: CommittedCourseExpectation,
+) {
+  const owned = await mkdtemp(join(tmpdir(), 'courseweave-installed-adapter-copy-'));
+  const courseRoot = join(owned, 'course');
+  const archive = join(owned, 'adapter.tar');
+  try {
+    const sourceSnapshot = await committedCourseSnapshot(sourceRoot);
+    if (sourceSnapshot.status !== ''
+      || sourceSnapshot.head !== expected.head
+      || sourceSnapshot.tree !== expected.tree
+      || sourceSnapshot.manifestSha256 !== expected.manifestSha256) {
+      throw new Error('Installed-adapter source does not match the expected clean commit.');
+    }
+    await mkdir(courseRoot);
+    await run('git', ['-C', sourceRoot, 'archive', '--format=tar', '--output', archive, expected.head]);
+    await run('tar', ['-xf', archive, '-C', courseRoot]);
+    await rm(archive, { force: true });
+    const copiedManifestSha256 = createHash('sha256').update(await readFile(join(courseRoot, 'courseweave.json'))).digest('hex');
+    if (copiedManifestSha256 !== expected.manifestSha256) {
+      throw new Error('Installed-adapter committed archive did not reproduce the expected manifest.');
+    }
+    const after = await committedCourseSnapshot(sourceRoot);
+    if (JSON.stringify(after) !== JSON.stringify(sourceSnapshot)) {
+      throw new Error('Installed-adapter source changed while its committed archive was copied.');
+    }
+    let closePromise: Promise<void> | null = null;
+    return {
+      courseRoot,
+      sourceSnapshot,
+      manifestSha256: async () => createHash('sha256').update(await readFile(join(courseRoot, 'courseweave.json'))).digest('hex'),
+      verifySourceUnchanged: async () => {
+        const current = await committedCourseSnapshot(sourceRoot);
+        if (JSON.stringify(current) !== JSON.stringify(sourceSnapshot)) {
+          throw new Error('Installed-adapter source changed during the browser proof.');
+        }
+        return current;
+      },
+      close: () => {
+        closePromise ??= rm(owned, { recursive: true, force: true });
+        return closePromise;
+      },
+    };
+  } catch (error) {
+    await rm(owned, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 async function availablePort(): Promise<number> {
@@ -256,9 +332,14 @@ function assertNoNode(venv: string): void {
   if (result.error?.code !== 'ENOENT' || result.status !== null) throw new Error('The installed Jupyter child PATH resolves Node.');
 }
 
-export async function launchInstalledWorkspace(mode: LaunchMode, options: { emptyCourse?: boolean } = {}) {
+export async function launchInstalledWorkspace(mode: LaunchMode, options: {
+  emptyCourse?: boolean;
+  courseRoot?: string;
+  providerEnvironment?: Record<string, string>;
+  terminalCommandCanary?: { executable: string; markerName: string };
+} = {}) {
   const owned = await mkdtemp(join(tmpdir(), 'courseweave-installed-wheel-'));
-  const courseRoot = join(owned, 'course');
+  const courseRoot = options.courseRoot ?? join(owned, 'course');
   const wheelRoot = join(owned, 'wheel');
   const venv = join(owned, 'venv');
   const socketPath = join(owned, 'bootstrap.sock');
@@ -274,7 +355,7 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
     await mkdir(courseRoot, { recursive: true });
     await mkdir(join(owned, 'home'));
     await mkdir(join(owned, 'tmp'));
-    if (!options.emptyCourse) await makeRichCourse(courseRoot);
+    if (options.courseRoot === undefined && !options.emptyCourse) await makeRichCourse(courseRoot);
     await mkdir(wheelRoot);
     setupOutput += await run('uv', ['build', '--wheel', '--out-dir', wheelRoot], { cwd: repoRoot });
     const wheelName = (await readdir(wheelRoot)).find((entry) => entry.endsWith('.whl'));
@@ -283,7 +364,13 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
     setupOutput += await run('uv', ['export', '--frozen', '--all-groups', '--no-emit-project', '--no-hashes', '--output-file', constraints], { cwd: repoRoot });
     setupOutput += await run('uv', ['pip', 'install', '--python', join(venv, 'bin', 'python'), '--constraint', constraints, join(wheelRoot, wheelName), 'jupyterlab==4.6.3', 'jupyter-server==2.21.0']);
     assertNoNode(venv);
-    const environment = runtimeEnvironment(owned, venv, browserHelper, socketPath);
+    if (options.terminalCommandCanary !== undefined) {
+      const canaryPath = join(venv, 'bin', options.terminalCommandCanary.executable);
+      const markerPath = join(courseRoot, options.terminalCommandCanary.markerName);
+      await writeFile(canaryPath, `#!${join(venv, 'bin', 'python')}\nfrom pathlib import Path\nPath(${JSON.stringify(markerPath)}).write_text('executed\\n', encoding='utf-8')\nraise SystemExit(97)\n`, 'utf8');
+      await chmod(canaryPath, 0o700);
+    }
+    const environment = runtimeEnvironment(owned, venv, browserHelper, socketPath, options.providerEnvironment);
     const installedPathOutput = await run(join(venv, 'bin', 'python'), ['-c', 'import courseweave; print(courseweave.__file__)'], { env: environment });
     setupOutput += installedPathOutput;
     const installedPath = installedPathOutput.trim();
@@ -310,9 +397,17 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
     child.once('exit', () => { void handoff?.close().catch(() => undefined); });
     bootstrapProxy = await tokenlessBootstrap(handoff.secret, () => launchTracker?.refresh());
     let closePromise: Promise<void> | null = null;
+    let interrupted = false;
+    const interrupt = async () => {
+      if (interrupted) return;
+      await stopOwnedProcess(child, launchTracker, { failOnForcedTermination: true });
+      interrupted = true;
+    };
     const close = () => {
       closePromise ??= (async () => {
-        const stopPromise = stopOwnedProcess(child, launchTracker, { failOnForcedTermination: true });
+        const stopPromise = interrupted
+          ? Promise.resolve()
+          : stopOwnedProcess(child, launchTracker, { failOnForcedTermination: true });
         const results = await Promise.allSettled([stopPromise, handoff?.close(), bootstrapProxy?.close()]);
         const stopResult = results[0];
         if (stopResult.status === 'rejected') {
@@ -336,17 +431,21 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
         if (jupyterToken === null || jupyterToken.length === 0 || input.capabilityToken.length === 0) throw new Error('Installed-wheel credential audit could not obtain both credentials.');
         if (input.pageConfig.token !== jupyterToken) throw new Error('Installed-wheel PageConfig did not contain the expected standard Jupyter token.');
         if (JSON.stringify(input.pageConfig).includes(input.capabilityToken)) throw new Error('CourseWeave capability entered PageConfig.');
-        const forbidden = [jupyterToken, input.capabilityToken];
+        const configuredCanaries = Object.entries(options.providerEnvironment ?? {})
+          .filter(([name]) => name.endsWith('_API_KEY'))
+          .map(([, value]) => value);
+        const forbidden = [jupyterToken, input.capabilityToken, ...configuredCanaries];
         if ([input.storage, input.browserOutput, ...input.locations, setupOutput, launchOutput].some((value) => forbidden.some((credential) => value.includes(credential)))) {
           throw new Error('Installed-wheel credential entered storage, URL, or captured output.');
         }
         let filesScanned = await scanFiles(owned, forbidden);
+        if (options.courseRoot !== undefined) filesScanned += await scanFiles(courseRoot, forbidden);
         for (const root of input.artifactRoots ?? []) filesScanned += await scanFiles(root, forbidden);
         return { filesScanned, retainedCredentials: 0 };
       },
       courseManifestExists: async () => access(join(courseRoot, 'courseweave.json')).then(() => true, () => false),
       coursePrivateStateExists: async () => access(join(courseRoot, '.courseweave')).then(() => true, () => false),
-      terminalSentinelExists: async () => access(join(courseRoot, 'terminal-argv-must-not-run')).then(() => true, () => false),
+      terminalSentinelExists: async () => access(join(courseRoot, options.terminalCommandCanary?.markerName ?? 'terminal-argv-must-not-run')).then(() => true, () => false),
       trackOwnedProcesses: () => { launchTracker?.refresh(); },
       courseFiles: async () => {
         const files: string[] = [];
@@ -359,6 +458,7 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: { empt
         ownedProcessesAlive: (launchTracker?.live().length ?? 0) > 0,
         ownedRootExists: await access(owned).then(() => true, () => false)
       }),
+      interrupt,
       close,
     };
   } catch (error) {

@@ -14,6 +14,7 @@
     "build": "pnpm --filter @courseweave/lab run build && pnpm --filter @courseweave/learn run build && pnpm --filter @courseweave/author run build",
     "test:e2e": "pnpm exec playwright test --config playwright.config.ts",
     "test:e2e:installed-wheel": "COURSEWEAVE_INSTALLED_WHEEL=1 pnpm exec playwright test --config playwright.config.ts",
+    "test:e2e:installed-adapter": "COURSEWEAVE_INSTALLED_ADAPTER=1 pnpm exec playwright test --config playwright.config.ts",
     "test:e2e:author": "pnpm exec playwright test --config playwright.author.config.ts",
     "test:build-determinism": "node --test scripts/verify-build-determinism.test.mjs && node scripts/verify-build-determinism.mjs"
   },
