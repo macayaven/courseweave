@@ -26,7 +26,9 @@ const DASHBOARD_COMMAND = 'Open CourseWeave Dashboard';
 
 async function invokePaletteCommand(page: Page, command: string, timeout = PALETTE_STEP_TIMEOUT_MS): Promise<void> {
   await page.getByRole('menuitem', { name: 'View', exact: true }).click({ timeout });
-  await page.getByRole('menuitem', { name: 'Activate Command Palette', exact: true }).click({ timeout });
+  const activatePalette = page.getByRole('menuitem', { name: /^Activate Command Palette(?:\s|$)/ });
+  await expect(activatePalette).toHaveCount(1, { timeout });
+  await activatePalette.click({ timeout });
   const palette = page.locator('.jp-ModalCommandPalette');
   const input = palette.locator('.lm-CommandPalette-input');
   await expect(palette).toBeVisible({ timeout });
@@ -65,7 +67,9 @@ test.describe.configure({ timeout: 300_000, mode: 'serial' });
 test('focused command-palette proof requires native keyboard input and Enter', async ({ page }) => {
   await page.setContent(`
     <button role="menuitem" id="view">View</button>
-    <button role="menuitem" id="activate" hidden>Activate Command Palette</button>
+    <button role="menuitem" id="activate" hidden>
+      <span>Activate Command Palette</span> <span>⇧ ⌘ C</span>
+    </button>
     <div class="jp-ModalCommandPalette" id="palette" hidden>
       <input class="lm-CommandPalette-input" aria-label="SEARCH" />
       <div class="lm-CommandPalette-item" role="menuitem">${DASHBOARD_COMMAND}</div>
