@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext, type FrameLocator, type Page } from 'playwright/test';
 
-import { launchInstalledWorkspace, prepareCommittedCourseCopy } from './installed-wheel-helpers';
+import { launchInstalledWorkspace, prepareCommittedCourseCopy, usingTestResourceCustody } from './installed-wheel-helpers';
 
 const ADAPTER_HEAD = 'dca20eb6118ef547484198d2982110d3f770649f';
 const ADAPTER_TREE = '4c56c4a019f35995cc08ef16a11b0f1e0638dcc3';
@@ -21,7 +21,10 @@ type AdapterSnapshot = {
 };
 
 function git(adapterRoot: string, args: string[]): string {
-  const result = spawnSync('git', ['-C', adapterRoot, ...args], { encoding: 'utf8' });
+  const result = spawnSync('git', ['-C', adapterRoot, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
+  });
   if (result.status !== 0 || result.error !== undefined) {
     throw new Error('Could not inspect the installed-adapter source snapshot.');
   }
@@ -109,6 +112,28 @@ async function fileSha256(path: string): Promise<string> {
   return createHash('sha256').update(await readFile(path)).digest('hex');
 }
 
+type CommittedCourseCopy = Awaited<ReturnType<typeof prepareCommittedCourseCopy>>;
+
+async function verifyAdapterCustody(
+  copy: CommittedCourseCopy,
+  adapterRoot: string,
+  expected: AdapterSnapshot,
+  closeCopy = false,
+): Promise<void> {
+  const checks = await Promise.allSettled([
+    copy.verifySourceUnchanged().then((current) => {
+      if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('Committed-copy source custody changed.');
+    }),
+    snapshotAdapter(adapterRoot).then((current) => {
+      if (JSON.stringify(current) !== JSON.stringify(expected)) throw new Error('Adapter source custody changed.');
+    }),
+    closeCopy ? copy.close() : Promise.resolve(),
+  ]);
+  const failures = checks.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map((result) => result.reason);
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, 'Adapter source custody verification failed.');
+}
+
 async function startFakeOpenAiProvider() {
   const requests: Array<{ path: string; authorization: string | undefined; body: Record<string, unknown> }> = [];
   const sockets = new Set<Socket>();
@@ -139,17 +164,37 @@ async function startFakeOpenAiProvider() {
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });
-  await new Promise<void>((resolveListen, rejectListen) => server.listen(0, '127.0.0.1', resolveListen).once('error', rejectListen));
-  const address = server.address();
-  if (address === null || typeof address === 'string') throw new Error('Could not bind the local fake provider.');
-  return {
-    baseUrl: `http://127.0.0.1:${address.port}/v1`,
-    requests,
-    close: async () => {
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>((resolveClose) => (server as HttpServer).close(() => resolveClose()));
-    },
-  };
+  try {
+    await new Promise<void>((resolveListen, rejectListen) => server.listen(0, '127.0.0.1', resolveListen).once('error', rejectListen));
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Could not bind the local fake provider.');
+    return {
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      requests,
+      close: async () => {
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>((resolveClose, rejectClose) => (
+          server as HttpServer
+        ).close((error) => error ? rejectClose(error) : resolveClose()));
+      },
+    };
+  } catch (error) {
+    for (const socket of sockets) socket.destroy();
+    if (server.listening) {
+      try {
+        await new Promise<void>((resolveClose, rejectClose) => server.close((closeError) => (
+          closeError ? rejectClose(closeError) : resolveClose()
+        )));
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Local fake provider setup failed and cleanup also failed.',
+          { cause: error },
+        );
+      }
+    }
+    throw error;
+  }
 }
 
 test.describe.configure({ timeout: 300_000, mode: 'serial' });
@@ -168,25 +213,37 @@ test('proves the installed platform end to end against the exact Agent Harness P
     manifestSha256: ADAPTER_MANIFEST_SHA256,
   });
 
-  const copy = await prepareCommittedCourseCopy(adapterRoot!, {
-    head: ADAPTER_HEAD,
-    tree: ADAPTER_TREE,
-    manifestSha256: ADAPTER_MANIFEST_SHA256,
-  });
-  try {
+  await usingTestResourceCustody(async (outerCustody) => {
+    const copy = await outerCustody.acquire(
+      () => prepareCommittedCourseCopy(adapterRoot!, {
+        head: ADAPTER_HEAD,
+        tree: ADAPTER_TREE,
+        manifestSha256: ADAPTER_MANIFEST_SHA256,
+      }),
+      async (ownedCopy) => { await verifyAdapterCustody(ownedCopy, adapterRoot!, before, true); },
+    );
     expect(await snapshotAdapter(adapterRoot!)).toEqual(before);
     expect(await copy.manifestSha256()).toBe(ADAPTER_MANIFEST_SHA256);
 
     const videoUrl = 'https://storage.googleapis.com/macayaven-agent-harness-path-videos/S01-agent-loop.mp4';
     const unexpectedExternal: string[] = [];
     const videoRequests: string[] = [];
-    const workspace = await launchInstalledWorkspace('learn', {
-      courseRoot: copy.courseRoot,
-      terminalCommandCanary: { executable: 'uv', markerName: 'terminal-command-executed' },
-    });
+    let workspace: Awaited<ReturnType<typeof launchInstalledWorkspace>> | undefined;
+    await usingTestResourceCustody(async (custody) => {
+    await custody.acquire(async () => undefined, async () => {
+      await verifyAdapterCustody(copy, adapterRoot!, before);
+    }, 5);
+    workspace = await custody.acquire(
+      () => launchInstalledWorkspace('learn', {
+        courseRoot: copy.courseRoot,
+        terminalCommandCanary: { executable: 'uv', markerName: 'terminal-command-executed' },
+      }),
+      async (ownedWorkspace) => { await ownedWorkspace.close(); },
+      0,
+    );
     milestone('missing-provider workspace launched');
     let copiedTerminalInstructions = '';
-    const context = await browser.newContext();
+    const context = await custody.acquire(() => browser.newContext(), async (ownedContext) => { await ownedContext.close(); }, 20);
     await context.exposeBinding('__courseweaveCopyForTest', (_source, value: unknown) => {
       copiedTerminalInstructions = String(value);
     });
@@ -206,12 +263,11 @@ test('proves the installed platform end to end against the exact Agent Harness P
         await route.abort();
       }
     });
-    const page = await context.newPage();
+    const page = await custody.acquire(() => context.newPage(), async (ownedPage) => { await ownedPage.close(); }, 10);
     const pageErrors: string[] = [];
     const consoleMessages: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
     page.on('console', (message) => consoleMessages.push(`${message.type()}:${message.text()}`));
-    try {
       await bootstrap(page, await workspace.bootstrapUrl());
       const guide = page.frameLocator('iframe[title="CourseWeave guide"]');
       await expect(guide.locator('body')).toContainText('The Agent Harness Path');
@@ -334,51 +390,57 @@ test('proves the installed platform end to end against the exact Agent Harness P
       milestone('reject, edited accept, and idempotent replay verified');
 
       const credential = await browserCredentialSnapshot(page, afterAcceptRuntime);
-      const audit = await workspace.auditCredentials({
+      expect(pageErrors).toEqual([]);
+
+      workspace.scheduleFinalCredentialAudit({
         ...credential,
         browserOutput: JSON.stringify({ pageErrors, consoleMessages }),
         locations: page.frames().map((frame) => frame.url()),
         artifactRoots: [testInfo.outputDir],
       });
-      expect(audit.retainedCredentials).toBe(0);
-      expect(audit.filesScanned).toBeGreaterThan(0);
-      expect(pageErrors).toEqual([]);
-      milestone(`first credential audit scanned ${audit.filesScanned} files`);
-
       await workspace.interrupt();
       await refreshedGuide.getByLabel('Ask the teacher').fill('This request crosses an intentional backend interruption.');
       await refreshedGuide.getByRole('button', { name: 'Ask teacher' }).click();
       await expect(refreshedGuide.getByText('Teacher connection interrupted. Your draft is unsent.', { exact: true })).toBeVisible();
       milestone('backend interruption preserved the draft');
-    } finally {
-      const cleanup = await Promise.allSettled([context.close(), workspace.close()]);
-      if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;
-      await expect(workspace.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
-    }
-
-    const fakeProvider = await startFakeOpenAiProvider();
-    const providerWorkspace = await launchInstalledWorkspace('learn', {
-      courseRoot: copy.courseRoot,
-      providerEnvironment: {
-        COURSEWEAVE_PROVIDER: 'openai',
-        OPENAI_MODEL: 'stub-model',
-        OPENAI_BASE_URL: fakeProvider.baseUrl,
-        OPENAI_API_KEY: 'courseweave-local-provider-canary',
-        COURSEWEAVE_PROVIDER_TIMEOUT_SECONDS: '5',
-      },
     });
-    const providerContext = await browser.newContext();
+    const audit = workspace!.finalAuditResult();
+    expect(audit).toEqual({ filesScanned: expect.any(Number), retainedCredentials: 0 });
+    expect(audit!.filesScanned).toBeGreaterThan(0);
+    milestone(`first post-stop credential audit scanned ${audit!.filesScanned} files`);
+    await expect(workspace!.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
+
+    let providerWorkspace: Awaited<ReturnType<typeof launchInstalledWorkspace>> | undefined;
+    await usingTestResourceCustody(async (custody) => {
+    await custody.acquire(async () => undefined, async () => {
+      await verifyAdapterCustody(copy, adapterRoot!, before);
+    }, 5);
+    const fakeProvider = await custody.acquire(startFakeOpenAiProvider, async (provider) => { await provider.close(); }, 30);
+    providerWorkspace = await custody.acquire(
+      () => launchInstalledWorkspace('learn', {
+        courseRoot: copy.courseRoot,
+        providerEnvironment: {
+          COURSEWEAVE_PROVIDER: 'openai',
+          OPENAI_MODEL: 'stub-model',
+          OPENAI_BASE_URL: fakeProvider.baseUrl,
+          OPENAI_API_KEY: 'courseweave-local-provider-canary',
+          COURSEWEAVE_PROVIDER_TIMEOUT_SECONDS: '5',
+        },
+      }),
+      async (ownedWorkspace) => { await ownedWorkspace.close(); },
+      0,
+    );
+    const providerContext = await custody.acquire(() => browser.newContext(), async (ownedContext) => { await ownedContext.close(); }, 20);
     await providerContext.route('https://**/*', async (route) => {
       unexpectedExternal.push(route.request().url());
       await route.abort();
     });
-    const providerPage = await providerContext.newPage();
+    const providerPage = await custody.acquire(() => providerContext.newPage(), async (ownedPage) => { await ownedPage.close(); }, 10);
     milestone('local-provider workspace launched');
     const providerErrors: string[] = [];
     const providerConsole: string[] = [];
     providerPage.on('pageerror', (error) => providerErrors.push(error.message));
     providerPage.on('console', (message) => providerConsole.push(`${message.type()}:${message.text()}`));
-    try {
       await bootstrap(providerPage, await providerWorkspace.bootstrapUrl());
       const providerGuide = providerPage.frameLocator('iframe[title="CourseWeave guide"]');
       await expect(providerGuide.getByRole('region', { name: 'Reading' })).toContainText('Read the agent-loop lesson');
@@ -397,31 +459,37 @@ test('proves the installed platform end to end against the exact Agent Harness P
       expect(fakeProvider.requests[0]).toMatchObject({ path: '/v1/chat/completions', authorization: 'Bearer courseweave-local-provider-canary', body: { stream: true } });
       milestone('authoritative state reload and local provider chat verified');
       const credential = await browserCredentialSnapshot(providerPage, providerRuntime);
-      const audit = await providerWorkspace.auditCredentials({
+      providerWorkspace.scheduleFinalCredentialAudit({
         ...credential,
         browserOutput: JSON.stringify({ providerErrors, providerConsole }),
         locations: providerPage.frames().map((frame) => frame.url()),
         artifactRoots: [testInfo.outputDir],
       });
-      expect(audit.retainedCredentials).toBe(0);
-      expect(audit.filesScanned).toBeGreaterThan(0);
       expect(providerErrors).toEqual([]);
-      milestone(`provider credential audit scanned ${audit.filesScanned} files`);
-    } finally {
-      const cleanup = await Promise.allSettled([providerContext.close(), providerWorkspace.close(), fakeProvider.close()]);
-      if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;
-      if (cleanup[2]?.status === 'rejected') throw cleanup[2].reason;
-      await expect(providerWorkspace.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
-    }
+    });
+    const providerAudit = providerWorkspace!.finalAuditResult();
+    expect(providerAudit).toEqual({ filesScanned: expect.any(Number), retainedCredentials: 0 });
+    expect(providerAudit!.filesScanned).toBeGreaterThan(0);
+    milestone(`provider post-stop credential audit scanned ${providerAudit!.filesScanned} files`);
+    await expect(providerWorkspace!.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
 
-    const authorWorkspace = await launchInstalledWorkspace('author', { courseRoot: copy.courseRoot });
-    const authorPage = await browser.newPage();
+    let authorWorkspace: Awaited<ReturnType<typeof launchInstalledWorkspace>> | undefined;
+    await usingTestResourceCustody(async (custody) => {
+    await custody.acquire(async () => undefined, async () => {
+      await verifyAdapterCustody(copy, adapterRoot!, before);
+    }, 5);
+    authorWorkspace = await custody.acquire(
+      () => launchInstalledWorkspace('author', { courseRoot: copy.courseRoot }),
+      async (ownedWorkspace) => { await ownedWorkspace.close(); },
+      0,
+    );
+    const authorContext = await custody.acquire(() => browser.newContext(), async (ownedContext) => { await ownedContext.close(); }, 20);
+    const authorPage = await custody.acquire(() => authorContext.newPage(), async (ownedPage) => { await ownedPage.close(); }, 10);
     milestone('author workspace launched');
     const authorErrors: string[] = [];
     const authorConsole: string[] = [];
     authorPage.on('pageerror', (error) => authorErrors.push(error.message));
     authorPage.on('console', (message) => authorConsole.push(`${message.type()}:${message.text()}`));
-    try {
       await bootstrap(authorPage, await authorWorkspace.bootstrapUrl());
       const author = authorPage.frameLocator('iframe[title="CourseWeave author"]');
       await expect(author.getByLabel('Course title')).toHaveValue('The Agent Harness Path');
@@ -453,29 +521,23 @@ test('proves the installed platform end to end against the exact Agent Harness P
       await expect(reloadedAuthor.getByRole('button', { name: 'Select module Adapter Browser Proof Edited' })).toBeVisible();
       const authorRuntime = await runtimeCredentials(authorPage);
       const credential = await browserCredentialSnapshot(authorPage, authorRuntime);
-      const audit = await authorWorkspace.auditCredentials({
+      authorWorkspace.scheduleFinalCredentialAudit({
         ...credential,
         browserOutput: JSON.stringify({ authorErrors, authorConsole }),
         locations: authorPage.frames().map((frame) => frame.url()),
         artifactRoots: [testInfo.outputDir],
       });
-      expect(audit.retainedCredentials).toBe(0);
-      expect(audit.filesScanned).toBeGreaterThan(0);
       expect(authorErrors).toEqual([]);
-      milestone(`author credential audit scanned ${audit.filesScanned} files`);
-    } finally {
-      const cleanup = await Promise.allSettled([authorPage.close(), authorWorkspace.close()]);
-      if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;
-      await expect(authorWorkspace.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
-    }
+    });
+    const authorAudit = authorWorkspace!.finalAuditResult();
+    expect(authorAudit).toEqual({ filesScanned: expect.any(Number), retainedCredentials: 0 });
+    expect(authorAudit!.filesScanned).toBeGreaterThan(0);
+    milestone(`author post-stop credential audit scanned ${authorAudit!.filesScanned} files`);
+    await expect(authorWorkspace!.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
 
     expect(unexpectedExternal).toEqual([]);
     expect(videoRequests.length).toBeGreaterThan(0);
     expect(new Set(videoRequests)).toEqual(new Set([videoUrl]));
-    await expect(copy.verifySourceUnchanged()).resolves.toEqual(before);
-    expect(await snapshotAdapter(adapterRoot!)).toEqual(before);
     milestone('adapter source unchanged and exact-owned cleanup verified');
-  } finally {
-    await copy.close();
-  }
+  });
 });

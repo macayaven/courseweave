@@ -1,10 +1,11 @@
 import { expect, test, type Page } from 'playwright/test';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { failingBootstrapProxy, launchInstalledWorkspace } from './installed-wheel-helpers';
+import { failingBootstrapProxy, launchInstalledWorkspace, prepareCommittedCourseCopy, usingTestResourceCustody } from './installed-wheel-helpers';
 import { OwnedProcessTracker, stopOwnedProcess } from './process-cleanup';
 
 const TINY_MP4 = Buffer.from(
@@ -72,6 +73,124 @@ function assertAuthorBrowserClean(
 }
 
 test.describe.configure({ timeout: 300_000, mode: 'serial' });
+
+test('resource custody cleans every acquired resource when the next acquisition fails', async () => {
+  const cleaned: string[] = [];
+
+  await expect(usingTestResourceCustody(async (custody) => {
+    await custody.acquire(async () => 'source verification', async (name) => { cleaned.push(name); }, 5);
+    await custody.acquire(async () => 'workspace', async (name) => { cleaned.push(name); }, 0);
+    await custody.acquire(async () => 'context', async (name) => { cleaned.push(name); }, 10);
+    await custody.acquire(async () => { throw new Error('page acquisition failed'); }, async () => undefined, 20);
+  })).rejects.toThrow('page acquisition failed');
+
+  expect(cleaned).toEqual(['workspace', 'source verification', 'context']);
+});
+
+test('resource custody preserves the primary failure and surfaces every cleanup failure', async () => {
+  const attempted: string[] = [];
+  let failure: unknown;
+
+  try {
+    await usingTestResourceCustody(async (custody) => {
+      await custody.acquire(async () => 'workspace', async (name) => {
+        attempted.push(name);
+        throw new Error('workspace cleanup failed');
+      }, 0);
+      await custody.acquire(async () => 'context', async (name) => {
+        attempted.push(name);
+        throw new Error('context cleanup failed');
+      }, 10);
+      throw new Error('primary test failure');
+    });
+  } catch (error) {
+    failure = error;
+  }
+
+  expect(attempted).toEqual(['workspace', 'context']);
+  expect(failure).toBeInstanceOf(AggregateError);
+  expect((failure as AggregateError).cause).toEqual(expect.objectContaining({ message: 'primary test failure' }));
+  expect((failure as AggregateError).errors).toEqual([
+    expect.objectContaining({ message: 'primary test failure' }),
+    expect.objectContaining({ message: 'workspace cleanup failed' }),
+    expect.objectContaining({ message: 'context cleanup failed' }),
+  ]);
+});
+
+test('committed adapter copy disables optional Git locks for every source operation', async () => {
+  const owned = await mkdtemp(join(tmpdir(), 'courseweave-readonly-git-proof-'));
+  const source = join(owned, 'source');
+  const bin = join(owned, 'bin');
+  let copy: Awaited<ReturnType<typeof prepareCommittedCourseCopy>> | undefined;
+  const previousPath = process.env.PATH;
+  try {
+    await mkdir(source);
+    await mkdir(bin);
+    await writeFile(join(source, 'courseweave.json'), '{}\n', 'utf8');
+    const git = (args: string[]) => {
+      const result = spawnSync('/usr/bin/git', ['-C', source, ...args], { encoding: 'utf8' });
+      if (result.status !== 0) throw new Error('Read-only Git proof fixture setup failed.');
+      return result.stdout.trim();
+    };
+    git(['init', '--quiet']);
+    git(['add', 'courseweave.json']);
+    git(['-c', 'user.name=CourseWeave Test', '-c', 'user.email=courseweave@example.invalid', 'commit', '--quiet', '-m', 'fixture']);
+    await writeFile(join(bin, 'git'), '#!/bin/sh\ntest "$GIT_OPTIONAL_LOCKS" = 0 || exit 91\nexec /usr/bin/git "$@"\n', 'utf8');
+    await chmod(join(bin, 'git'), 0o700);
+    process.env.PATH = `${bin}:${previousPath ?? ''}`;
+    copy = await prepareCommittedCourseCopy(source, {
+      head: git(['rev-parse', 'HEAD']),
+      tree: git(['rev-parse', 'HEAD^{tree}']),
+      manifestSha256: createHash('sha256').update('{}\n').digest('hex'),
+    });
+    await expect(copy.verifySourceUnchanged()).resolves.toEqual(expect.objectContaining({ status: '' }));
+  } finally {
+    process.env.PATH = previousPath;
+    const cleanup = await Promise.allSettled([
+      copy === undefined ? Promise.resolve() : copy.close(),
+      rm(owned, { recursive: true, force: true }),
+    ]);
+    const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map((result) => result.reason);
+    if (failures.length > 0) throw new AggregateError(failures, 'Read-only Git proof cleanup failed.');
+  }
+});
+
+test('final credential audit detects a canary created only at shutdown and still deletes the owned root', async ({ browser }) => {
+  const shutdownCanary = 'courseweave-dummy-shutdown-only-canary';
+  let workspace: Awaited<ReturnType<typeof launchInstalledWorkspace>> | undefined;
+  let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
+  let page: Page | undefined;
+  let closeFailure: unknown;
+  try {
+    workspace = await launchInstalledWorkspace('learn', {
+      shutdownCredentialCanary: { value: shutdownCanary, fileName: 'shutdown-only-canary.txt' },
+    });
+    context = await browser.newContext();
+    page = await context.newPage();
+    await bootstrap(page, await workspace.bootstrapUrl());
+    const pageConfig = await page.locator('#jupyter-config-data').evaluate((node) => JSON.parse(node.textContent ?? '{}')) as Record<string, unknown>;
+    expect(typeof pageConfig.courseweaveRuntimeId).toBe('string');
+    const credential = await credentialSnapshot(page, pageConfig.courseweaveRuntimeId as string);
+    workspace.scheduleFinalCredentialAudit({
+      ...credential,
+      browserOutput: '',
+      locations: page.frames().map((frame) => frame.url()),
+    });
+    await expect(workspace.shutdownCredentialCanaryExists()).resolves.toBe(false);
+    try { await workspace.close(); } catch (error) { closeFailure = error; }
+  } finally {
+    const cleanup = await Promise.allSettled([
+      page === undefined ? Promise.resolve() : page.close(),
+      context === undefined ? Promise.resolve() : context.close(),
+      workspace === undefined || closeFailure !== undefined ? Promise.resolve() : workspace.close(),
+    ]);
+    const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map((result) => result.reason);
+    if (failures.length > 0) throw new AggregateError(failures, 'Shutdown-canary test cleanup failed.');
+  }
+
+  expect(closeFailure).toEqual(expect.objectContaining({ message: 'Installed-wheel credential scan found a retained credential.' }));
+  await expect(workspace!.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
+});
 
 test('Author browser telemetry rejects arbitrary page and error-level console failures', () => {
   const message = 'Installed Author reported unexpected browser errors.';
@@ -253,9 +372,19 @@ test('cleanup fails closed when a separately sessioned descendant outlives its s
 });
 
 test('fresh installed wheel opens an authenticated Learn workspace without Node in its runtime PATH', async ({ browser, request }, testInfo) => {
-  const workspace = await launchInstalledWorkspace('learn');
-  const context = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
-  const page = await context.newPage();
+  let workspace: Awaited<ReturnType<typeof launchInstalledWorkspace>> | undefined;
+  await usingTestResourceCustody(async (custody) => {
+  workspace = await custody.acquire(
+    () => launchInstalledWorkspace('learn'),
+    async (ownedWorkspace) => { await ownedWorkspace.close(); },
+    0,
+  );
+  const context = await custody.acquire(
+    () => browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] }),
+    async (ownedContext) => { await ownedContext.close(); },
+    20,
+  );
+  const page = await custody.acquire(() => context.newPage(), async (ownedPage) => { await ownedPage.close(); }, 10);
   const pageErrors: string[] = [];
   const consoleMessages: Array<{ type: string; text: string; url: string }> = [];
   const publishedContexts: Array<Record<string, unknown>> = [];
@@ -281,7 +410,6 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     }
     contextResponses.push({ method: request.method(), status: response.status(), url: response.url(), sourceId, order: responseOrder++ });
   });
-  try {
     const bootstrapUrl = await workspace.bootstrapUrl();
     const baseUrl = await workspace.jupyterBaseUrl();
     const unauthenticated = await context.request.get(`${baseUrl}lab`, { maxRedirects: 0 });
@@ -426,29 +554,32 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     const unexpectedConsoleErrors = consoleMessages.filter((message) => message.type === 'error' && !expectedConsoleError(message));
     expect(unexpectedConsoleErrors).toEqual([]);
     const credential = await credentialSnapshot(page, config.courseweaveRuntimeId as string);
-    const audit = await workspace.auditCredentials({
+    workspace.scheduleFinalCredentialAudit({
       ...credential,
       browserOutput: JSON.stringify({ consoleMessages, pageErrors }),
       locations: page.frames().map((frame) => frame.url()),
       artifactRoots: [testInfo.outputDir]
     });
-    expect(audit.retainedCredentials).toBe(0);
-    expect(audit.filesScanned).toBeGreaterThan(0);
-  } finally {
-    const cleanup = await Promise.allSettled([context.close(), workspace.close()]);
-    if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;
-    await expect(workspace.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
-  }
+  });
+  expect(workspace!.finalAuditResult()).toEqual({ filesScanned: expect.any(Number), retainedCredentials: 0 });
+  expect(workspace!.finalAuditResult()!.filesScanned).toBeGreaterThan(0);
+  await expect(workspace!.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
 });
 
 test('fresh installed wheel opens Author without materializing an empty course before Save', async ({ browser }, testInfo) => {
-  const workspace = await launchInstalledWorkspace('author', { emptyCourse: true });
-  const page = await browser.newPage();
+  let workspace: Awaited<ReturnType<typeof launchInstalledWorkspace>> | undefined;
+  await usingTestResourceCustody(async (custody) => {
+  workspace = await custody.acquire(
+    () => launchInstalledWorkspace('author', { emptyCourse: true }),
+    async (ownedWorkspace) => { await ownedWorkspace.close(); },
+    0,
+  );
+  const context = await custody.acquire(() => browser.newContext(), async (ownedContext) => { await ownedContext.close(); }, 20);
+  const page = await custody.acquire(() => context.newPage(), async (ownedPage) => { await ownedPage.close(); }, 10);
   const pageErrors: string[] = [];
   const consoleMessages: Array<{ type: string; text: string; url: string }> = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('console', (message) => consoleMessages.push({ type: message.type(), text: message.text(), url: message.location().url }));
-  try {
     await bootstrap(page, await workspace.bootstrapUrl());
     const config = await page.locator('#jupyter-config-data').evaluate((node) => JSON.parse(node.textContent ?? '{}')) as Record<string, unknown>;
     await page.evaluate(() => document.body.removeAttribute('data-jupyter-api-token'));
@@ -467,18 +598,15 @@ test('fresh installed wheel opens Author without materializing an empty course b
       'courseweave.json',
     ]);
     const credential = await credentialSnapshot(page, config.courseweaveRuntimeId as string);
-    const audit = await workspace.auditCredentials({
+    workspace.scheduleFinalCredentialAudit({
       ...credential,
       browserOutput: JSON.stringify({ consoleMessages, pageErrors }),
       locations: page.frames().map((frame) => frame.url()),
       artifactRoots: [testInfo.outputDir]
     });
-    expect(audit.retainedCredentials).toBe(0);
-    expect(audit.filesScanned).toBeGreaterThan(0);
     assertAuthorBrowserClean(pageErrors, consoleMessages);
-  } finally {
-    const cleanup = await Promise.allSettled([page.close(), workspace.close()]);
-    if (cleanup[1]?.status === 'rejected') throw cleanup[1].reason;
-    await expect(workspace.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
-  }
+  });
+  expect(workspace!.finalAuditResult()).toEqual({ filesScanned: expect.any(Number), retainedCredentials: 0 });
+  expect(workspace!.finalAuditResult()!.filesScanned).toBeGreaterThan(0);
+  await expect(workspace!.cleanupState()).resolves.toEqual({ ownedProcessesAlive: false, ownedRootExists: false });
 });

@@ -93,12 +93,69 @@ async function run(command: string, args: string[], options: { cwd?: string; env
       child.once('exit', (code) => finish(code === 0 ? undefined : new Error(`Installed-wheel setup command failed: ${command}`)));
     });
   } catch (error) {
-    await stopOwnedProcess(child, processTracker);
+    if (child.exitCode === null && child.signalCode === null) {
+      try {
+        await stopOwnedProcess(child, processTracker);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Installed-wheel setup command failed and cleanup also failed.',
+          { cause: error },
+        );
+      }
+    }
     throw error;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
   return output;
+}
+
+type ResourceCleanup = { priority: number; order: number; close(): Promise<void> };
+
+export type TestResourceCustody = {
+  acquire<T>(acquire: () => Promise<T>, close: (resource: T) => Promise<void>, priority?: number): Promise<T>;
+};
+
+export async function usingTestResourceCustody<T>(
+  body: (custody: TestResourceCustody) => Promise<T>,
+): Promise<T> {
+  const cleanups: ResourceCleanup[] = [];
+  let nextOrder = 0;
+  const custody: TestResourceCustody = {
+    acquire: async (acquire, close, priority = 0) => {
+      const resource = await acquire();
+      cleanups.push({ priority, order: nextOrder++, close: () => close(resource) });
+      return resource;
+    },
+  };
+  let completed = false;
+  let result: T | undefined;
+  let primaryFailure: unknown;
+  try {
+    result = await body(custody);
+    completed = true;
+  } catch (error) {
+    primaryFailure = error;
+  }
+  const cleanupFailures: unknown[] = [];
+  for (const cleanup of cleanups.sort((left, right) => left.priority - right.priority || left.order - right.order)) {
+    try { await cleanup.close(); } catch (error) { cleanupFailures.push(error); }
+  }
+  if (!completed) {
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [primaryFailure, ...cleanupFailures],
+        'Test failed and resource cleanup also failed.',
+        { cause: primaryFailure },
+      );
+    }
+    throw primaryFailure;
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, 'Test resource cleanup failed.');
+  }
+  return result as T;
 }
 
 type CommittedCourseExpectation = {
@@ -109,8 +166,15 @@ type CommittedCourseExpectation = {
 
 type CommittedCourseSnapshot = CommittedCourseExpectation & { status: string };
 
+const readOnlyGitEnvironment = (): NodeJS.ProcessEnv => ({
+  ...process.env,
+  GIT_OPTIONAL_LOCKS: '0',
+});
+
 async function committedCourseSnapshot(sourceRoot: string): Promise<CommittedCourseSnapshot> {
-  const git = async (args: string[]) => (await run('git', ['-C', sourceRoot, ...args])).trim();
+  const git = async (args: string[]) => (
+    await run('git', ['-C', sourceRoot, ...args], { env: readOnlyGitEnvironment() })
+  ).trim();
   return {
     head: await git(['rev-parse', 'HEAD']),
     tree: await git(['rev-parse', 'HEAD^{tree}']),
@@ -135,7 +199,9 @@ export async function prepareCommittedCourseCopy(
       throw new Error('Installed-adapter source does not match the expected clean commit.');
     }
     await mkdir(courseRoot);
-    await run('git', ['-C', sourceRoot, 'archive', '--format=tar', '--output', archive, expected.head]);
+    await run('git', ['-C', sourceRoot, 'archive', '--format=tar', '--output', archive, expected.head], {
+      env: readOnlyGitEnvironment(),
+    });
     await run('tar', ['-xf', archive, '-C', courseRoot]);
     await rm(archive, { force: true });
     const copiedManifestSha256 = createHash('sha256').update(await readFile(join(courseRoot, 'courseweave.json'))).digest('hex');
@@ -164,7 +230,14 @@ export async function prepareCommittedCourseCopy(
       },
     };
   } catch (error) {
-    await rm(owned, { recursive: true, force: true });
+    try { await rm(owned, { recursive: true, force: true }); }
+    catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'Installed-adapter copy setup failed and cleanup also failed.',
+        { cause: error },
+      );
+    }
     throw error;
   }
 }
@@ -209,21 +282,38 @@ async function bootstrapSocket(path: string): Promise<{ secret: Promise<string>;
     });
   });
   void secret.catch(() => undefined);
-  await new Promise<void>((resolveListen, rejectListen) => server.listen(path, () => resolveListen()).once('error', rejectListen));
+  const close = () => {
+    closePromise ??= (async () => {
+      if (!settled) {
+        settled = true;
+        if (timer !== undefined) clearTimeout(timer);
+        rejectSecret(new Error('Installed-wheel bootstrap handoff closed.'));
+      }
+      for (const socket of sockets) socket.destroy();
+      if (server.listening) {
+        await new Promise<void>((resolveClose, rejectClose) => server.close((error) => (
+          error ? rejectClose(error) : resolveClose()
+        )));
+      }
+    })();
+    return closePromise;
+  };
+  try {
+    await new Promise<void>((resolveListen, rejectListen) => server.listen(path, () => resolveListen()).once('error', rejectListen));
+  } catch (error) {
+    try { await close(); }
+    catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'Installed-wheel bootstrap handoff setup failed and cleanup also failed.',
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   return {
     secret,
-    close: () => {
-      closePromise ??= (async () => {
-        if (!settled) {
-          settled = true;
-          if (timer !== undefined) clearTimeout(timer);
-          rejectSecret(new Error('Installed-wheel bootstrap handoff closed.'));
-        }
-        for (const socket of sockets) socket.destroy();
-        await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-      })();
-      return closePromise;
-    }
+    close,
   };
 }
 
@@ -276,18 +366,35 @@ async function tokenlessBootstrap(
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
   });
-  await new Promise<void>((resolveListen, rejectListen) => server!.listen(port, '127.0.0.1', resolveListen).once('error', rejectListen));
+  const close = () => {
+    closePromise ??= (async () => {
+      for (const controller of fetches) controller.abort();
+      for (const socket of sockets) socket.destroy();
+      if (server!.listening) {
+        await new Promise<void>((resolveClose, rejectClose) => server!.close((error) => (
+          error ? rejectClose(error) : resolveClose()
+        )));
+      }
+    })();
+    return closePromise;
+  };
+  try {
+    await new Promise<void>((resolveListen, rejectListen) => server!.listen(port, '127.0.0.1', resolveListen).once('error', rejectListen));
+  } catch (error) {
+    try { await close(); }
+    catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        'Installed-wheel tokenless bootstrap setup failed and cleanup also failed.',
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   return {
     url,
     jupyterToken: () => jupyterToken,
-    close: () => {
-      closePromise ??= (async () => {
-        for (const controller of fetches) controller.abort();
-        for (const socket of sockets) socket.destroy();
-        await new Promise<void>((resolveClose) => server!.close(() => resolveClose()));
-      })();
-      return closePromise;
-    }
+    close,
   };
 }
 
@@ -327,6 +434,17 @@ async function scanFiles(root: string, credentials: readonly string[]): Promise<
   return files;
 }
 
+export type CredentialAuditInput = {
+  capabilityToken: string;
+  pageConfig: Record<string, unknown>;
+  storage: string;
+  browserOutput: string;
+  locations: string[];
+  artifactRoots?: string[];
+};
+
+export type CredentialAuditResult = { filesScanned: number; retainedCredentials: 0 };
+
 function assertNoNode(venv: string): void {
   const result = spawnSync('node', ['--version'], { env: { ...process.env, PATH: noNodePath(venv) }, encoding: 'utf8' });
   if (result.error?.code !== 'ENOENT' || result.status !== null) throw new Error('The installed Jupyter child PATH resolves Node.');
@@ -337,6 +455,7 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: {
   courseRoot?: string;
   providerEnvironment?: Record<string, string>;
   terminalCommandCanary?: { executable: string; markerName: string };
+  shutdownCredentialCanary?: { value: string; fileName: string };
 } = {}) {
   const owned = await mkdtemp(join(tmpdir(), 'courseweave-installed-wheel-'));
   const courseRoot = options.courseRoot ?? join(owned, 'course');
@@ -393,28 +512,97 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: {
     };
     child.stdout?.on('data', capture);
     child.stderr?.on('data', capture);
-    child.once('error', () => { void handoff?.close().catch(() => undefined); });
-    child.once('exit', () => { void handoff?.close().catch(() => undefined); });
+    const childClosed = new Promise<void>((resolveClosed, rejectClosed) => {
+      child.once('close', () => resolveClosed());
+      child.once('error', () => rejectClosed(new Error('Installed CourseWeave supervisor stream failed.')));
+    });
+    void childClosed.catch(() => undefined);
+    let shutdownCanaryReady: Promise<void> = Promise.resolve();
+    if (options.shutdownCredentialCanary !== undefined) {
+      if (!/^[A-Za-z0-9._-]+$/.test(options.shutdownCredentialCanary.fileName)) {
+        throw new Error('Shutdown credential canary filename is invalid.');
+      }
+      shutdownCanaryReady = new Promise<void>((resolveCanary, rejectCanary) => {
+        child.once('exit', () => {
+          void writeFile(
+            join(owned, options.shutdownCredentialCanary!.fileName),
+            options.shutdownCredentialCanary!.value,
+            'utf8',
+          ).then(() => resolveCanary(), rejectCanary);
+        });
+        child.once('error', rejectCanary);
+      });
+    }
     bootstrapProxy = await tokenlessBootstrap(handoff.secret, () => launchTracker?.refresh());
-    let closePromise: Promise<void> | null = null;
+    let finalAuditInput: CredentialAuditInput | null = null;
+    let finalAuditResult: CredentialAuditResult | null = null;
+    let closePromise: Promise<CredentialAuditResult | null> | null = null;
     let interrupted = false;
+    const waitForStableOutput = async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          childClosed,
+          new Promise<void>((_, rejectStable) => {
+            timer = setTimeout(() => rejectStable(new Error('Installed CourseWeave supervisor streams did not close.')), 5_000);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+      await shutdownCanaryReady;
+    };
     const interrupt = async () => {
       if (interrupted) return;
       await stopOwnedProcess(child, launchTracker, { failOnForcedTermination: true });
+      await waitForStableOutput();
       interrupted = true;
+    };
+    const auditCredentials = async (input: CredentialAuditInput): Promise<CredentialAuditResult> => {
+      const jupyterToken = bootstrapProxy!.jupyterToken();
+      if (jupyterToken === null || jupyterToken.length === 0 || input.capabilityToken.length === 0) throw new Error('Installed-wheel credential audit could not obtain both credentials.');
+      if (input.pageConfig.token !== jupyterToken) throw new Error('Installed-wheel PageConfig did not contain the expected standard Jupyter token.');
+      if (JSON.stringify(input.pageConfig).includes(input.capabilityToken)) throw new Error('CourseWeave capability entered PageConfig.');
+      const configuredCanaries = Object.entries(options.providerEnvironment ?? {})
+        .filter(([name]) => name.endsWith('_API_KEY'))
+        .map(([, value]) => value);
+      const shutdownCanaries = options.shutdownCredentialCanary === undefined ? [] : [options.shutdownCredentialCanary.value];
+      const forbidden = [jupyterToken, input.capabilityToken, ...configuredCanaries, ...shutdownCanaries];
+      if ([input.storage, input.browserOutput, ...input.locations, setupOutput, launchOutput].some((value) => forbidden.some((credential) => value.includes(credential)))) {
+        throw new Error('Installed-wheel credential entered storage, URL, or captured output.');
+      }
+      let filesScanned = await scanFiles(owned, forbidden);
+      if (options.courseRoot !== undefined) filesScanned += await scanFiles(courseRoot, forbidden);
+      for (const root of input.artifactRoots ?? []) filesScanned += await scanFiles(root, forbidden);
+      return { filesScanned, retainedCredentials: 0 };
     };
     const close = () => {
       closePromise ??= (async () => {
-        const stopPromise = interrupted
-          ? Promise.resolve()
-          : stopOwnedProcess(child, launchTracker, { failOnForcedTermination: true });
-        const results = await Promise.allSettled([stopPromise, handoff?.close(), bootstrapProxy?.close()]);
-        const stopResult = results[0];
-        if (stopResult.status === 'rejected') {
-          throw new Error(stopResult.reason instanceof Error ? stopResult.reason.message : 'Owned CourseWeave supervisor cleanup failed.');
+        const failures: unknown[] = [];
+        let processStable = interrupted;
+        if (!interrupted) {
+          try {
+            await stopOwnedProcess(child, launchTracker, { failOnForcedTermination: true });
+            await waitForStableOutput();
+            processStable = true;
+          } catch (error) {
+            failures.push(error);
+          }
         }
-        await rm(owned, { recursive: true, force: true });
-        if (results.slice(1).some((result) => result.status === 'rejected')) throw new Error('Installed-wheel local transport cleanup failed.');
+        for (const result of await Promise.allSettled([handoff?.close(), bootstrapProxy?.close()])) {
+          if (result.status === 'rejected') failures.push(result.reason);
+        }
+        if (processStable && finalAuditInput !== null) {
+          try { finalAuditResult = await auditCredentials(finalAuditInput); }
+          catch (error) { failures.push(error); }
+        }
+        if (processStable) {
+          try { await rm(owned, { recursive: true, force: true }); }
+          catch (error) { failures.push(error); }
+        }
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) throw new AggregateError(failures, 'Installed-wheel finalization failed.');
+        return finalAuditResult;
       })();
       return closePromise;
     };
@@ -426,26 +614,21 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: {
         safe.search = ''; safe.hash = '';
         return new URL('.', safe).href;
       },
-      auditCredentials: async (input: { capabilityToken: string; pageConfig: Record<string, unknown>; storage: string; browserOutput: string; locations: string[]; artifactRoots?: string[] }) => {
-        const jupyterToken = bootstrapProxy!.jupyterToken();
-        if (jupyterToken === null || jupyterToken.length === 0 || input.capabilityToken.length === 0) throw new Error('Installed-wheel credential audit could not obtain both credentials.');
-        if (input.pageConfig.token !== jupyterToken) throw new Error('Installed-wheel PageConfig did not contain the expected standard Jupyter token.');
-        if (JSON.stringify(input.pageConfig).includes(input.capabilityToken)) throw new Error('CourseWeave capability entered PageConfig.');
-        const configuredCanaries = Object.entries(options.providerEnvironment ?? {})
-          .filter(([name]) => name.endsWith('_API_KEY'))
-          .map(([, value]) => value);
-        const forbidden = [jupyterToken, input.capabilityToken, ...configuredCanaries];
-        if ([input.storage, input.browserOutput, ...input.locations, setupOutput, launchOutput].some((value) => forbidden.some((credential) => value.includes(credential)))) {
-          throw new Error('Installed-wheel credential entered storage, URL, or captured output.');
-        }
-        let filesScanned = await scanFiles(owned, forbidden);
-        if (options.courseRoot !== undefined) filesScanned += await scanFiles(courseRoot, forbidden);
-        for (const root of input.artifactRoots ?? []) filesScanned += await scanFiles(root, forbidden);
-        return { filesScanned, retainedCredentials: 0 };
+      scheduleFinalCredentialAudit: (input: CredentialAuditInput) => {
+        if (closePromise !== null) throw new Error('Installed-wheel finalization already started.');
+        if (finalAuditInput !== null) throw new Error('Installed-wheel final credential audit already scheduled.');
+        finalAuditInput = {
+          ...input,
+          pageConfig: { ...input.pageConfig },
+          locations: [...input.locations],
+          artifactRoots: input.artifactRoots === undefined ? undefined : [...input.artifactRoots],
+        };
       },
       courseManifestExists: async () => access(join(courseRoot, 'courseweave.json')).then(() => true, () => false),
       coursePrivateStateExists: async () => access(join(courseRoot, '.courseweave')).then(() => true, () => false),
       terminalSentinelExists: async () => access(join(courseRoot, options.terminalCommandCanary?.markerName ?? 'terminal-argv-must-not-run')).then(() => true, () => false),
+      shutdownCredentialCanaryExists: async () => options.shutdownCredentialCanary !== undefined
+        && access(join(owned, options.shutdownCredentialCanary.fileName)).then(() => true, () => false),
       trackOwnedProcesses: () => { launchTracker?.refresh(); },
       courseFiles: async () => {
         const files: string[] = [];
@@ -459,12 +642,29 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: {
         ownedRootExists: await access(owned).then(() => true, () => false)
       }),
       interrupt,
+      finalAuditResult: () => finalAuditResult,
       close,
     };
   } catch (error) {
-    const results = await Promise.allSettled([launchProcess === null ? Promise.resolve() : stopOwnedProcess(launchProcess, launchTracker), handoff?.close(), bootstrapProxy?.close()]);
-    if (results[0]?.status === 'fulfilled') await rm(owned, { recursive: true, force: true });
-    if (results[0]?.status === 'rejected') throw new Error('Owned CourseWeave supervisor cleanup failed.');
+    const results = await Promise.allSettled([
+      launchProcess === null ? Promise.resolve() : stopOwnedProcess(launchProcess, launchTracker),
+      handoff?.close(),
+      bootstrapProxy?.close(),
+    ]);
+    const cleanupFailures = results
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => result.reason);
+    if (results[0]?.status === 'fulfilled') {
+      try { await rm(owned, { recursive: true, force: true }); }
+      catch (cleanupError) { cleanupFailures.push(cleanupError); }
+    }
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupFailures],
+        'Installed-wheel setup failed and cleanup also failed.',
+        { cause: error },
+      );
+    }
     throw error;
   }
 }
