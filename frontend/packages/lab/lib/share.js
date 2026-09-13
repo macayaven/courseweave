@@ -3,8 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.LabCaptureProvider = void 0;
 const protocol_1 = require("./protocol");
 function labelFor(panel, cell) {
-    const path = typeof panel.context?.path === 'string' ? panel.context.path : 'active document';
-    const cellId = typeof cell?.model?.id === 'string' ? cell.model.id : null;
+    const path = typeof panel.context?.path === "string"
+        ? panel.context.path
+        : "active document";
+    const cellId = typeof cell?.model?.id === "string" ? cell.model.id : null;
     return cellId === null ? path : `${path}#${cellId}`;
 }
 function selectionFrom(editor) {
@@ -26,19 +28,23 @@ class LabCaptureProvider {
         this.pendingRequestId = null;
         this.consumed = new protocol_1.BoundedLruSet(256);
         this.listener = (event) => {
-            if (!this.listening || event.source !== this.options.childWindow || event.origin !== this.options.serviceOrigin)
+            if (!this.listening ||
+                event.source !== this.options.childWindow ||
+                event.origin !== this.options.serviceOrigin)
                 return;
             const request = (0, protocol_1.parseCaptureRequest)(event.data);
             if (request === null || !this.consumed.accept(request.requestId))
                 return;
             if (this.pendingRequestId !== null) {
-                this.reject(request.requestId, 'busy');
+                this.reject(request.requestId, "busy");
                 return;
             }
             this.pendingRequestId = request.requestId;
-            void this.capture(request).catch(() => {
-                this.reject(request.requestId, 'unavailable');
-            }).finally(() => {
+            void this.capture(request)
+                .catch(() => {
+                this.reject(request.requestId, "unavailable");
+            })
+                .finally(() => {
                 if (this.pendingRequestId === request.requestId)
                     this.pendingRequestId = null;
             });
@@ -51,91 +57,111 @@ class LabCaptureProvider {
     reject(requestId, code) {
         if (!this.listening)
             return;
-        this.options.childWindow.postMessage({ type: 'courseweave.share.capture.rejected.v1', requestId, code }, this.options.serviceOrigin);
+        this.options.childWindow.postMessage({ type: "courseweave.share.capture.rejected.v1", requestId, code }, this.options.serviceOrigin);
     }
     allowed(request) {
         const course = this.courseReader();
         const coordinate = this.options.activeCoordinate();
-        if (course === null || coordinate === null || request.maxChars > course.policies.max_shared_chars)
+        if (course === null ||
+            coordinate === null ||
+            request.maxChars > course.policies.max_shared_chars)
             return false;
-        const phase = course.modules.find((item) => item.id === coordinate.moduleId)?.phases.find((item) => item.id === coordinate.phaseId);
+        const phase = course.modules
+            .find((item) => item.id === coordinate.moduleId)
+            ?.phases.find((item) => item.id === coordinate.phaseId);
         if (phase === undefined)
             return false;
-        return request.kind === 'selection' ? phase.capabilities.share_selection
-            : request.kind === 'cell' ? phase.capabilities.share_cell
-                : phase.capabilities.share_output;
+        return (phase.teacher.access.mode === "available" &&
+            course.policies.allowed_share_kinds.includes(request.kind) &&
+            phase.teacher.sharing.allow.includes(request.kind));
     }
     activeCell() {
         const panel = this.options.notebook.currentWidget;
         const cell = this.options.notebook.activeCell;
-        return this.options.activeWidget() === panel && panel !== null && cell !== null ? { panel, cell } : null;
+        return this.options.activeWidget() === panel &&
+            panel !== null &&
+            cell !== null
+            ? { panel, cell }
+            : null;
     }
     read(kind) {
         if (this.options.activeWidget() === this.options.terminal.currentWidget)
             return null;
         const notebook = this.activeCell();
-        if (kind === 'selection') {
-            if (notebook !== null && notebook.cell.editor !== undefined && notebook.cell.editor !== null) {
+        if (kind === "selection") {
+            if (notebook !== null &&
+                notebook.cell.editor !== undefined &&
+                notebook.cell.editor !== null) {
                 const content = selectionFrom(notebook.cell.editor);
-                return content === null ? null : { label: labelFor(notebook.panel, notebook.cell), content };
+                return content === null
+                    ? null
+                    : { label: labelFor(notebook.panel, notebook.cell), content };
             }
             const panel = this.options.editor.currentWidget;
-            if (this.options.activeWidget() === panel && panel?.content?.editor !== undefined) {
+            if (this.options.activeWidget() === panel &&
+                panel?.content?.editor !== undefined) {
                 const content = selectionFrom(panel.content.editor);
-                return content === null ? null : { label: labelFor(panel, null), content };
+                return content === null
+                    ? null
+                    : { label: labelFor(panel, null), content };
             }
             return null;
         }
         if (notebook === null)
             return null;
-        if (kind === 'cell') {
+        if (kind === "cell") {
             const content = notebook.cell.model?.sharedModel?.getSource();
-            return typeof content === 'string' && content.length > 0 ? { label: labelFor(notebook.panel, notebook.cell), content } : null;
+            return typeof content === "string" && content.length > 0
+                ? { label: labelFor(notebook.panel, notebook.cell), content }
+                : null;
         }
-        if (notebook.cell.model?.type !== 'code' || notebook.cell.model.outputs === undefined)
+        if (notebook.cell.model?.type !== "code" ||
+            notebook.cell.model.outputs === undefined)
             return null;
         const content = JSON.stringify(notebook.cell.model.outputs.toJSON());
-        return content.length > 0 ? { label: labelFor(notebook.panel, notebook.cell), content } : null;
+        return content.length > 0
+            ? { label: labelFor(notebook.panel, notebook.cell), content }
+            : null;
     }
     async capture(request) {
         await Promise.resolve();
         if (!this.listening)
             return;
         if (!this.allowed(request)) {
-            this.reject(request.requestId, 'forbidden');
+            this.reject(request.requestId, "forbidden");
             return;
         }
         const captured = this.read(request.kind);
         if (captured === null) {
-            this.reject(request.requestId, 'unavailable');
+            this.reject(request.requestId, "unavailable");
             return;
         }
         if (Array.from(captured.content).length > request.maxChars) {
-            this.reject(request.requestId, 'too_large');
+            this.reject(request.requestId, "too_large");
             return;
         }
         if (!this.listening)
             return;
         this.options.childWindow.postMessage({
-            type: 'courseweave.share.capture.result.v1',
+            type: "courseweave.share.capture.result.v1",
             requestId: request.requestId,
             kind: request.kind,
             label: captured.label,
-            content: captured.content
+            content: captured.content,
         }, this.options.serviceOrigin);
     }
     start() {
         if (this.listening)
             return;
         this.listening = true;
-        this.options.hostWindow.addEventListener('message', this.listener);
+        this.options.hostWindow.addEventListener("message", this.listener);
     }
     dispose() {
         if (!this.listening)
             return;
         this.listening = false;
         this.pendingRequestId = null;
-        this.options.hostWindow.removeEventListener('message', this.listener);
+        this.options.hostWindow.removeEventListener("message", this.listener);
     }
 }
 exports.LabCaptureProvider = LabCaptureProvider;

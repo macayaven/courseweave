@@ -53,3 +53,7 @@ def block_real_model_providers(monkeypatch: pytest.MonkeyPatch) -> None:
     for client_type in (httpx.Client, httpx2.Client):
         original_send = client_type.send
         monkeypatch.setattr(client_type, "send", guarded_sync_send(original_send))
+
+@pytest.fixture(autouse=True)
+def isolated_personal_state(tmp_path, monkeypatch):
+    monkeypatch.setenv('COURSEWEAVE_STATE_HOME', str(tmp_path.parent / ('personal-state-' + tmp_path.name)))

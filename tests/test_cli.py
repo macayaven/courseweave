@@ -349,6 +349,9 @@ class _FakeSocket:
         self.bound: tuple[str, int] | None = None
         self.close_calls = 0
 
+    def setsockopt(self, level: int, option: int, value: int) -> None:
+        pass
+
     def bind(self, address: tuple[str, int]) -> None:
         self.bound = address
         if self.fail_bind:
@@ -1421,7 +1424,7 @@ def test_real_jupyter_launch_keeps_live_runtime_files_secret_free_and_relays_wor
     assert errors == []
     assert observations["course_status"] == 200
     assert observations["course_etag"] == '""'
-    assert observations["course"]["schema_version"] == 1  # type: ignore[index]
+    assert observations["course"]["schema_version"] == 2  # type: ignore[index]
     assert observations["context_status"] == 200
     assert set(observations["context"]) == {  # type: ignore[arg-type]
         "module_id",
@@ -1432,3 +1435,22 @@ def test_real_jupyter_launch_keeps_live_runtime_files_secret_free_and_relays_wor
     assert sorted(path.relative_to(course) for path in course.rglob("*")) == before
     assert not (course / "courseweave.json").exists()
     assert not (course / ".courseweave").exists()
+
+
+def test_reserved_listener_restarts_immediately_after_a_served_connection() -> None:
+    first = reserve_listener(0)
+    port = first.getsockname()[1]
+    try:
+        first.listen()
+        with pytest.raises(OSError):
+            reserve_listener(port)
+        with socket.socket() as client:
+            client.settimeout(2)
+            client.connect(('127.0.0.1', port))
+            connection, _ = first.accept()
+            connection.close()
+            assert client.recv(1) == b''
+    finally:
+        first.close()
+    restarted = reserve_listener(port)
+    restarted.close()

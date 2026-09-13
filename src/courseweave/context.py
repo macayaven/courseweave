@@ -47,7 +47,14 @@ def resolve_context(
         manifest, context.explicit_module_id, context.explicit_phase_id
     )
     if explicit is not None:
-        return _resolved(*explicit, surface_id=None, reason="explicit_phase")
+        candidates = [
+            candidate
+            for candidate in _path_candidates(manifest, context.active_path)
+            if (candidate.module_id, candidate.phase_id) == explicit
+            and _matches_surface_metadata(candidate.surface, context)
+        ]
+        surface_id = candidates[0].surface_id if len(candidates) == 1 else None
+        return _resolved(*explicit, surface_id=surface_id, reason="explicit_phase")
 
     path_candidates = _path_candidates(manifest, context.active_path)
     if context.active_cell_id is not None:
@@ -55,9 +62,8 @@ def resolve_context(
             surface = candidate.surface
             if (
                 isinstance(surface, NotebookSurface)
-                and surface.match is not None
-                and surface.match.cell_ids is not None
-                and context.active_cell_id in surface.match.cell_ids
+                and surface.selector.type == "cell_ids"
+                and context.active_cell_id in surface.selector.values
             ):
                 return _from_candidate(candidate, "cell_id")
 
@@ -67,9 +73,8 @@ def resolve_context(
             surface = candidate.surface
             if (
                 isinstance(surface, NotebookSurface)
-                and surface.match is not None
-                and surface.match.cell_tags is not None
-                and active_tags.intersection(surface.match.cell_tags)
+                and surface.selector.type == "cell_tags"
+                and (set(surface.selector.values).issubset(active_tags) if surface.selector.match == "all" else active_tags.intersection(surface.selector.values))
             ):
                 return _from_candidate(candidate, "cell_tag")
 
@@ -214,11 +219,33 @@ def _path_candidates(
     for module in manifest.modules:
         for phase in module.phases:
             for surface in phase.surfaces:
-                if getattr(surface, "path", None) == active_path:
+                if getattr(surface, "src", getattr(surface, "path", None)) == active_path:
                     candidates.append(
                         _Candidate(module.id, phase.id, surface.id, surface)
                     )
     return candidates
+
+
+def _matches_surface_metadata(surface: object, context: WorkspaceContext) -> bool:
+    """Bind explicit activity metadata only when all supplied selectors agree."""
+    if context.surface_kind is not None and getattr(surface, "type", None) != context.surface_kind:
+        return False
+    if isinstance(surface, NotebookSurface):
+        selector = surface.selector
+        if selector.type == "cell_ids":
+            return context.active_cell_id in selector.values
+        if selector.type == "cell_tags":
+            active_tags = set(context.active_cell_tags)
+            return (
+                set(selector.values).issubset(active_tags)
+                if selector.match == "all"
+                else bool(active_tags.intersection(selector.values))
+            )
+    if isinstance(surface, VideoSurface) and surface.start_seconds is not None:
+        return context.video_seconds is not None and _contains_video_second(
+            surface, context.video_seconds
+        )
+    return True
 
 
 def _contains_video_second(surface: VideoSurface, seconds: float) -> bool:
@@ -263,4 +290,3 @@ def _resolved(
         surface_id=surface_id,
         reason=reason,
     )
-

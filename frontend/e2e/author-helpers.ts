@@ -106,7 +106,7 @@ export function minimalManifest(): JsonObject {
 
 export function emptyManifest(): JsonObject {
   return {
-    schema_version: 1,
+    schema_version: 2,
     id: "new-course",
     title: "New Course",
     description: "",
@@ -116,6 +116,8 @@ export function emptyManifest(): JsonObject {
       durable_mutation: "proposal_or_direct_student_action",
       terminal_execution: "student_only",
       conversation_memory: "session_only",
+      allowed_share_kinds: [],
+      allowed_proposal_types: [],
       max_shared_chars: 8192,
       workspace_write_globs: [],
     },

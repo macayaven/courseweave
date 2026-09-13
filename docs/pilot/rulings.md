@@ -1,0 +1,7 @@
+# Recorded pilot rulings
+
+Ruling: Add an optional safe HTML surface fragment during Task 2 and carry it into Author/Lab in Tasks 4–5 — the accepted self-check activity must open the reused lesson at its quiz, and explicit metadata avoids course-specific anchor inference — if wrong, the small schema/client addition can be removed or adjusted before public release; no existing surface must supply it.
+
+Ruling: Interpret Ready after a successful text answer as requiring current-run provider outcome evidence plus valid terminal success; deterministic gates and authored hints may finish without establishing provider connectivity — the spec requires truthful Ready status and server-enforced access, so Task5’s broad wording cannot make a non-provider response prove connectivity — if wrong, a provider integration that omits canonical outcome metadata will remain unconfirmed until that adapter is corrected.
+
+Ruling: Permit immediate reference feedback only after the immediate unaided attempt is saved; keep the delayed reference separate until its own saved attempt, and record premature delayed-key exposure as assistance — this gives the initial tester useful feedback while protecting the documented delayed-task sequence — if wrong, delayed observations include the effect of immediate feedback and cannot be interpreted as course-only retention without a revised protocol and another attempt.

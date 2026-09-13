@@ -5,7 +5,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { type AuthorManifest, type Proposal, type ProviderStatus } from "@courseweave/ui";
+import {
+  type AuthorManifest,
+  type Proposal,
+  type ProviderStatus,
+} from "@courseweave/ui";
 import { AuthorApiError, createAuthorClient, type CourseResponse } from "./api";
 import {
   createDraft,
@@ -90,7 +94,7 @@ function isAuthorManifest(value: unknown): value is AuthorManifest {
   return (
     typeof value === "object" &&
     value !== null &&
-    (value as { schema_version?: unknown }).schema_version === 1 &&
+    (value as { schema_version?: unknown }).schema_version === 2 &&
     Array.isArray((value as { modules?: unknown }).modules)
   );
 }
@@ -178,7 +182,7 @@ function selectionForPointer(
   pointer: string,
 ): AuthorDocumentState["selection"] | null {
   if (
-    /^\/(id|title|description|entry_module_id|policies\/(content_sharing|durable_mutation|terminal_execution|conversation_memory|max_shared_chars|workspace_write_globs\/\d+))$/.test(
+    /^\/(id|title|description|entry_module_id|runtime|policies\/(content_sharing|durable_mutation|terminal_execution|conversation_memory|max_shared_chars|allowed_share_kinds|allowed_proposal_types|workspace_write_globs\/\d+))$/.test(
       pointer,
     )
   )
@@ -196,14 +200,14 @@ function selectionForPointer(
   const phase = module.phases[Number(phaseMatch[1])];
   const phaseRest = phaseMatch[2] ?? "";
   if (phase === undefined) return null;
-  if (phaseRest === "surfaces")
+  if (phaseRest === "" || phaseRest === "surfaces")
     return {
       type: "phase",
       moduleKey: module.clientKey,
       phaseKey: phase.clientKey,
     };
   if (
-    /^(id|title|kind|teacher_mode|capabilities\/(chat|share_selection|share_cell|share_output|create_profile_proposal|create_course_proposal|create_workspace_proposal|hint_level)|completion\/(type|record_id|path))$/.test(
+    /^(id|title|progress|experience\/(type|id)|teacher(?:\/.*)?|completion(?:\/.*)?|learning(?:\/.*)?)$/.test(
       phaseRest,
     )
   )
@@ -212,26 +216,25 @@ function selectionForPointer(
       moduleKey: module.clientKey,
       phaseKey: phase.clientKey,
     };
-  const surfaceMatch = phaseRest.match(/^surfaces\/(\d+)\/(.*)$/);
+  const surfaceMatch = phaseRest.match(/^surfaces\/(\d+)(?:\/(.*))?$/);
   if (surfaceMatch === null) return null;
   const surface = phase.surfaces[Number(surfaceMatch[1])];
   const surfaceRest = surfaceMatch[2] ?? "";
   if (
-    !/^(id|type|role|path|url|label|cwd|location|start_seconds|end_seconds|argv(?:\/\d+)?|match\/(cell_ids|cell_tags)(?:\/\d+)?)$/.test(
+    surfaceRest !== "" &&
+    !/^(id|type|purpose|path|fragment|src|url|label|cwd|start_seconds|end_seconds|command(?:\/\d+)?|selector\/(type|match|values)(?:\/\d+)?)$/.test(
       surfaceRest,
     )
   )
     return null;
   if (surface === undefined) return null;
   if (
-    (surfaceRest === "argv" &&
-      (surface.type !== "terminal" || surface.argv.length !== 0)) ||
-    (surfaceRest === "match/cell_ids" &&
+    (surfaceRest === "command" &&
+      (surface.type !== "terminal" || surface.command.length !== 0)) ||
+    (surfaceRest === "selector/values" &&
       (surface.type !== "notebook" ||
-        (surface.match?.cell_ids?.length ?? 0) !== 0)) ||
-    (surfaceRest === "match/cell_tags" &&
-      (surface.type !== "notebook" ||
-        (surface.match?.cell_tags?.length ?? 0) !== 0))
+        surface.selector.type === "whole_notebook" ||
+        surface.selector.values.length !== 0))
   )
     return null;
   return {
@@ -510,45 +513,81 @@ function AuthorEditor({
       return [...other, next];
     });
   }, []);
-  const refreshAuthorData = useCallback(async (signal?: AbortSignal) => {
-    const started = connectionEpoch;
-    setAuthorityState("refreshing");
-    const [courseResult, proposalsResult] = await Promise.allSettled([
-      client.getCourse(signal),
-      client.getProposals(signal),
-    ]);
-    const current = !signal?.aborted && started === latestConnectionEpoch.current;
-    const course = current && courseResult.status === "fulfilled";
-    const proposalList =
-      current &&
-      proposalsResult.status === "fulfilled" &&
-      Array.isArray(proposalsResult.value);
-    const complete = course && proposalList;
-    if (!current) return { committed: false };
-    if (!complete) {
-      setAuthorityState("blocked");
-      return { committed: false };
-    }
-    if (courseResult.status === "fulfilled" && proposalsResult.status === "fulfilled") {
-      onCourseSaved(courseResult.value);
-      setProposals(proposalsResult.value as Proposal[]);
-    }
-    initialProposalsLoaded.current = true;
-    proposalsEpoch.current = started;
-    reconnectEpoch.current = null;
-    setAuthorityState("fresh");
-    return { committed: true };
-  }, [client, connectionEpoch, onCourseSaved]);
   const authorityRead = useRef<AbortController | null>(null);
-  const retryAuthority = useCallback(() => {
-    authorityRead.current?.abort();
-    const controller = new AbortController();
-    authorityRead.current = controller;
-    void refreshAuthorData(controller.signal);
-  }, [refreshAuthorData]);
+  const authorityAlive = useRef(true);
   useEffect(() => {
-    return () => authorityRead.current?.abort();
+    authorityAlive.current = true;
+    return () => {
+      authorityAlive.current = false;
+      authorityRead.current?.abort();
+    };
   }, []);
+  useEffect(() => () => authorityRead.current?.abort(), [epoch, connected]);
+  const refreshAuthorData = useCallback(
+    async (signal?: AbortSignal) => {
+      const started = connectionEpoch;
+      const draftEpoch = latestEpoch.current;
+      const controller = new AbortController();
+      const previous = authorityRead.current;
+      authorityRead.current = controller;
+      previous?.abort();
+      const ownsRefresh = () =>
+        authorityAlive.current &&
+        authorityRead.current === controller &&
+        started === latestConnectionEpoch.current;
+      const cancelled = () => {
+        // A cancelled current read must offer Retry even if one transport takes
+        // longer to settle. A replaced/old-epoch read cannot change new authority.
+        if (ownsRefresh()) setAuthorityState("blocked");
+      };
+      const cancelFromCaller = () => controller.abort();
+      controller.signal.addEventListener("abort", cancelled, { once: true });
+      signal?.addEventListener("abort", cancelFromCaller, { once: true });
+      setAuthorityState("refreshing");
+      try {
+        if (signal?.aborted) controller.abort();
+        if (controller.signal.aborted) return { committed: false };
+        const [courseResult, proposalsResult] = await Promise.allSettled([
+          client.getCourse(controller.signal),
+          client.getProposals(controller.signal),
+        ]);
+        if (!ownsRefresh()) return { committed: false };
+        const complete =
+          !controller.signal.aborted &&
+          draftEpoch === latestEpoch.current &&
+          courseResult.status === "fulfilled" &&
+          proposalsResult.status === "fulfilled" &&
+          Array.isArray(proposalsResult.value);
+        if (!complete) {
+          setAuthorityState("blocked");
+          return { committed: false };
+        }
+        if (
+          courseResult.status === "fulfilled" &&
+          proposalsResult.status === "fulfilled"
+        ) {
+          onCourseSaved(courseResult.value);
+          setProposals(proposalsResult.value as Proposal[]);
+        }
+        initialProposalsLoaded.current = true;
+        proposalsEpoch.current = started;
+        reconnectEpoch.current = null;
+        setAuthorityState("fresh");
+        return { committed: true };
+      } catch {
+        if (ownsRefresh()) setAuthorityState("blocked");
+        return { committed: false };
+      } finally {
+        signal?.removeEventListener("abort", cancelFromCaller);
+        controller.signal.removeEventListener("abort", cancelled);
+        if (authorityRead.current === controller) authorityRead.current = null;
+      }
+    },
+    [client, connectionEpoch, onCourseSaved],
+  );
+  const retryAuthority = useCallback(() => {
+    void refreshAuthorData();
+  }, [refreshAuthorData]);
   const phase = selectedPhase(state);
   return (
     <>
@@ -596,15 +635,13 @@ function AuthorEditor({
         exists={baseline.etag !== ""}
         dirty={dirty}
         validate={(m, signal) => validate(m, "structural", signal)}
-        put={(raw, tag, signal) =>
-          {
-            setProposalSavePending(true);
-            return client
-              .putCourse(raw, tag, signal)
-              .then(savedCourse)
-              .finally(() => setProposalSavePending(false));
-          }
-        }
+        put={(raw, tag, signal) => {
+          setProposalSavePending(true);
+          return client
+            .putCourse(raw, tag, signal)
+            .then(savedCourse)
+            .finally(() => setProposalSavePending(false));
+        }}
         getLatest={(signal) => client.getCourse(signal).then(savedCourse)}
         onSaved={saved}
         onCanonical={setFormatted}
@@ -627,7 +664,11 @@ function AuthorEditor({
               ? "Refreshing authoritative course and proposals…"
               : "Authoritative course and proposals must be reviewed before another mutation."}
           </p>
-          <button type="button" onClick={retryAuthority} disabled={authorityState === "refreshing"}>
+          <button
+            type="button"
+            onClick={retryAuthority}
+            disabled={authorityState === "refreshing"}
+          >
             Retry authoritative refresh
           </button>
         </section>
@@ -635,6 +676,25 @@ function AuthorEditor({
       <CurriculumThread
         client={client}
         sourceId={sourceId}
+        selection={(() => {
+          const selected = state.selection;
+          if (selected.type !== "phase" && selected.type !== "surface")
+            return null;
+          const module = state.draft.modules.find(
+            (item) => item.clientKey === selected.moduleKey,
+          );
+          const phase = module?.phases.find(
+            (item) => item.clientKey === selected.phaseKey,
+          );
+          return module && phase
+            ? {
+                module_id: module.id,
+                phase_id: phase.id,
+                title: phase.title,
+                manifest_etag: baseline.etag,
+              }
+            : null;
+        })()}
         clean={!dirty && !proposalSavePending && !refreshBlocked}
         recovery={!connected}
         authorityBlocked={refreshBlocked}
@@ -650,9 +710,12 @@ function AuthorEditor({
         client={{
           validateCourse: (manifest, signal) =>
             client.validateCourse(manifest, "structural", signal),
-          editProposal: (id, body, signal) => client.editProposal(id, body, signal) as Promise<Proposal>,
-          acceptProposal: (id, body, signal) => client.acceptProposal(id, body, signal) as Promise<Proposal>,
-          rejectProposal: (id, body, signal) => client.rejectProposal(id, body, signal) as Promise<Proposal>,
+          editProposal: (id, body, signal) =>
+            client.editProposal(id, body, signal) as Promise<Proposal>,
+          acceptProposal: (id, body, signal) =>
+            client.acceptProposal(id, body, signal) as Promise<Proposal>,
+          rejectProposal: (id, body, signal) =>
+            client.rejectProposal(id, body, signal) as Promise<Proposal>,
         }}
         clean={!dirty}
         recovery={!connected}
@@ -660,8 +723,14 @@ function AuthorEditor({
         savePending={proposalSavePending}
         onRefresh={refreshAuthorData}
         onProposal={recordProposal}
-        onConflict={() => setNotice("Proposal changed; review the saved course before continuing.")}
-        onAcceptedCourse={() => setNotice("Accepted proposal refreshed from the saved course.")}
+        onConflict={() =>
+          setNotice(
+            "Proposal changed; review the saved course before continuing.",
+          )
+        }
+        onAcceptedCourse={() =>
+          setNotice("Accepted proposal refreshed from the saved course.")
+        }
         onAuthorityUnknown={() => setAuthorityState("blocked")}
       />
       <p role="status">
@@ -735,7 +804,11 @@ export function AuthorApp() {
         </button>
       </>
     );
-  if ((load === "loading" && !retainedConnection.current) || !course || !client.current)
+  if (
+    (load === "loading" && !retainedConnection.current) ||
+    !course ||
+    !client.current
+  )
     return <AuthorShell state="Loading saved course…" />;
   const connected = runtime.status === "ready" && load === "ready";
   if (!isAuthorManifest(course.manifest))

@@ -1,0 +1,89 @@
+{
+  "evaluation_version": "teaching-evaluation-v1",
+  "fixture_version": "synthetic-teaching-v1",
+  "prompt_version": "course-assistant-v1",
+  "context_version": "teaching-context-v1",
+  "evidence_type": "synthetic",
+  "empirical_provider_evidence": false,
+  "profiles": {
+    "text-only-v1": {
+      "streaming": false,
+      "tools": false,
+      "response": "According to Tool-call pairing source (fixture A), ordinary text needs no tool result. Start by locating actual tool calls."
+    },
+    "stream-tools-v1": {
+      "streaming": true,
+      "tools": true,
+      "response": "According to Tool-call pairing source (fixture A), ordinary text needs no tool result. For parallel calls, check every call ID against its matching tool result."
+    }
+  },
+  "no_provider": {
+    "provider": null,
+    "actions": [
+      "use_lesson",
+      "reset_lesson",
+      "hint",
+      "decline_revisit"
+    ],
+    "guide_status": "not_configured"
+  },
+  "scenarios": [
+    {
+      "id": "grounding-citations",
+      "test": "test_two_synthetic_profiles_ground_with_identical_safe_data",
+      "criterion": "Approved extracted lesson is provided with a source label; synthetic replies use the label; hidden solutions are absent."
+    },
+    {
+      "id": "wrong-answer-targeted-explanation",
+      "test": "test_current_session_check_fact_works_with_opt_out_and_other_session_cannot_use_it",
+      "criterion": "The current selected incorrect check provides only its own deterministic feedback, objective links, and an optional evidence explanation."
+    },
+    {
+      "id": "progressive-hints",
+      "test": "test_explicit_hints_only_expose_next_authored_step",
+      "criterion": "An explicit hint advances the ordered authored ladder by one step without sending later hints."
+    },
+    {
+      "id": "no-answer-before-attempt",
+      "test": "test_explicit_hints_only_expose_next_authored_step",
+      "criterion": "Correct-option identifiers and all option feedback are omitted before the selected attempt."
+    },
+    {
+      "id": "voluntary-revisit",
+      "test": "test_no_provider_authored_hint_and_decline_actions",
+      "criterion": "A learner can decline; no navigation, preference, or progress mutation occurs."
+    },
+    {
+      "id": "consent-opt-out",
+      "test": "test_consent_revocation_outside_api_removes_evidence_dependent_replay",
+      "criterion": "Revocation removes earlier evidence-dependent response echoes from future replay."
+    },
+    {
+      "id": "navigation-authority",
+      "test": "test_navigation_preserves_old_attribution_and_uses_new_policy",
+      "criterion": "The same conversation retains old attribution and uses fresh authority after navigation."
+    },
+    {
+      "id": "invalid-tool-no-mutation",
+      "test": "test_failed_author_tool_data_never_publishes_candidate",
+      "criterion": "Malformed, refused, truncated, and stale-source tool data produce no candidate, durable mutation, or successful history."
+    },
+    {
+      "id": "tool-message-pairing",
+      "test": "test_mixed_author_text_and_tool_runs_full_graph_before_candidate",
+      "criterion": "Ordinary assistant text requires no tool result; an actual call gets a matching result before the next model request."
+    },
+    {
+      "id": "deterministic-no-provider",
+      "test": "test_no_provider_authored_hint_and_decline_actions",
+      "criterion": "Authored help and consent choices remain usable without provider configuration."
+    }
+  ],
+  "run": ".venv/bin/python -m pytest tests/test_teaching.py -q --junitxml=teaching-evaluation.xml",
+  "limitations": [
+    "Synthetic output is an oracle fixture, not evidence that a real model teaches accurately.",
+    "Transport/profile conformance does not certify a model's capabilities or learning outcomes.",
+    "Task 7 owns real app endpoint canaries and empirical pedagogy evidence."
+  ],
+  "source_label": "Tool-call pairing source (fixture A)"
+}

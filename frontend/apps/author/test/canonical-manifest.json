@@ -1,0 +1,368 @@
+{
+  "schema_version": 2,
+  "id": "author-roundtrip",
+  "title": "Author preservation example",
+  "description": "Structural fixture only; paths are illustrative. This is not a runnable course.",
+  "entry_module_id": "library",
+  "runtime": {
+    "type": "jupyter",
+    "kernel": {
+      "type": "python_uv_project"
+    }
+  },
+  "policies": {
+    "content_sharing": "explicit_only",
+    "allowed_share_kinds": [
+      "selection",
+      "cell",
+      "output"
+    ],
+    "max_shared_chars": 8192,
+    "allowed_proposal_types": [
+      "profile",
+      "course",
+      "workspace"
+    ],
+    "durable_mutation": "proposal_or_direct_student_action",
+    "terminal_execution": "student_only",
+    "conversation_memory": "session_only",
+    "workspace_write_globs": [
+      "notes/*.md"
+    ]
+  },
+  "modules": [
+    {
+      "id": "library",
+      "title": "Library",
+      "description": "Exercise nested references.",
+      "phases": [
+        {
+          "id": "investigate",
+          "title": "Investigate the library trace",
+          "progress": "required",
+          "experience": {
+            "type": "custom",
+            "id": "example.org/investigation"
+          },
+          "surfaces": [
+            {
+              "id": "lesson",
+              "purpose": "primary",
+              "type": "html",
+              "label": "Lesson",
+              "path": "lessons/trace.html",
+              "fragment": "Self-check:1"
+            },
+            {
+              "id": "notes",
+              "purpose": "supporting",
+              "type": "markdown",
+              "label": "Notes",
+              "path": "notes.md"
+            },
+            {
+              "id": "source",
+              "purpose": "reference",
+              "type": "source",
+              "label": "Toy source",
+              "path": "toy.py"
+            },
+            {
+              "id": "all",
+              "purpose": "supporting",
+              "type": "notebook",
+              "label": "Whole notebook",
+              "path": "trace.ipynb",
+              "selector": {
+                "type": "whole_notebook"
+              }
+            },
+            {
+              "id": "ids",
+              "purpose": "supporting",
+              "type": "notebook",
+              "label": "Selected cells",
+              "path": "trace.ipynb",
+              "selector": {
+                "type": "cell_ids",
+                "values": [
+                  "cell_1",
+                  "cell-2"
+                ]
+              }
+            },
+            {
+              "id": "tags",
+              "purpose": "supporting",
+              "type": "notebook",
+              "label": "Both tags",
+              "path": "trace.ipynb",
+              "selector": {
+                "type": "cell_tags",
+                "values": [
+                  "trace",
+                  "attempt"
+                ],
+                "match": "all"
+              }
+            },
+            {
+              "id": "video",
+              "purpose": "reference",
+              "type": "video",
+              "label": "Excerpt",
+              "src": "https://example.org/trace.mp4",
+              "start_seconds": 0,
+              "end_seconds": 42
+            },
+            {
+              "id": "local-video",
+              "purpose": "reference",
+              "type": "video",
+              "label": "Local video",
+              "src": "trace.mp4",
+              "start_seconds": null,
+              "end_seconds": null
+            },
+            {
+              "id": "command",
+              "purpose": "supporting",
+              "type": "terminal",
+              "label": "Copy replay command",
+              "command": [
+                "python",
+                "toy.py",
+                "--label",
+                "a value with spaces"
+              ],
+              "cwd": "."
+            },
+            {
+              "id": "reference",
+              "purpose": "reference",
+              "type": "external",
+              "label": "Background",
+              "url": "https://example.org/background"
+            }
+          ],
+          "completion": {
+            "requirements": [
+              {
+                "id": "prediction",
+                "type": "learner_record",
+                "record_kind": "text",
+                "prompt": "Predict the missing result."
+              },
+              {
+                "id": "evidence",
+                "type": "learner_record",
+                "record_kind": "evidence",
+                "prompt": "Record what you observed."
+              },
+              {
+                "id": "attest",
+                "type": "learner_record",
+                "record_kind": "attestation",
+                "prompt": "Confirm that you compared the traces."
+              },
+              {
+                "id": "artifact",
+                "type": "artifact_exists",
+                "prompt": "Create a trace note. Presence is not correctness.",
+                "path": "notes/trace.md"
+              }
+            ]
+          },
+          "teacher": {
+            "access": {
+              "mode": "available",
+              "requires": [
+                "prediction",
+                "evidence"
+              ]
+            },
+            "guidance": {
+              "style": {
+                "type": "custom",
+                "id": "example.org/coaching"
+              },
+              "hint_level": "graduated",
+              "text": "Ask for the learner’s reasoning first."
+            },
+            "sharing": {
+              "allow": [
+                "selection",
+                "cell",
+                "output"
+              ]
+            },
+            "proposals": {
+              "allow": [
+                "profile",
+                "course",
+                "workspace"
+              ]
+            }
+          },
+          "learning": {
+            "objectives": [
+              {
+                "id": "pairing",
+                "text": "Account for every requested call."
+              },
+              {
+                "id": "bounds",
+                "text": "Distinguish turn limits from timeouts."
+              }
+            ],
+            "duration": {
+              "min_minutes": 20,
+              "max_minutes": 40
+            },
+            "overview": "A small independent transcript investigation.",
+            "hints": [
+              {
+                "id": "first",
+                "text": "Compare the requested and returned identifiers.",
+                "objective_ids": [
+                  "pairing"
+                ]
+              },
+              {
+                "id": "second",
+                "text": "Track where the host waits.",
+                "objective_ids": [
+                  "pairing",
+                  "bounds"
+                ]
+              }
+            ],
+            "sources": [
+              {
+                "id": "reference",
+                "label": "Fixture reference",
+                "url": "https://example.org/reference",
+                "reviewed_date": "2026-09-08"
+              },
+              {
+                "id": "undated",
+                "label": "Undated fixture",
+                "url": "https://example.org/undated"
+              }
+            ],
+            "checks": [
+              {
+                "id": "bound",
+                "type": "single_choice",
+                "prompt": "What directly bounds a hung operation?",
+                "objective_ids": [
+                  "bounds"
+                ],
+                "options": [
+                  {
+                    "id": "turns",
+                    "text": "A model-turn cap",
+                    "feedback": "It limits model iterations."
+                  },
+                  {
+                    "id": "timeout",
+                    "text": "An operation timeout",
+                    "feedback": "It bounds waiting for that operation."
+                  }
+                ],
+                "correct_option_id": "timeout"
+              }
+            ]
+          }
+        },
+        {
+          "id": "practice",
+          "title": "Optional practice",
+          "progress": "optional",
+          "experience": {
+            "type": "builtin",
+            "id": "practice"
+          },
+          "surfaces": [
+            {
+              "id": "any-tags",
+              "purpose": "primary",
+              "type": "notebook",
+              "label": "Either tag",
+              "path": "trace.ipynb",
+              "selector": {
+                "type": "cell_tags",
+                "values": [
+                  "trace",
+                  "attempt"
+                ],
+                "match": "any"
+              }
+            }
+          ],
+          "completion": {
+            "requirements": []
+          },
+          "teacher": {
+            "access": {
+              "mode": "available",
+              "requires": []
+            },
+            "guidance": {
+              "style": {
+                "type": "custom",
+                "id": "example.org/coaching"
+              },
+              "hint_level": "graduated",
+              "text": "Ask for the learner’s reasoning first."
+            },
+            "sharing": {
+              "allow": [
+                "selection",
+                "cell",
+                "output"
+              ]
+            },
+            "proposals": {
+              "allow": [
+                "profile",
+                "course",
+                "workspace"
+              ]
+            }
+          },
+          "learning": null
+        },
+        {
+          "id": "reference",
+          "title": "Reference only",
+          "progress": "excluded",
+          "experience": {
+            "type": "builtin",
+            "id": "generic"
+          },
+          "surfaces": [],
+          "teacher": {
+            "access": {
+              "mode": "observer_only",
+              "requires": []
+            },
+            "guidance": {
+              "style": {
+                "type": "builtin",
+                "id": "reviewing"
+              },
+              "hint_level": "none"
+            },
+            "sharing": {
+              "allow": []
+            },
+            "proposals": {
+              "allow": []
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

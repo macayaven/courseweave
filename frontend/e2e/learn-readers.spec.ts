@@ -7,8 +7,9 @@ test('production Learner accepts only parent-confirmed HTML and HTTPS video outc
   await page.setViewportSize({ width: 320, height: 900 });
   const api = { active: true, surfaceId: 'html-lesson', authenticatedRequests: 0 };
   const learn = await mountLearner(page, api);
+  await learn.getByText('Course contents', {exact:true}).click();
 
-  await learn.getByRole('button', { name: 'Open Second lesson' }).click();
+  await learn.getByLabel('Course dashboard').locator('details').getByRole('button', { name: 'Open Second lesson' }).click();
   await expect(learn.getByLabel('Course reader').getByRole('status')).toHaveText('Opened Second lesson in the CourseWeave main-area reader.');
   await expect(learn.locator('iframe[title="Second lesson"]')).toHaveCount(0);
   expect(await learn.locator('[data-testid="learn-rail"]').evaluate((rail) => rail.scrollWidth <= rail.clientWidth)).toBe(true);
@@ -27,13 +28,14 @@ test('production Learner accepts only parent-confirmed HTML and HTTPS video outc
 test('production Learner rejects an HTTP video without assigning media or navigating externally', async ({ page, context }) => {
   let externalRequests = 0;
   await context.route('http://video.example.test/**', async (route) => { externalRequests += 1; await route.abort(); });
-  const insecureCourse = structuredClone(course) as { modules: Array<{ phases: Array<{ surfaces: Array<{ id: string; url?: string }> }> }> };
-  insecureCourse.modules[0]!.phases[0]!.surfaces.find((surface) => surface.id === 'video-lesson')!.url = 'http://video.example.test/second.mp4';
+  const insecureCourse = structuredClone(course) as { modules: Array<{ phases: Array<{ surfaces: Array<{ id: string; src?: string }> }> }> };
+  insecureCourse.modules[0]!.phases[0]!.surfaces.find((surface) => surface.id === 'video-lesson')!.src = 'http://video.example.test/second.mp4';
   const api = { active: true, surfaceId: 'video-lesson', course: insecureCourse, authenticatedRequests: 0 };
   const learn = await mountLearner(page, api);
+  await learn.getByText('Course contents', {exact:true}).click();
 
   await learn.getByRole('button', { name: 'Open Second video' }).click();
-  await expect(learn.getByLabel('Course reader').getByRole('status')).toContainText('This course surface is unavailable.');
+  await expect(learn.getByLabel('Course reader')).toHaveCount(0);
   await expect(learn.locator('video')).toHaveCount(0);
   expect(externalRequests).toBe(0);
   expect(api.unhandledRequests ?? 0).toBe(0);
@@ -42,6 +44,7 @@ test('production Learner rejects an HTTP video without assigning media or naviga
 test('production Learner rejects credential-bearing HTML before iframe assignment or request', async ({ page }) => {
   const api = { active: true, authenticatedRequests: 0 };
   const learn = await mountLearner(page, api);
+  await learn.getByText('Course contents', {exact:true}).click();
 
   await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('#learn-frame');
@@ -49,7 +52,7 @@ test('production Learner rejects credential-bearing HTML before iframe assignmen
     frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', jupyterBaseUrl: `${location.origin}/`, htmlSource: source }, location.origin);
   });
 
-  await expect(learn.getByLabel('Course reader').getByRole('status')).toContainText('This course surface is unavailable.');
+  await expect(learn.getByLabel('Course reader')).toHaveCount(0);
   await expect(learn.locator('iframe[title="Second lesson"]')).toHaveCount(0);
   expect(api.unhandledRequests ?? 0).toBe(0);
 });
@@ -57,7 +60,8 @@ test('production Learner rejects credential-bearing HTML before iframe assignmen
 test('production Learner rejects a delayed destination outcome after newer context stays on A', async ({ page }) => {
   const api = { active: true, surfaceId: 'html-lesson', authenticatedRequests: 0 };
   const learn = await mountLearner(page, api);
-  await learn.getByRole('button', { name: 'Open Second lesson' }).click();
+  await learn.getByText('Course contents', {exact:true}).click();
+  await learn.getByLabel('Course dashboard').locator('details').getByRole('button', { name: 'Open Second lesson' }).click();
   const readerStatus = learn.getByLabel('Course reader').getByRole('status');
   await expect(readerStatus).toHaveText('Opened Second lesson in the CourseWeave main-area reader.');
 
@@ -79,19 +83,20 @@ test('production Learner rejects a delayed destination outcome after newer conte
 test('production Learner accepts a delayed HTML destination outcome only after newer context confirms B', async ({ page }) => {
   const api = { active: true, surfaceId: 'video-lesson', authenticatedRequests: 0 };
   const learn = await mountLearner(page, api);
+  await learn.getByText('Course contents', {exact:true}).click();
   await page.evaluate(() => { document.documentElement.dataset.deferReaderOutcome = 'true'; });
-  await learn.getByRole('button', { name: 'Open Second lesson' }).click();
+  await learn.getByLabel('Course dashboard').locator('details').getByRole('button', { name: 'Open Second lesson' }).click();
   api.surfaceId = 'html-lesson';
   const requestCount = api.authenticatedRequests;
   await notifyContextChanged(page);
   await expect.poll(() => api.authenticatedRequests).toBeGreaterThan(requestCount);
 
   await expect(learn.locator('iframe[title="Second lesson"]')).toHaveCount(0);
-  await expect(learn.getByLabel('Course reader').getByRole('status')).toContainText('This course surface is unavailable.');
+  await expect(learn.getByLabel('Course reader')).toHaveCount(0);
 
   await page.evaluate(() => {
     const frame = document.querySelector<HTMLIFrameElement>('#learn-frame');
-    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', jupyterBaseUrl: `${location.origin}/`, htmlSource: `${location.origin}/files/lessons/second.html` }, location.origin);
+    frame?.contentWindow?.postMessage({ type: 'courseweave.reader.opened.v1', sourceId: 'browser-source', moduleId: 'module-b', phaseId: 'read-b', surfaceId: 'html-lesson', jupyterBaseUrl: `${location.origin}/`, htmlSource: `${location.origin}/courseweave/reader/lessons/second.html` }, location.origin);
   });
 
   await expect(learn.getByLabel('Course reader').getByRole('status')).toHaveText('Opened Second lesson in the CourseWeave main-area reader.');

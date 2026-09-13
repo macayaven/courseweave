@@ -1,249 +1,1532 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://courseweave.local/schema/courseweave-v1.json",
-  "title": "CourseWeave course manifest",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema_version", "id", "title", "description", "entry_module_id", "policies", "modules"],
-  "properties": {
-    "schema_version": {"const": 1},
-    "id": {"$ref": "#/$defs/slug"},
-    "title": {"$ref": "#/$defs/nonEmpty"},
-    "description": {"type": "string"},
-    "entry_module_id": {"oneOf": [{"$ref": "#/$defs/slug"}, {"type": "null"}]},
-    "policies": {"$ref": "#/$defs/policies"},
-    "modules": {"type": "array", "items": {"$ref": "#/$defs/module"}}
-  },
   "$defs": {
-    "slug": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 80,
-      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
-    },
-    "nonEmpty": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 240,
-      "pattern": ".*\\S.*"
-    },
-    "relativePath": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 1024,
-      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$)).+"
-    },
-    "role": {"enum": ["primary", "reference", "exercise", "evidence"]},
-    "policies": {
-      "type": "object",
+    "ArtifactExistsRequirement": {
       "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "artifact_exists",
+          "title": "Type",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Prompt",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "pattern": "^(?!/)(?![\\s\\S]*[:\\\\\\x00-\\x1f\\x7f])(?![\\s\\S]*(?:^|/)(?:\\.{1,2})(?:/|$))[^/]+(?:/[^/]+)*(?![\\s\\S])",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "prompt",
+        "path"
+      ],
+      "title": "ArtifactExistsRequirement",
+      "type": "object"
+    },
+    "BuiltinExperience": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "builtin",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "enum": [
+            "generic",
+            "orientation",
+            "reading",
+            "media",
+            "prediction",
+            "experiment",
+            "practice",
+            "review",
+            "project"
+          ],
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "title": "BuiltinExperience",
+      "type": "object"
+    },
+    "BuiltinTeacherStyle": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "builtin",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "enum": [
+            "orienting",
+            "explanatory",
+            "socratic",
+            "debugging",
+            "reviewing"
+          ],
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "title": "BuiltinTeacherStyle",
+      "type": "object"
+    },
+    "CellIdsSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "cell_ids",
+          "title": "Type",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+(?![\\s\\S])",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "values"
+      ],
+      "title": "CellIdsSelector",
+      "type": "object"
+    },
+    "CellTagsSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "cell_tags",
+          "title": "Type",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "title": "Values",
+          "type": "array"
+        },
+        "match": {
+          "enum": [
+            "any",
+            "all"
+          ],
+          "title": "Match",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "values",
+        "match"
+      ],
+      "title": "CellTagsSelector",
+      "type": "object"
+    },
+    "CheckOption": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Text",
+          "type": "string"
+        },
+        "feedback": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Feedback",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "feedback"
+      ],
+      "title": "CheckOption",
+      "type": "object"
+    },
+    "Completion": {
+      "additionalProperties": false,
+      "properties": {
+        "requirements": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "artifact_exists": "#/$defs/ArtifactExistsRequirement",
+                "learner_record": "#/$defs/LearnerRecordRequirement"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LearnerRecordRequirement"
+              },
+              {
+                "$ref": "#/$defs/ArtifactExistsRequirement"
+              }
+            ]
+          },
+          "maxItems": 64,
+          "title": "Requirements",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requirements"
+      ],
+      "title": "Completion",
+      "type": "object"
+    },
+    "CoursePolicies": {
+      "additionalProperties": false,
+      "properties": {
+        "content_sharing": {
+          "const": "explicit_only",
+          "title": "Content Sharing",
+          "type": "string"
+        },
+        "allowed_share_kinds": {
+          "items": {
+            "enum": [
+              "selection",
+              "cell",
+              "output"
+            ],
+            "type": "string"
+          },
+          "title": "Allowed Share Kinds",
+          "type": "array"
+        },
+        "max_shared_chars": {
+          "maximum": 131072,
+          "minimum": 1,
+          "title": "Max Shared Chars",
+          "type": "integer"
+        },
+        "allowed_proposal_types": {
+          "items": {
+            "enum": [
+              "profile",
+              "course",
+              "workspace"
+            ],
+            "type": "string"
+          },
+          "title": "Allowed Proposal Types",
+          "type": "array"
+        },
+        "durable_mutation": {
+          "const": "proposal_or_direct_student_action",
+          "title": "Durable Mutation",
+          "type": "string"
+        },
+        "terminal_execution": {
+          "const": "student_only",
+          "title": "Terminal Execution",
+          "type": "string"
+        },
+        "conversation_memory": {
+          "const": "session_only",
+          "title": "Conversation Memory",
+          "type": "string"
+        },
+        "workspace_write_globs": {
+          "items": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "pattern": "^(?![!])(?![\\s\\S]*[{}])^(?!/)(?![\\s\\S]*[:\\\\\\x00-\\x1f\\x7f])(?![\\s\\S]*(?:^|/)(?:\\.{1,2})(?:/|$))[^/]+(?:/[^/]+)*(?![\\s\\S])",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Workspace Write Globs",
+          "type": "array"
+        }
+      },
       "required": [
         "content_sharing",
+        "allowed_share_kinds",
+        "max_shared_chars",
+        "allowed_proposal_types",
         "durable_mutation",
         "terminal_execution",
         "conversation_memory",
-        "max_shared_chars",
         "workspace_write_globs"
       ],
+      "title": "CoursePolicies",
+      "type": "object"
+    },
+    "CustomExperience": {
+      "additionalProperties": false,
       "properties": {
-        "content_sharing": {"const": "explicit_only"},
-        "durable_mutation": {"const": "proposal_or_direct_student_action"},
-        "terminal_execution": {"const": "student_only"},
-        "conversation_memory": {"const": "session_only"},
-        "max_shared_chars": {"type": "integer", "minimum": 1, "maximum": 131072},
-        "workspace_write_globs": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+        "type": {
+          "const": "custom",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+/[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
         }
-      }
-    },
-    "module": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "title", "description", "phases"],
-      "properties": {
-        "id": {"$ref": "#/$defs/slug"},
-        "title": {"$ref": "#/$defs/nonEmpty"},
-        "description": {"type": "string"},
-        "phases": {
-          "type": "array",
-          "minItems": 1,
-          "items": {"$ref": "#/$defs/phase"}
-        }
-      }
-    },
-    "phase": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "title", "kind", "teacher_mode", "surfaces", "completion", "capabilities"],
-      "properties": {
-        "id": {"$ref": "#/$defs/slug"},
-        "title": {"$ref": "#/$defs/nonEmpty"},
-        "kind": {"enum": ["orient", "read", "watch", "predict", "experiment", "lab", "review", "audit", "ship"]},
-        "teacher_mode": {"enum": ["orienter", "reading_companion", "socratic_guide", "debugging_coach", "reviewer", "observer", "curriculum_designer"]},
-        "surfaces": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/surface"}},
-        "completion": {"$ref": "#/$defs/completion"},
-        "capabilities": {"$ref": "#/$defs/capabilities"}
-      }
-    },
-    "capabilities": {
-      "type": "object",
-      "additionalProperties": false,
+      },
       "required": [
-        "chat",
-        "hint_level",
-        "share_selection",
-        "share_cell",
-        "share_output",
-        "create_profile_proposal",
-        "create_course_proposal",
-        "create_workspace_proposal"
+        "type",
+        "id"
       ],
-      "properties": {
-        "chat": {"type": "boolean"},
-        "hint_level": {"enum": ["none", "gentle", "graduated", "full"]},
-        "share_selection": {"type": "boolean"},
-        "share_cell": {"type": "boolean"},
-        "share_output": {"type": "boolean"},
-        "create_profile_proposal": {"type": "boolean"},
-        "create_course_proposal": {"type": "boolean"},
-        "create_workspace_proposal": {"type": "boolean"}
-      }
+      "title": "CustomExperience",
+      "type": "object"
     },
-    "completion": {
-      "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["type"],
-          "properties": {"type": {"const": "manual"}}
+    "CustomTeacherStyle": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "custom",
+          "title": "Type",
+          "type": "string"
         },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["type", "record_id"],
-          "properties": {
-            "type": {"enum": ["prediction_recorded", "receipt_recorded"]},
-            "record_id": {"$ref": "#/$defs/slug"}
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["type", "record_id", "path"],
-          "properties": {
-            "type": {"const": "artifact_exists"},
-            "record_id": {"$ref": "#/$defs/slug"},
-            "path": {"$ref": "#/$defs/relativePath"}
-          }
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+/[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
         }
-      ]
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "title": "CustomTeacherStyle",
+      "type": "object"
     },
-    "localSurface": {
-      "type": "object",
+    "Duration": {
       "additionalProperties": false,
-      "required": ["id", "type", "role", "path"],
       "properties": {
-        "id": {"$ref": "#/$defs/slug"},
-        "type": {"enum": ["html", "markdown", "source"]},
-        "role": {"$ref": "#/$defs/role"},
-        "path": {"$ref": "#/$defs/relativePath"}
-      }
+        "min_minutes": {
+          "maximum": 1440,
+          "minimum": 1,
+          "title": "Min Minutes",
+          "type": "integer"
+        },
+        "max_minutes": {
+          "maximum": 1440,
+          "minimum": 1,
+          "title": "Max Minutes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "min_minutes",
+        "max_minutes"
+      ],
+      "title": "Duration",
+      "type": "object"
     },
-    "notebookSurface": {
-      "type": "object",
+    "ExternalSurface": {
       "additionalProperties": false,
-      "required": ["id", "type", "role", "path"],
       "properties": {
-        "id": {"$ref": "#/$defs/slug"},
-        "type": {"const": "notebook"},
-        "role": {"$ref": "#/$defs/role"},
-        "path": {"$ref": "#/$defs/relativePath"},
-        "match": {
-          "type": "object",
-          "additionalProperties": false,
-          "minProperties": 1,
-          "properties": {
-            "cell_ids": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": {"type": "string", "minLength": 1, "maxLength": 160}
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "purpose": {
+          "enum": [
+            "primary",
+            "supporting",
+            "reference"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "type": {
+          "const": "external",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2048,
+          "minLength": 1,
+          "pattern": "^(?![\\s\\S]*[\\x00-\\x20\\x7f\\\\])https://(?![^/?#]*@)(?:\\[[0-9A-Fa-f:.]+\\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::[0-9]+)?(?:[/?#][\\s\\S]*)?(?![\\s\\S])",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "purpose",
+        "type",
+        "label",
+        "url"
+      ],
+      "title": "ExternalSurface",
+      "type": "object"
+    },
+    "Hint": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Text",
+          "type": "string"
+        },
+        "objective_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Objective Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "Hint",
+      "type": "object"
+    },
+    "HtmlSurface": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "purpose": {
+          "enum": [
+            "primary",
+            "supporting",
+            "reference"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "type": {
+          "const": "html",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "pattern": "^(?!/)(?![\\s\\S]*[:\\\\\\x00-\\x1f\\x7f])(?![\\s\\S]*(?:^|/)(?:\\.{1,2})(?:/|$))[^/]+(?:/[^/]+)*(?![\\s\\S])",
+          "title": "Path",
+          "type": "string"
+        },
+        "fragment": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]*(?![\\s\\S])",
+              "type": "string"
             },
-            "cell_tags": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": {"type": "string", "minLength": 1, "maxLength": 160}
+            {
+              "type": "null"
             }
-          }
+          ],
+          "default": null,
+          "title": "Fragment"
         }
-      }
+      },
+      "required": [
+        "id",
+        "purpose",
+        "type",
+        "label",
+        "path"
+      ],
+      "title": "HtmlSurface",
+      "type": "object"
     },
-    "videoLocal": {
-      "type": "object",
+    "JupyterKernel": {
       "additionalProperties": false,
-      "required": ["id", "type", "role", "path"],
       "properties": {
-        "id": {"$ref": "#/$defs/slug"},
-        "type": {"const": "video"},
-        "role": {"$ref": "#/$defs/role"},
-        "path": {"$ref": "#/$defs/relativePath"},
-        "start_seconds": {"type": "number", "minimum": 0},
-        "end_seconds": {"type": "number", "exclusiveMinimum": 0}
-      }
+        "type": {
+          "const": "python_uv_project",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "JupyterKernel",
+      "type": "object"
     },
-    "videoRemote": {
-      "type": "object",
+    "JupyterRuntime": {
       "additionalProperties": false,
-      "required": ["id", "type", "role", "url"],
       "properties": {
-        "id": {"$ref": "#/$defs/slug"},
-        "type": {"const": "video"},
-        "role": {"$ref": "#/$defs/role"},
-        "url": {"type": "string", "format": "uri", "pattern": "^https://"},
-        "start_seconds": {"type": "number", "minimum": 0},
-        "end_seconds": {"type": "number", "exclusiveMinimum": 0}
-      }
-    },
-    "terminalSurface": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "type", "role", "label", "argv", "cwd"],
-      "properties": {
-        "id": {"$ref": "#/$defs/slug"},
-        "type": {"const": "terminal"},
-        "role": {"$ref": "#/$defs/role"},
-        "label": {"$ref": "#/$defs/nonEmpty"},
-        "argv": {
-          "type": "array",
-          "minItems": 1,
-          "items": {"type": "string", "minLength": 1, "maxLength": 2048}
+        "type": {
+          "const": "jupyter",
+          "title": "Type",
+          "type": "string"
         },
-        "cwd": {"$ref": "#/$defs/relativePath"}
-      }
+        "kernel": {
+          "$ref": "#/$defs/JupyterKernel"
+        }
+      },
+      "required": [
+        "type",
+        "kernel"
+      ],
+      "title": "JupyterRuntime",
+      "type": "object"
     },
-    "externalSurface": {
-      "type": "object",
+    "LearnerRecordRequirement": {
       "additionalProperties": false,
-      "required": ["id", "type", "role", "url"],
       "properties": {
-        "id": {"$ref": "#/$defs/slug"},
-        "type": {"const": "external"},
-        "role": {"$ref": "#/$defs/role"},
-        "url": {"type": "string", "format": "uri", "pattern": "^https://"}
-      }
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "learner_record",
+          "title": "Type",
+          "type": "string"
+        },
+        "record_kind": {
+          "enum": [
+            "text",
+            "evidence",
+            "attestation"
+          ],
+          "title": "Record Kind",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "record_kind",
+        "prompt"
+      ],
+      "title": "LearnerRecordRequirement",
+      "type": "object"
     },
-    "surface": {
-      "oneOf": [
-        {"$ref": "#/$defs/localSurface"},
-        {"$ref": "#/$defs/notebookSurface"},
-        {"$ref": "#/$defs/videoLocal"},
-        {"$ref": "#/$defs/videoRemote"},
-        {"$ref": "#/$defs/terminalSurface"},
-        {"$ref": "#/$defs/externalSurface"}
-      ]
+    "Learning": {
+      "additionalProperties": false,
+      "description": "Authored teaching metadata. Checks never confer completion or certification.\n\nHints are progressive in array order. Correct IDs/feedback are author data,\nnot suitable for unfiltered pre-attempt provider context.",
+      "properties": {
+        "objectives": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Objective"
+          },
+          "maxItems": 32,
+          "title": "Objectives",
+          "type": "array"
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "overview": {
+          "anyOf": [
+            {
+              "maxLength": 8000,
+              "minLength": 1,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overview"
+        },
+        "hints": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Hint"
+          },
+          "maxItems": 20,
+          "title": "Hints",
+          "type": "array"
+        },
+        "sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SourceReference"
+          },
+          "maxItems": 32,
+          "title": "Sources",
+          "type": "array"
+        },
+        "checks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SingleChoiceCheck"
+          },
+          "maxItems": 32,
+          "title": "Checks",
+          "type": "array"
+        }
+      },
+      "title": "Learning",
+      "type": "object"
+    },
+    "MarkdownSurface": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "purpose": {
+          "enum": [
+            "primary",
+            "supporting",
+            "reference"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "type": {
+          "const": "markdown",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "pattern": "^(?!/)(?![\\s\\S]*[:\\\\\\x00-\\x1f\\x7f])(?![\\s\\S]*(?:^|/)(?:\\.{1,2})(?:/|$))[^/]+(?:/[^/]+)*(?![\\s\\S])",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "purpose",
+        "type",
+        "label",
+        "path"
+      ],
+      "title": "MarkdownSurface",
+      "type": "object"
+    },
+    "Module": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 4000,
+          "title": "Description",
+          "type": "string"
+        },
+        "phases": {
+          "items": {
+            "$ref": "#/$defs/Phase"
+          },
+          "maxItems": 256,
+          "title": "Phases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "description",
+        "phases"
+      ],
+      "title": "Module",
+      "type": "object"
+    },
+    "NotebookSurface": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "purpose": {
+          "enum": [
+            "primary",
+            "supporting",
+            "reference"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "type": {
+          "const": "notebook",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "pattern": "^(?!/)(?![\\s\\S]*[:\\\\\\x00-\\x1f\\x7f])(?![\\s\\S]*(?:^|/)(?:\\.{1,2})(?:/|$))[^/]+(?:/[^/]+)*(?![\\s\\S])",
+          "title": "Path",
+          "type": "string"
+        },
+        "selector": {
+          "discriminator": {
+            "mapping": {
+              "cell_ids": "#/$defs/CellIdsSelector",
+              "cell_tags": "#/$defs/CellTagsSelector",
+              "whole_notebook": "#/$defs/WholeNotebookSelector"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/WholeNotebookSelector"
+            },
+            {
+              "$ref": "#/$defs/CellIdsSelector"
+            },
+            {
+              "$ref": "#/$defs/CellTagsSelector"
+            }
+          ],
+          "title": "Selector"
+        }
+      },
+      "required": [
+        "id",
+        "purpose",
+        "type",
+        "label",
+        "path",
+        "selector"
+      ],
+      "title": "NotebookSurface",
+      "type": "object"
+    },
+    "Objective": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "Objective",
+      "type": "object"
+    },
+    "Phase": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Title",
+          "type": "string"
+        },
+        "progress": {
+          "enum": [
+            "required",
+            "optional",
+            "excluded"
+          ],
+          "title": "Progress",
+          "type": "string"
+        },
+        "experience": {
+          "discriminator": {
+            "mapping": {
+              "builtin": "#/$defs/BuiltinExperience",
+              "custom": "#/$defs/CustomExperience"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/BuiltinExperience"
+            },
+            {
+              "$ref": "#/$defs/CustomExperience"
+            }
+          ],
+          "title": "Experience"
+        },
+        "surfaces": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "external": "#/$defs/ExternalSurface",
+                "html": "#/$defs/HtmlSurface",
+                "markdown": "#/$defs/MarkdownSurface",
+                "notebook": "#/$defs/NotebookSurface",
+                "source": "#/$defs/SourceSurface",
+                "terminal": "#/$defs/TerminalSurface",
+                "video": "#/$defs/VideoSurface"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/HtmlSurface"
+              },
+              {
+                "$ref": "#/$defs/MarkdownSurface"
+              },
+              {
+                "$ref": "#/$defs/SourceSurface"
+              },
+              {
+                "$ref": "#/$defs/NotebookSurface"
+              },
+              {
+                "$ref": "#/$defs/VideoSurface"
+              },
+              {
+                "$ref": "#/$defs/TerminalSurface"
+              },
+              {
+                "$ref": "#/$defs/ExternalSurface"
+              }
+            ]
+          },
+          "maxItems": 64,
+          "title": "Surfaces",
+          "type": "array"
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Completion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "teacher": {
+          "$ref": "#/$defs/TeacherPolicy"
+        },
+        "learning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Learning"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "progress",
+        "experience",
+        "surfaces",
+        "teacher"
+      ],
+      "title": "Phase",
+      "type": "object"
+    },
+    "SingleChoiceCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "single_choice",
+          "title": "Type",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Prompt",
+          "type": "string"
+        },
+        "objective_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Objective Ids",
+          "type": "array"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/CheckOption"
+          },
+          "maxItems": 8,
+          "minItems": 2,
+          "title": "Options",
+          "type": "array"
+        },
+        "correct_option_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Correct Option Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "prompt",
+        "options",
+        "correct_option_id"
+      ],
+      "title": "SingleChoiceCheck",
+      "type": "object"
+    },
+    "SourceReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2048,
+          "minLength": 1,
+          "pattern": "^(?![\\s\\S]*[\\x00-\\x20\\x7f\\\\])https://(?![^/?#]*@)(?:\\[[0-9A-Fa-f:.]+\\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::[0-9]+)?(?:[/?#][\\s\\S]*)?(?![\\s\\S])",
+          "title": "Url",
+          "type": "string"
+        },
+        "reviewed_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}(?![\\s\\S])",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed Date"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "url"
+      ],
+      "title": "SourceReference",
+      "type": "object"
+    },
+    "SourceSurface": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "purpose": {
+          "enum": [
+            "primary",
+            "supporting",
+            "reference"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "type": {
+          "const": "source",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "pattern": "^(?!/)(?![\\s\\S]*[:\\\\\\x00-\\x1f\\x7f])(?![\\s\\S]*(?:^|/)(?:\\.{1,2})(?:/|$))[^/]+(?:/[^/]+)*(?![\\s\\S])",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "purpose",
+        "type",
+        "label",
+        "path"
+      ],
+      "title": "SourceSurface",
+      "type": "object"
+    },
+    "TeacherAccess": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "available",
+            "disabled",
+            "observer_only"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode",
+        "requires"
+      ],
+      "title": "TeacherAccess",
+      "type": "object"
+    },
+    "TeacherGuidance": {
+      "additionalProperties": false,
+      "properties": {
+        "style": {
+          "discriminator": {
+            "mapping": {
+              "builtin": "#/$defs/BuiltinTeacherStyle",
+              "custom": "#/$defs/CustomTeacherStyle"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/BuiltinTeacherStyle"
+            },
+            {
+              "$ref": "#/$defs/CustomTeacherStyle"
+            }
+          ],
+          "title": "Style"
+        },
+        "hint_level": {
+          "enum": [
+            "none",
+            "gentle",
+            "graduated",
+            "full"
+          ],
+          "title": "Hint Level",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        }
+      },
+      "required": [
+        "style",
+        "hint_level"
+      ],
+      "title": "TeacherGuidance",
+      "type": "object"
+    },
+    "TeacherPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/TeacherAccess"
+        },
+        "guidance": {
+          "$ref": "#/$defs/TeacherGuidance"
+        },
+        "sharing": {
+          "$ref": "#/$defs/TeacherSharing"
+        },
+        "proposals": {
+          "$ref": "#/$defs/TeacherProposals"
+        }
+      },
+      "required": [
+        "access",
+        "guidance",
+        "sharing",
+        "proposals"
+      ],
+      "title": "TeacherPolicy",
+      "type": "object"
+    },
+    "TeacherProposals": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "items": {
+            "enum": [
+              "profile",
+              "course",
+              "workspace"
+            ],
+            "type": "string"
+          },
+          "title": "Allow",
+          "type": "array"
+        }
+      },
+      "required": [
+        "allow"
+      ],
+      "title": "TeacherProposals",
+      "type": "object"
+    },
+    "TeacherSharing": {
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "items": {
+            "enum": [
+              "selection",
+              "cell",
+              "output"
+            ],
+            "type": "string"
+          },
+          "title": "Allow",
+          "type": "array"
+        }
+      },
+      "required": [
+        "allow"
+      ],
+      "title": "TeacherSharing",
+      "type": "object"
+    },
+    "TerminalSurface": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "purpose": {
+          "enum": [
+            "primary",
+            "supporting",
+            "reference"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "type": {
+          "const": "terminal",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "command": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "pattern": "^[^\\x00]+(?![\\s\\S])",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Command",
+          "type": "array"
+        },
+        "cwd": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "pattern": "^(?:\\.(?![\\s\\S])|^(?!/)(?![\\s\\S]*[:\\\\\\x00-\\x1f\\x7f])(?![\\s\\S]*(?:^|/)(?:\\.{1,2})(?:/|$))[^/]+(?:/[^/]+)*(?![\\s\\S]))",
+          "title": "Cwd",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "purpose",
+        "type",
+        "label",
+        "command",
+        "cwd"
+      ],
+      "title": "TerminalSurface",
+      "type": "object"
+    },
+    "VideoSurface": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Id",
+          "type": "string"
+        },
+        "purpose": {
+          "enum": [
+            "primary",
+            "supporting",
+            "reference"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "type": {
+          "const": "video",
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "src": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "minLength": 1,
+              "pattern": "^(?!/)(?![\\s\\S]*[:\\\\\\x00-\\x1f\\x7f])(?![\\s\\S]*(?:^|/)(?:\\.{1,2})(?:/|$))[^/]+(?:/[^/]+)*(?![\\s\\S])",
+              "type": "string"
+            },
+            {
+              "format": "uri",
+              "maxLength": 2048,
+              "minLength": 1,
+              "pattern": "^(?![\\s\\S]*[\\x00-\\x20\\x7f\\\\])https://(?![^/?#]*@)(?:\\[[0-9A-Fa-f:.]+\\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::[0-9]+)?(?:[/?#][\\s\\S]*)?(?![\\s\\S])",
+              "type": "string"
+            }
+          ],
+          "title": "Src"
+        },
+        "start_seconds": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Seconds"
+        },
+        "end_seconds": {
+          "anyOf": [
+            {
+              "maximum": 2147483647,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Seconds"
+        }
+      },
+      "required": [
+        "id",
+        "purpose",
+        "type",
+        "label",
+        "src"
+      ],
+      "title": "VideoSurface",
+      "type": "object"
+    },
+    "WholeNotebookSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "whole_notebook",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "WholeNotebookSelector",
+      "type": "object"
     }
-  }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "id": {
+      "maxLength": 80,
+      "minLength": 1,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+      "title": "Id",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 200,
+      "minLength": 1,
+      "pattern": ".*\\S.*",
+      "title": "Title",
+      "type": "string"
+    },
+    "description": {
+      "maxLength": 4000,
+      "title": "Description",
+      "type": "string"
+    },
+    "entry_module_id": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Entry Module Id"
+    },
+    "runtime": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JupyterRuntime"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "policies": {
+      "$ref": "#/$defs/CoursePolicies"
+    },
+    "modules": {
+      "items": {
+        "$ref": "#/$defs/Module"
+      },
+      "maxItems": 256,
+      "title": "Modules",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "description",
+    "entry_module_id",
+    "policies",
+    "modules"
+  ],
+  "title": "CourseManifest",
+  "type": "object"
 }

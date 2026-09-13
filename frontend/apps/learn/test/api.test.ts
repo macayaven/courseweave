@@ -107,12 +107,12 @@ describe('createCourseweaveClient', () => {
     vi.stubGlobal('fetch', fetch);
 
     await expect(
-      createCourseweaveClient(runtime).patchState({ expected_revision: 1, operation: { type: 'complete_phase', module_id: 's01', phase_id: 'orient', record_id: 'complete' } })
+      createCourseweaveClient(runtime).patchState({ expected_revision: 1, operation: { type: 'set_preferences', preferences: { enabled: false } } })
     ).rejects.toBeInstanceOf(CourseweaveApiError);
     expect(fetch).toHaveBeenCalledOnce();
   });
 
-  it('accepts only Task 3 state operations', () => {
+  it('accepts only canonical direct state operations', () => {
     const client = createCourseweaveClient(runtime);
     if (false) {
       // @ts-expect-error Unsupported state operations are not part of the client contract.

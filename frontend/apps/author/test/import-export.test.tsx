@@ -32,7 +32,7 @@ vi.mock("../src/api", () => ({
 vi.mock("../src/runtime", () => ({ useAuthorRuntime: app.runtime }));
 import { AuthorApp } from "../src/app";
 
-const valid = { schema_version: 1, id: "course", title: "C" };
+const valid = { schema_version: 2, id: "course", title: "C" };
 
 afterEach(() => {
   cleanup();
@@ -58,7 +58,7 @@ describe("Author import and export", () => {
       readImportFile(new File(['{"schema_version":0}'], "legacy.json")),
     ).rejects.toThrow("schema version");
     await expect(
-      readImportFile(new File(['{"schema_version":2}'], "future.json")),
+      readImportFile(new File(['{"schema_version":3}'], "future.json")),
     ).rejects.toThrow("schema version");
     await expect(
       readImportFile(new File([new Uint8Array([0xc3, 0x28])], "broken.json")),
@@ -71,7 +71,7 @@ describe("Author import and export", () => {
   it("retains the current state on failed import and can import the same file twice", async () => {
     const validate = vi.fn().mockResolvedValue({
       manifest: valid,
-      formatted_json: '{\n  "schema_version": 1\n}\n',
+      formatted_json: '{\n  "schema_version": 2\n}\n',
     });
     const imported = vi.fn();
     render(
@@ -96,12 +96,15 @@ describe("Author import and export", () => {
 
   it("rejects structurally invalid and unexpected schema-v1 imports without changing a dirty selected draft or baseline", async () => {
     const manifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Saved",
       description: "",
       entry_module_id: "module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -118,24 +121,28 @@ describe("Author import and export", () => {
             {
               id: "phase",
               title: "Phase",
-              kind: "read",
-              teacher_mode: "reading_companion",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "reading" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "surface",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "saved.md",
                 },
               ],
@@ -170,7 +177,9 @@ describe("Author import and export", () => {
               {
                 path: hasUnexpected ? "/unexpected" : "/modules",
                 code: "schema_validation",
-                message: hasUnexpected ? "Unexpected field." : "Modules are required.",
+                message: hasUnexpected
+                  ? "Unexpected field."
+                  : "Modules are required.",
               },
             ],
           },
@@ -187,12 +196,7 @@ describe("Author import and export", () => {
     const structurallyInvalid = { ...manifest, modules: "not an array" };
     fireEvent.change(screen.getByLabelText("Import course file"), {
       target: {
-        files: [
-          new File(
-            [JSON.stringify(structurallyInvalid)],
-            "bad.json",
-          ),
-        ],
+        files: [new File([JSON.stringify(structurallyInvalid)], "bad.json")],
       },
     });
     expect(await screen.findByText("invalid v1")).toBeInTheDocument();
@@ -230,7 +234,7 @@ describe("Author import and export", () => {
     });
     app.putCourse.mockResolvedValue({
       manifest,
-      raw: '{}\n',
+      raw: "{}\n",
       etag: '"next-etag"',
     });
     fireEvent.click(screen.getByRole("button", { name: "Save course" }));
@@ -322,12 +326,15 @@ describe("Author import and export", () => {
 
   it("exports and explicitly saves the identical server canonical byte sequence", async () => {
     const manifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Café",
       description: "",
       entry_module_id: null,
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",

@@ -459,12 +459,18 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
 
     const guide = page.frameLocator('iframe[title="CourseWeave guide"]');
     await expect(page.locator('iframe[title="CourseWeave guide"]')).toHaveCount(1);
+    expect((await page.locator('iframe[title="CourseWeave guide"]').boundingBox())!.height).toBeGreaterThan(400);
     const guideReferrer = await guide.locator('body').evaluate(() => document.referrer);
     expect(guideReferrer).toMatch(/^https?:\/\/[^/]+\/$/);
     await expect(guide.locator('body')).toContainText('Installed wheel rich course');
     await expect(guide.getByRole('region', { name: 'Course dashboard' })).toContainText('Installed phase');
     await invokePaletteCommand(page, DASHBOARD_COMMAND);
-    await expect(page.locator('#courseweave-dashboard')).toContainText('Installed wheel rich course', { timeout: PALETTE_STEP_TIMEOUT_MS });
+    try {
+      await expect(page.locator('#courseweave-dashboard')).toContainText('Installed wheel rich course', { timeout: PALETTE_STEP_TIMEOUT_MS });
+    } catch (error) {
+      console.log('Dashboard diagnostic:', JSON.stringify({pageErrors,consoleMessages, visibleText:await page.locator('body').innerText()}));
+      throw error;
+    }
     await expect.poll(() => publishedContexts.some((body) => body.sequence === 0 && typeof body.source_id === 'string')).toBe(true);
     const invalidationPromise = guide.locator('body').evaluate(() => new Promise<boolean>((resolve) => {
       const listener = (event: MessageEvent) => {
@@ -480,7 +486,8 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
       if (response.request().method() !== 'POST' || !response.url().endsWith('/courseweave/context')) return false;
       try { return response.request().postDataJSON().active_path === 'lesson.md'; } catch { return false; }
     });
-    await guide.getByRole('button', { name: 'Open markdown' }).click();
+    await guide.getByText('Course contents', {exact:true}).click();
+    await guide.locator('.cw-navigation details').getByRole('button', { name: 'Open markdown' }).click();
     const contextResponse = await markdownContextResponse;
     expect({ status: contextResponse.status(), cache: contextResponse.headers()['cache-control'], cors: contextResponse.headers()['access-control-allow-origin'] ?? null }).toEqual({ status: 200, cache: 'no-store', cors: null });
     expect(contextResponse.request().postDataJSON()).toMatchObject({ active_path: 'lesson.md', surface_kind: 'markdown' });
@@ -488,13 +495,14 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     await expect(page.locator('.lm-TabBar-tabLabel', { hasText: 'lesson.md' })).toBeVisible();
     await guide.getByRole('button', { name: 'Open html' }).click();
     const reader = page.locator('iframe[title="CourseWeave reader"]');
-    await expect(reader).toHaveAttribute('src', /\/courseweave\/files\/lessons\/reader\.html$/);
+    await expect(reader).toHaveAttribute('src', /\/courseweave\/courseweave\/reader\/lessons\/reader\.html$/);
     await expect(reader).toHaveAttribute('sandbox', 'allow-same-origin');
     await expect(reader).toHaveAttribute('referrerpolicy', 'same-origin');
-    await expect.poll(() => page.frames().some((frame) => /\/courseweave\/files\/lessons\/reader\.html$/.test(frame.url()))).toBe(true);
-    const htmlFrame = page.frames().find((frame) => /\/courseweave\/files\/lessons\/reader\.html$/.test(frame.url()));
+    await expect.poll(() => page.frames().some((frame) => /\/courseweave\/courseweave\/reader\/lessons\/reader\.html$/.test(frame.url()))).toBe(true);
+    const htmlFrame = page.frames().find((frame) => /\/courseweave\/courseweave\/reader\/lessons\/reader\.html$/.test(frame.url()));
     await htmlFrame!.evaluate(() => document.body.removeAttribute('data-jupyter-api-token'));
     await expect(htmlFrame!.locator('body')).toContainText('Reader fixture');
+    expect(await htmlFrame!.evaluate(()=>(window as any).courseweaveReaderScriptRan)).toBeUndefined();
     await guide.getByRole('button', { name: 'Open video' }).click();
     await expect(reader).toHaveAttribute('src', 'https://video.example.test/video.mp4');
     await expect(reader).toHaveAttribute('sandbox', '');
@@ -511,7 +519,7 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     await expect(page.locator('.jp-Terminal')).toHaveCount(1);
     workspace.trackOwnedProcesses();
     const terminalInstructions = page.locator('[data-courseweave-terminal-instructions]');
-    const expectedInstructions = JSON.stringify({ cwd: '.', argv: ['/usr/bin/touch', 'terminal-argv-must-not-run'] }, null, 2);
+    const expectedInstructions = JSON.stringify({ cwd: '.', command: ['/usr/bin/touch', 'terminal-argv-must-not-run'] }, null, 2);
     await expect(terminalInstructions).toContainText(expectedInstructions);
     const copyInstructions = terminalInstructions.getByRole('button', { name: 'Copy launch instructions' });
     await expect(copyInstructions).toBeVisible();
@@ -523,6 +531,10 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
     await page.waitForTimeout(250);
     await expect(workspace.terminalSentinelExists()).resolves.toBe(false);
     expect(pageErrors).toEqual([]);
+    const blockedFixtureScript = (message: {type: string; text: string; url: string}) => message.type === 'error'
+      && message.url === `${baseUrl}courseweave/reader/lessons/reader.html`
+      && message.text === `Blocked script execution in '${message.url}' because the document's frame is sandboxed and the 'allow-scripts' permission is not set.`;
+    expect(consoleMessages.filter(blockedFixtureScript)).toHaveLength(1);
     const expectedConsoleError = (message: { type: string; text: string; url: string }) => {
       if (message.type !== 'error') return false;
       let parsed: URL | null = null;
@@ -549,7 +561,7 @@ test('fresh installed wheel opens an authenticated Learn workspace without Node 
         '/courseweave/courseweave/context'
       ].includes(path))
         || (/status of 404/.test(message.text) && path.endsWith('/favicon.ico'))
-        || startupContext404);
+        || startupContext404 || blockedFixtureScript(message));
     };
     const unexpectedConsoleErrors = consoleMessages.filter((message) => message.type === 'error' && !expectedConsoleError(message));
     expect(unexpectedConsoleErrors).toEqual([]);
@@ -586,17 +598,15 @@ test('fresh installed wheel opens Author without materializing an empty course b
     expect(config.courseweaveLaunchMode).toBe('author');
     expect(Object.prototype.hasOwnProperty.call(config, 'courseweaveCapabilityToken')).toBe(false);
     const author = page.frameLocator('iframe[title="CourseWeave author"]');
+    expect((await page.locator('iframe[title="CourseWeave author"]').boundingBox())!.height).toBeGreaterThan(400);
     await expect(page.locator('iframe[title="CourseWeave author"]')).toBeVisible();
     await expect(workspace.courseManifestExists()).resolves.toBe(false);
     await expect(workspace.coursePrivateStateExists()).resolves.toBe(false);
     await author.getByRole('button', { name: 'Save course' }).click();
     await expect(author.getByText('Saved exact canonical course bytes.', { exact: true })).toBeVisible();
     await expect(workspace.courseManifestExists()).resolves.toBe(true);
-    await expect(workspace.courseFiles()).resolves.toEqual([
-      '.courseweave/courseweave.db', '.courseweave/courseweave.db-shm',
-      '.courseweave/courseweave.db-wal', '.courseweave/courseweave.lock',
-      'courseweave.json',
-    ]);
+    await expect(workspace.courseFiles()).resolves.toEqual(['courseweave.json']);
+    await expect(workspace.coursePrivateStateExists()).resolves.toBe(false);
     const credential = await credentialSnapshot(page, config.courseweaveRuntimeId as string);
     workspace.scheduleFinalCredentialAudit({
       ...credential,

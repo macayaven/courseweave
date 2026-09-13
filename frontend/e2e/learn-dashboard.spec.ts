@@ -21,13 +21,14 @@ test('production Learner dashboard keeps manifest order, exposes no-document and
   const api = { active: false, authenticatedRequests: 0 };
   const learn = await mountLearner(page, api);
 
-  await expect(learn.getByText('No active course document')).toBeVisible();
+  await expect(learn.getByRole('button',{name:'Start: Second reading'})).toBeVisible();
+  await learn.getByText('Course contents',{exact:true}).click();
   await expect(learn.getByRole('heading', { name: 'Second module' })).toBeVisible();
   await expect(learn.getByRole('heading', { name: 'First module' })).toBeVisible();
   const headings = await learn.locator('[aria-label="Course dashboard"] h2, [aria-label="Course dashboard"] h3').allTextContents();
   expect(headings).toEqual(['Second module', 'Second reading', 'First module', 'First reading']);
 
-  const openLesson = learn.getByRole('button', { name: 'Open Second lesson' });
+  const openLesson = learn.getByLabel('Course dashboard').locator('details').getByRole('button', { name: 'Open Second lesson' });
   const openVideo = learn.getByRole('button', { name: 'Open Second video' });
   await openVideo.focus();
   await learn.locator('body').press('Shift+Tab');
@@ -48,7 +49,7 @@ test('production Learner dashboard keeps manifest order, exposes no-document and
   await notifyContextChanged(page);
   await expect(learn.getByText('No active course document')).toHaveCount(0);
   await expect(learn.getByLabel('Current location')).toHaveText(/Second module.*Second reading/);
-  await expect(learn.getByRole('region', { name: 'Reading' })).toBeVisible();
+  await expect(learn.getByRole('region', { name: 'Current activity' })).toBeVisible();
   await expect.poll(() => api.authenticatedRequests).toBeGreaterThan(0);
 
   const navigation = page.evaluate(() => new Promise<unknown>((resolve) => window.addEventListener('courseweave-test-navigation', (event) => resolve((event as CustomEvent).detail), { once: true })));
@@ -63,11 +64,12 @@ test('production Learner keeps a populated oversized proposal independently scro
     active: false,
     authenticatedRequests: 0,
     proposals: [{
-      id: 'proposal-a', revision: 1, type: 'workspace_file_replace', origin: 'teacher_suggested', status: 'pending', summary: 'Long proposal', created_at: '2026-09-02T00:00:00Z', target: 'lesson.md', target_hash: null, result: null,
+      id: 'proposal-a', revision: 1, type: 'manifest_replace', origin: 'teacher_suggested', status: 'pending', summary: 'Long proposal', created_at: '2026-09-02T00:00:00Z', target: 'lesson.md', target_hash: null, result: null,
       payload: { diff: `+${'unbroken-proposal-content-'.repeat(40)}` }
     }]
   };
   const learn = await mountLearner(page, api);
+  await learn.getByText('Suggested changes (1)',{exact:true}).click();
   const diff = learn.locator('.cw-proposal-diff');
   await expect(diff).toBeVisible();
   expect(await diff.evaluate((element) => {

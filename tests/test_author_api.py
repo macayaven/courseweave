@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import copy
 import concurrent.futures
 import hashlib
@@ -22,34 +23,43 @@ AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
 def manifest() -> dict:
-    return {
-        "schema_version": 1,
-        "id": "author-course",
-        "title": "Author Course",
-        "description": "",
-        "entry_module_id": "module-one",
-        "policies": {
-            "content_sharing": "explicit_only",
-            "durable_mutation": "proposal_or_direct_student_action",
-            "terminal_execution": "student_only",
-            "conversation_memory": "session_only",
-            "max_shared_chars": 8192,
-            "workspace_write_globs": [],
-        },
-        "modules": [{
-            "id": "module-one", "title": "Module one", "description": "",
-            "phases": [{
-                "id": "read-one", "title": "Read", "kind": "read",
-                "teacher_mode": "reading_companion", "surfaces": [{
-                    "id": "lesson", "type": "markdown", "role": "primary", "path": "lesson.md",
-                }],
-                "completion": {"type": "manual"},
-                "capabilities": {"chat": True, "hint_level": "none", "share_selection": False,
-                    "share_cell": False, "share_output": False, "create_profile_proposal": False,
-                    "create_course_proposal": False, "create_workspace_proposal": False},
-            }],
-        }],
-    }
+    data = {'schema_version': 2,
+     'id': 'author-course',
+     'title': 'Author Course',
+     'description': '',
+     'entry_module_id': 'module-one',
+     'policies': {'content_sharing': 'explicit_only',
+                  'allowed_share_kinds': [],
+                  'max_shared_chars': 8192,
+                  'allowed_proposal_types': [],
+                  'durable_mutation': 'proposal_or_direct_student_action',
+                  'terminal_execution': 'student_only',
+                  'conversation_memory': 'session_only',
+                  'workspace_write_globs': []},
+     'modules': [{'id': 'module-one',
+                  'title': 'Module one',
+                  'description': '',
+                  'phases': [{'id': 'read-one',
+                              'title': 'Read',
+                              'progress': 'required',
+                              'experience': {'type': 'builtin', 'id': 'reading'},
+                              'surfaces': [{'id': 'lesson',
+                                            'purpose': 'primary',
+                                            'type': 'markdown',
+                                            'label': 'lesson',
+                                            'path': 'lesson.md'}],
+                              'completion': {'requirements': [{'id': 'acknowledgement',
+                                                               'type': 'learner_record',
+                                                               'record_kind': 'attestation',
+                                                               'prompt': 'Confirm completion of '
+                                                                         'Read.'}]},
+                              'teacher': {'access': {'mode': 'available', 'requires': []},
+                                          'guidance': {'style': {'type': 'builtin',
+                                                                 'id': 'explanatory'},
+                                                       'hint_level': 'none'},
+                                          'sharing': {'allow': []},
+                                          'proposals': {'allow': []}}}]}]}
+    return data
 
 
 def client(root: Path) -> TestClient:
@@ -111,13 +121,11 @@ def test_runnable_validation_uses_local_evidence_without_remote_fetch(tmp_path: 
     draft = manifest()
     draft["modules"][0]["phases"][0]["surfaces"][0]["path"] = "missing.md"
     remote = copy.deepcopy(draft)
-    remote["modules"][0]["phases"][0]["surfaces"][0] = {
-        "id": "remote", "type": "video", "role": "primary", "url": "https://example.invalid/video.mp4"
-    }
+    remote["modules"][0]["phases"][0]["surfaces"][0] = {'id': 'remote', 'type': 'video', 'purpose': 'primary', 'label': 'remote', 'src': 'https://example.invalid/video.mp4'}
     app = client(tmp_path)
     missing = app.post("/api/author/validate", headers=AUTH, json={"manifest": draft, "mode": "runnable"})
     assert missing.status_code == 422
-    assert missing.json()["details"]["issues"][0]["code"] == "missing_artifact"
+    assert missing.json()["details"]["issues"][0]["code"] == "source_missing"
     assert app.post("/api/author/validate", headers=AUTH, json={"manifest": remote, "mode": "runnable"}).status_code == 200
 
 
@@ -132,7 +140,7 @@ def test_validation_route_has_exact_auth_and_request_contract(tmp_path: Path) ->
 def test_missing_manifest_replace_keeps_null_cas_and_is_exactly_once(tmp_path: Path) -> None:
     request = {"id": "initial-course", "type": "manifest_replace", "origin": "teacher_suggested",
                "summary": "Create the course", "target": "courseweave.json", "payload": {"manifest": manifest()}, "target_hash": None}
-    store = CourseStore(tmp_path)
+    store = CourseStore(tmp_path, course_id="author-course")
     proposal = store.create_proposal(request, "create")
     assert proposal.target_hash is None
     accepted = store.accept_proposal(proposal.id, proposal.revision, "accept")
@@ -151,52 +159,52 @@ def test_structural_issues_are_field_addressable_for_required_union_and_model_ru
     missing_title = manifest()
     del missing_title["title"]
     response = app.post("/api/author/validate", headers=AUTH, json={"manifest": missing_title, "mode": "structural"})
-    assert _issue_paths(response)["/title"] == "schema_validation"
+    assert _issue_paths(response)["/title"] == "contract_invalid"
 
     bad_surface = manifest()
     bad_surface["modules"][0]["phases"][0]["surfaces"][0]["path"] = "../secret-looking-value"
     response = app.post("/api/author/validate", headers=AUTH, json={"manifest": bad_surface, "mode": "structural"})
-    assert _issue_paths(response)["/modules/0/phases/0/surfaces/0/path"] == "schema_validation"
+    assert _issue_paths(response)["/modules/0/phases/0/surfaces/0/path"] == "contract_invalid"
 
     duplicate = manifest()
     duplicate["modules"].append(copy.deepcopy(duplicate["modules"][0]))
     response = app.post("/api/author/validate", headers=AUTH, json={"manifest": duplicate, "mode": "structural"})
-    assert _issue_paths(response)["/modules/1/id"] == "schema_validation"
+    assert _issue_paths(response)["/modules/1/id"] == "contract_invalid"
 
     bad_entry = manifest()
     bad_entry["entry_module_id"] = "missing-module"
     response = app.post("/api/author/validate", headers=AUTH, json={"manifest": bad_entry, "mode": "structural"})
-    assert _issue_paths(response)["/entry_module_id"] == "schema_validation"
+    assert _issue_paths(response)["/entry_module_id"] == "contract_invalid"
 
 
 def test_schema_version_and_malformed_field_type_have_safe_pointers(tmp_path: Path) -> None:
     app = client(tmp_path)
     unsupported = manifest()
-    unsupported["schema_version"] = 2
+    unsupported["schema_version"] = 3
     response = app.post("/api/author/validate", headers=AUTH, json={"manifest": unsupported, "mode": "structural"})
-    assert _issue_paths(response) == {"/schema_version": "schema_validation"}
+    assert _issue_paths(response) == {"/schema_version": "contract_invalid"}
 
     malformed = manifest()
     malformed["policies"]["max_shared_chars"] = "not-a-number"
     response = app.post("/api/author/validate", headers=AUTH, json={"manifest": malformed, "mode": "structural"})
-    assert _issue_paths(response)["/policies/max_shared_chars"] == "schema_validation"
+    assert _issue_paths(response)["/policies/max_shared_chars"] == "contract_invalid"
 
 
 def test_runnable_collects_all_local_diagnostics_and_allows_future_completion(tmp_path: Path) -> None:
     draft = manifest()
     phase = draft["modules"][0]["phases"][0]
     phase["surfaces"] = [
-        {"id": "missing", "type": "markdown", "role": "primary", "path": "missing.md"},
-        {"id": "terminal", "type": "terminal", "role": "exercise", "label": "Run", "argv": ["echo"], "cwd": "missing-cwd"},
-        {"id": "video", "type": "video", "role": "reference", "path": "video.mp4"},
+        {'id': 'missing', 'type': 'markdown', 'path': 'missing.md', 'purpose': 'primary', 'label': 'missing'},
+        {'id': 'terminal', 'type': 'terminal', 'label': 'Run', 'cwd': 'missing-cwd', 'purpose': 'supporting', 'command': ['echo']},
+        {'id': 'video', 'type': 'video', 'purpose': 'reference', 'label': 'video', 'src': 'video.mp4'},
     ]
     (tmp_path / "video.mp4").write_bytes(b"version https://git-lfs.github.com/spec/v1\n")
-    phase["completion"] = {"type": "artifact_exists", "record_id": "future", "path": "future.json"}
+    phase["completion"] = {'requirements': [{'id': 'future', 'type': 'artifact_exists', 'path': 'future.json', 'prompt': 'Create artifact.'}]}
     response = client(tmp_path).post("/api/author/validate", headers=AUTH, json={"manifest": draft, "mode": "runnable"})
     assert _issue_paths(response) == {
-        "/modules/0/phases/0/surfaces/0/path": "missing_artifact",
-        "/modules/0/phases/0/surfaces/1/cwd": "invalid_terminal_cwd",
-        "/modules/0/phases/0/surfaces/2/path": "lfs_pointer",
+        "/modules/0/phases/0/surfaces/0/path": "source_missing",
+        "/modules/0/phases/0/surfaces/1/cwd": "source_missing",
+        "/modules/0/phases/0/surfaces/2/src": "lfs_pointer",
     }
 
 
@@ -209,16 +217,14 @@ def test_validation_path_symlink_and_remote_url_are_safe_and_network_free(tmp_pa
     draft = manifest()
     draft["modules"][0]["phases"][0]["surfaces"][0]["path"] = "escaped/private.txt"
     response = client(root).post("/api/author/validate", headers=AUTH, json={"manifest": draft, "mode": "structural"})
-    assert _issue_paths(response) == {"/modules/0/phases/0/surfaces/0/path": "path_escape"}
+    assert _issue_paths(response) == {"/modules/0/phases/0/surfaces/0/path": "path_symlink_rejected"}
 
     def no_network(*_args, **_kwargs):
         raise AssertionError("validation must not make an outbound network request")
 
     monkeypatch.setattr(socket, "create_connection", no_network)
     remote = manifest()
-    remote["modules"][0]["phases"][0]["surfaces"][0] = {
-        "id": "remote", "type": "video", "role": "primary", "url": "https://network-tripwire.example/video.mp4"
-    }
+    remote["modules"][0]["phases"][0]["surfaces"][0] = {'id': 'remote', 'type': 'video', 'purpose': 'primary', 'label': 'remote', 'src': 'https://network-tripwire.example/video.mp4'}
     assert client(root).post("/api/author/validate", headers=AUTH, json={"manifest": remote, "mode": "runnable"}).status_code == 200
 
 

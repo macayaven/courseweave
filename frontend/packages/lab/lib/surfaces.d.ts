@@ -1,19 +1,32 @@
-import { Widget } from '@lumino/widgets';
-export type SurfaceType = 'html' | 'markdown' | 'video' | 'notebook' | 'source' | 'terminal' | 'external';
+import { Widget } from "@lumino/widgets";
+export type SurfaceType = "html" | "markdown" | "video" | "notebook" | "source" | "terminal" | "external";
 export interface CourseSurface {
     id: string;
     type: SurfaceType;
     path?: string;
     url?: string;
     cwd?: string;
-    argv?: string[];
+    command?: string[];
+    src?: string;
+    fragment?: string | null;
+    purpose?: "primary" | "supporting" | "reference";
+    selector?: {
+        type: string;
+        values?: string[];
+        match?: string;
+    };
+    start_seconds?: number | null;
+    end_seconds?: number | null;
     label?: string;
 }
 export interface CourseSnapshot {
+    schema_version: 2;
     id: string;
     title: string;
+    entry_module_id?: string | null;
     policies: {
         max_shared_chars: number;
+        allowed_share_kinds: Array<"selection" | "cell" | "output">;
     };
     modules: Array<{
         id: string;
@@ -21,10 +34,15 @@ export interface CourseSnapshot {
         phases: Array<{
             id: string;
             title: string;
-            capabilities: {
-                share_selection: boolean;
-                share_cell: boolean;
-                share_output: boolean;
+            progress: "required" | "optional" | "excluded";
+            teacher: {
+                access: {
+                    mode: "available" | "disabled" | "observer_only";
+                    requires: string[];
+                };
+                sharing: {
+                    allow: Array<"selection" | "cell" | "output">;
+                };
             };
             surfaces: CourseSurface[];
         }>;
@@ -36,10 +54,10 @@ export interface SurfaceCoordinate {
     surfaceId: string;
 }
 export declare function parseCourseSnapshot(value: unknown): CourseSnapshot | null;
-export declare function localReaderUrl(path: string, jupyterOrigin: string, baseUrl: string): string;
+export declare function localReaderUrl(path: string, jupyterOrigin: string, baseUrl: string, reader?: boolean): string;
 export declare function canonicalJupyterBaseUrl(jupyterOrigin: string, baseUrl: string): string;
 interface SurfaceShell {
-    add(widget: Widget, area: 'main', options?: Record<string, unknown>): void;
+    add(widget: Widget, area: "main", options?: Record<string, unknown>): void;
     activateById(id: string): void;
     currentWidget: Widget | null;
 }
@@ -65,6 +83,8 @@ interface CourseSurfaceFactoryOptions {
     baseUrl: string;
     beforeAuthorAttach?: (widget: Widget, iframe: HTMLIFrameElement) => void;
     writeClipboard?: (text: string) => Promise<void>;
+    onOpened?(coordinate: SurfaceCoordinate, result: SurfaceOpenResult): void | Promise<void>;
+    openExternal?(url: string): void;
 }
 export interface SurfaceOpenResult {
     htmlSource: string | null;
@@ -99,7 +119,7 @@ export declare function registerCourseCommands(commands: {
     openGuide(): unknown;
     openDashboard(): unknown;
     openAuthor(): unknown;
-    requestShare(kind: 'selection' | 'cell' | 'output'): unknown;
+    requestShare(kind: "selection" | "cell" | "output"): unknown;
 }): void;
 export declare class CourseSurfaceFactory {
     private readonly options;
@@ -108,9 +128,9 @@ export declare class CourseSurfaceFactory {
     private dashboard;
     private author;
     private readonly terminals;
-    private readonly terminalFlights;
     private readonly metadata;
     private readonly jupyterBaseUrl;
+    private opening;
     constructor(options: CourseSurfaceFactoryOptions);
     setCourse(course: CourseSnapshot): void;
     private lookup;
@@ -118,6 +138,8 @@ export declare class CourseSurfaceFactory {
     private nativeDocument;
     private createTerminal;
     open(coordinate: SurfaceCoordinate): Promise<SurfaceOpenResult>;
+    private openSurface;
+    private bindReaderLinks;
     openDashboard(): Widget;
     openAuthor(): Widget;
     metadataFor(widget: object | null): SurfaceMetadata | null;
@@ -125,13 +147,12 @@ export declare class CourseSurfaceFactory {
 export declare class SurfaceRequestBroker {
     private readonly options;
     private listening;
-    private readonly flights;
     constructor(options: {
         hostWindow: Window;
         childWindow: Window;
         serviceOrigin: string;
         sourceId: string;
-        factory: Pick<CourseSurfaceFactory, 'open'>;
+        factory: Pick<CourseSurfaceFactory, "open">;
     });
     private readonly listener;
     start(): void;

@@ -8,11 +8,16 @@ redacted outcomes for provider requests.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import math
 from dataclasses import dataclass, field
 from typing import Literal, Mapping
 
 import httpx2
 from pydantic_ai import Agent, ModelHTTPError
+from pydantic_ai.usage import UsageLimits
+from pydantic_ai.messages import ModelResponse
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -22,8 +27,39 @@ ProviderName = Literal["openai", "anthropic"]
 ProviderResultStatus = Literal["configured", "not_configured"]
 ProviderCallStatus = Literal["ok", "provider_error"]
 ProviderFailureKind = Literal[
-    "authentication", "timeout", "malformed_response", "unsupported", "request"
+    "authentication", "timeout", "malformed_response", "unsupported", "request",
+    "rate_limited", "refusal", "truncated", "cancelled", "input_limit"
 ]
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    version: str = "capabilities-v1"
+    text: bool = True
+    streaming: bool = True
+    tools: bool = True
+    structured_output: Literal["none", "tool", "native"] = "tool"
+
+
+PROFILES = {
+    "stream-tools-v1": ProviderCapabilities(),
+    "text-only-v1": ProviderCapabilities(streaming=False, tools=False, structured_output="none"),
+    "tools-v1": ProviderCapabilities(streaming=False),
+}
+
+
+class ProviderCompletionError(ValueError):
+    def __init__(self, kind: str):
+        self.kind = kind
+        super().__init__(kind)
+
+
+def validate_completion(response) -> None:
+    reason = getattr(response, "finish_reason", None)
+    if reason in {"length", "max_tokens"}:
+        raise ProviderCompletionError("truncated")
+    if reason in {"content_filter", "refusal"}:
+        raise ProviderCompletionError("refusal")
 
 
 @dataclass(frozen=True)
@@ -35,6 +71,31 @@ class ProviderConfig:
     base_url: str | None = None
     api_key: str | None = field(default=None, repr=False)
     timeout_seconds: float | None = None
+    profile: str = "stream-tools-v1"
+    max_input_chars: int = 65536
+    max_output_tokens: int = 4096
+    run_timeout_seconds: float = 90.0
+
+    def __post_init__(self):
+        if self.profile not in PROFILES:
+            raise ValueError("Unknown provider capability profile")
+        for value in (self.timeout_seconds, self.run_timeout_seconds):
+            if value is not None and (not math.isfinite(value) or value <= 0):
+                raise ValueError("Provider deadline must be finite and positive")
+        if not 1 <= self.max_input_chars <= 262144 or not 1 <= self.max_output_tokens <= 16384:
+            raise ValueError("Provider limits are out of bounds")
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return PROFILES[self.profile]
+
+    @property
+    def fingerprint(self) -> str:
+        public = {"provider": self.provider, "model": self.model, "profile": self.profile,
+                  "timeout": self.timeout_seconds, "run_timeout": self.run_timeout_seconds,
+                  "input": self.max_input_chars, "output": self.max_output_tokens}
+        return hashlib.sha256(json.dumps(public, sort_keys=True).encode()).hexdigest()
+
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, object]) -> ProviderConfig:
@@ -47,13 +108,17 @@ class ProviderConfig:
         try:
             timeout_seconds = float(timeout) if timeout is not None else None
         except (TypeError, ValueError):
-            timeout_seconds = None
+            raise ValueError("Invalid provider timeout") from None
         return cls(
             provider=provider,
             model=_nonempty(values.get(f"{prefix}_MODEL")),
             base_url=_nonempty(values.get(f"{prefix}_BASE_URL")),
             api_key=_nonempty(values.get(f"{prefix}_API_KEY")),
             timeout_seconds=timeout_seconds,
+            profile=_nonempty(values.get("COURSEWEAVE_PROVIDER_PROFILE")) or "text-only-v1",
+            run_timeout_seconds=float(values.get("COURSEWEAVE_PROVIDER_RUN_TIMEOUT_SECONDS", 90)),
+            max_input_chars=int(values.get("COURSEWEAVE_PROVIDER_MAX_INPUT_CHARS", 65536)),
+            max_output_tokens=int(values.get("COURSEWEAVE_PROVIDER_MAX_OUTPUT_TOKENS", 4096)),
         )
 
     @classmethod
@@ -114,6 +179,7 @@ class ProviderAdapter:
 
     model: OpenAIChatModel | AnthropicModel
     http_client: httpx2.AsyncClient | None = field(default=None, repr=False)
+    config: ProviderConfig = field(default_factory=lambda: ProviderConfig(provider=None), repr=False)
 
     async def aclose(self) -> None:
         """Close the per-run timeout client exactly once when this adapter owns it."""
@@ -124,13 +190,21 @@ class ProviderAdapter:
     async def complete(self, prompt: str, *, stream: bool = False) -> ProviderCallResult:
         """Return provider text or a typed, credential-safe failure."""
         try:
-            agent = Agent(self.model)
-            if stream:
-                async with agent.run_stream(prompt) as result:
-                    chunks = [chunk async for chunk in result.stream_text(delta=True)]
-                    return ProviderCallResult(status="ok", content="".join(chunks))
-            result = await agent.run(prompt)
-            return ProviderCallResult(status="ok", content=result.output)
+            if len(prompt) > self.config.max_input_chars:
+                raise ProviderCompletionError('input_limit')
+            agent = Agent(self.model, model_settings={'max_tokens': self.config.max_output_tokens}, retries=0)
+            async with asyncio.timeout(self.config.run_timeout_seconds):
+                if stream and self.config.capabilities.streaming:
+                    async with agent.run_stream(prompt, usage_limits=UsageLimits(request_limit=4, tool_calls_limit=2)) as result:
+                        chunks = [chunk async for chunk in result.stream_text(delta=True)]
+                        await result.get_output()
+                        validate_completion(result.response)
+                        return ProviderCallResult(status="ok", content="".join(chunks))
+                result = await agent.run(prompt, usage_limits=UsageLimits(request_limit=4, tool_calls_limit=2))
+                for message in result.new_messages():
+                    if isinstance(message, ModelResponse):
+                        validate_completion(message)
+                return ProviderCallResult(status="ok", content=result.output)
         except Exception as exc:  # Provider SDKs use different concrete error classes.
             return ProviderCallResult(status="provider_error", failure=_failure_for(exc))
         finally:
@@ -158,7 +232,7 @@ def create_model(config: ProviderConfig) -> ModelResult:
                 api_key=config.api_key,
                 http_client=http_client,
             )
-            model = OpenAIChatModel(config.model, provider=provider)
+            model = OpenAIChatModel(config.model, provider=provider, profile={"supports_tools": config.capabilities.tools, "supports_json_schema_output": config.capabilities.structured_output == "native", "supports_json_object_output": config.capabilities.structured_output == "native"})
         else:
             provider = AnthropicProvider(
                 base_url=config.base_url,
@@ -170,7 +244,7 @@ def create_model(config: ProviderConfig) -> ModelResult:
         if http_client is not None:
             _close_construction_client(http_client)
         raise
-    return ModelResult(status="configured", adapter=ProviderAdapter(model, http_client))
+    return ModelResult(status="configured", adapter=ProviderAdapter(model, http_client, config))
 
 
 def _close_construction_client(client: httpx2.AsyncClient) -> None:
@@ -189,6 +263,10 @@ def _nonempty(value: object) -> str | None:
 
 def _failure_for(exc: Exception) -> ProviderFailure:
     """Classify only stable, safe error properties; never reflect upstream text."""
+    if isinstance(exc, ProviderCompletionError):
+        return ProviderFailure(exc.kind, {"refusal": "The provider declined this request.", "truncated": "The provider response was incomplete.", "input_limit": "This request and its required teaching context exceed the input limit."}.get(exc.kind, "The provider returned a malformed response."))
+    if isinstance(exc, ModelHTTPError) and exc.status_code == 429:
+        return ProviderFailure("rate_limited", "The provider is rate limited; try again later.")
     if isinstance(exc, ModelHTTPError) and exc.status_code in {401, 403}:
         return ProviderFailure("authentication", "The provider rejected the configured credential.")
     if (
@@ -199,7 +277,7 @@ def _failure_for(exc: Exception) -> ProviderFailure:
     ):
         return ProviderFailure("timeout", "The provider request timed out.")
     name = type(exc).__name__.lower()
-    if "json" in name or "validation" in name or "decode" in name:
+    if "json" in name or "validation" in name or "decode" in name or "unexpectedmodelbehavior" in name:
         return ProviderFailure("malformed_response", "The provider returned a malformed response.")
     if "unsupported" in str(exc).lower() or "tool" in str(exc).lower():
         return ProviderFailure("unsupported", "The provider does not support this request.")

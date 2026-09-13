@@ -33,12 +33,15 @@ vi.mock("../src/runtime", () => ({ useAuthorRuntime: appMocks.runtime }));
 import { AuthorApp } from "../src/app";
 
 const course = {
-  schema_version: 1,
+  runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+  schema_version: 2,
   id: "course",
   title: "Course",
   description: "",
   entry_module_id: "module",
   policies: {
+    allowed_share_kinds: ["selection", "cell", "output"],
+    allowed_proposal_types: ["profile", "course", "workspace"],
     content_sharing: "explicit_only",
     durable_mutation: "proposal_or_direct_student_action",
     terminal_execution: "student_only",
@@ -55,24 +58,25 @@ const course = {
         {
           id: "phase",
           title: "Phase",
-          kind: "read",
-          teacher_mode: "reading_companion",
-          completion: { type: "manual" },
-          capabilities: {
-            chat: false,
-            hint_level: "none",
-            share_selection: false,
-            share_cell: false,
-            share_output: false,
-            create_profile_proposal: false,
-            create_course_proposal: false,
-            create_workspace_proposal: false,
+          progress: "required" as const,
+          experience: { type: "builtin" as const, id: "reading" as const },
+          teacher: {
+            access: { mode: "observer_only" as const, requires: [] },
+            guidance: {
+              style: { type: "builtin" as const, id: "explanatory" as const },
+              hint_level: "none" as const,
+            },
+            sharing: { allow: [] },
+            proposals: { allow: [] },
           },
+          completion: { requirements: [] },
+
           surfaces: [
             {
               id: "surface",
               type: "markdown",
-              role: "primary",
+              purpose: "primary" as const,
+              label: "Content",
               path: "lesson.md",
             },
           ],
@@ -180,7 +184,8 @@ describe("Author reconnect and unload recovery", () => {
 
     await screen.findByText(/remote version changed/i);
     await waitFor(() => expect(appMocks.validateCourse).toHaveBeenCalledOnce());
-    const firstSignal = appMocks.validateCourse.mock.calls[0]?.[2] as AbortSignal;
+    const firstSignal = appMocks.validateCourse.mock
+      .calls[0]?.[2] as AbortSignal;
     expect(appMocks.validateCourse.mock.calls[0]?.[0]).toMatchObject({
       title: "Dirty first",
     });
@@ -201,7 +206,8 @@ describe("Author reconnect and unload recovery", () => {
     await waitFor(() =>
       expect(appMocks.validateCourse).toHaveBeenCalledTimes(2),
     );
-    const secondSignal = appMocks.validateCourse.mock.calls[1]?.[2] as AbortSignal;
+    const secondSignal = appMocks.validateCourse.mock
+      .calls[1]?.[2] as AbortSignal;
     expect(firstSignal.aborted).toBe(true);
     expect(secondSignal).not.toBe(firstSignal);
     expect(secondSignal.aborted).toBe(false);
@@ -271,11 +277,11 @@ describe("Author reconnect and unload recovery", () => {
     const revoke = vi.fn();
     vi.stubGlobal("URL", { createObjectURL: create, revokeObjectURL: revoke });
     let filename = "";
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
-      function (this: HTMLAnchorElement) {
-        filename = this.download;
-      },
-    );
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      filename = this.download;
+    });
 
     const view = render(<AuthorApp />);
     fireEvent.change(await screen.findByLabelText("Course title"), {
@@ -341,12 +347,15 @@ describe("Author reconnect and unload recovery", () => {
 
   it("aborts all active validation reads on runtime loss then refetches a changed ETag without replaying PUT", async () => {
     const manifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Course",
       description: "",
       entry_module_id: "module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -363,24 +372,28 @@ describe("Author reconnect and unload recovery", () => {
             {
               id: "phase",
               title: "Phase",
-              kind: "read",
-              teacher_mode: "reading_companion",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "reading" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "surface",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "lesson.md",
                 },
               ],
@@ -461,9 +474,9 @@ describe("Author reconnect and unload recovery", () => {
     appMocks.validateCourse
       .mockImplementationOnce(
         () =>
-        new Promise((done) => {
-          resolve = done;
-        }),
+          new Promise((done) => {
+            resolve = done;
+          }),
       )
       .mockResolvedValue({
         manifest: { ...course, title: "Dirty local" },
@@ -491,12 +504,7 @@ describe("Author reconnect and unload recovery", () => {
     const view = await startDirtyApp();
     fireEvent.change(screen.getByLabelText("Import course file"), {
       target: {
-        files: [
-          new File(
-            [JSON.stringify(imported)],
-            "courseweave.json",
-          ),
-        ],
+        files: [new File([JSON.stringify(imported)], "courseweave.json")],
       },
     });
     await waitFor(() => expect(appMocks.validateCourse).toHaveBeenCalledOnce());
@@ -541,7 +549,9 @@ describe("Author reconnect and unload recovery", () => {
     expect(appMocks.getCourse).toHaveBeenCalledTimes(2);
     expect(appMocks.putCourse).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
-    await waitFor(() => expect(appMocks.validateCourse).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(appMocks.validateCourse).toHaveBeenCalledTimes(2),
+    );
     expect(appMocks.validateCourse.mock.calls[1]?.[0]).toMatchObject({
       title: "Dirty local",
       modules: [

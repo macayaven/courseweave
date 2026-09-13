@@ -43,6 +43,30 @@ LAB_ENTRY_TS = REPO_ROOT / "frontend" / "packages" / "lab" / "src" / "index.ts"
 FRONTEND_LOCK = REPO_ROOT / "frontend" / "pnpm-lock.yaml"
 FRONTEND_WORKSPACE = REPO_ROOT / "frontend" / "pnpm-workspace.yaml"
 
+THIRD_PARTY_NOTICE = "THIRD_PARTY_LICENSES.md"
+REACT_MIT_LICENSE = b"""MIT License
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the \"Software\"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
 REMOTE_ENTRY_RE = re.compile(
     r"^courseweave/labextension/static/remoteEntry\.[0-9a-f]+\.js$"
 )
@@ -110,6 +134,33 @@ def _bridge_javascript(wheel_contents: dict[str, bytes]) -> list[bytes]:
 
 
 class TestWheelContents:
+    def test_wheel_retains_bundled_react_license_notice(
+        self, wheel_contents: dict[str, bytes]
+    ) -> None:
+        license_entries = [
+            name
+            for name in wheel_contents
+            if name.endswith(f".dist-info/licenses/{THIRD_PARTY_NOTICE}")
+        ]
+        assert len(license_entries) == 1, license_entries
+        notice = wheel_contents[license_entries[0]]
+        for component in (
+            b"React 19.2.8",
+            b"ReactDOM 19.2.8",
+            b"scheduler 0.27.0",
+        ):
+            assert component in notice
+        assert REACT_MIT_LICENSE in notice
+
+        metadata_entries = [
+            name for name in wheel_contents if name.endswith(".dist-info/METADATA")
+        ]
+        assert len(metadata_entries) == 1, metadata_entries
+        assert (
+            f"License-File: {THIRD_PARTY_NOTICE}".encode()
+            in wheel_contents[metadata_entries[0]]
+        )
+
     def test_installed_smoke_redacts_bootstrap_failures_and_checks_discovery(self) -> None:
         helper = (REPO_ROOT / "frontend" / "e2e" / "installed-wheel-helpers.ts").read_text()
         spec = (REPO_ROOT / "frontend" / "e2e" / "installed-wheel-lab.spec.ts").read_text()
@@ -421,3 +472,59 @@ class TestActivationOrder:
         )
         assert registration < guard < open_call
         assert "async (" in source or "async:" in source or "Promise<void>" in source
+
+
+def test_sdist_contains_source_rebuild_and_validation_inputs(tmp_path):
+    import tarfile
+    from hatchling.builders.sdist import SdistBuilder
+    archive_path = next(SdistBuilder(str(REPO_ROOT)).build(directory=str(tmp_path)))
+    required = [
+        'frontend/package.json', 'frontend/pnpm-lock.yaml', 'frontend/pnpm-workspace.yaml',
+        'frontend/tsconfig.base.json', 'frontend/vitest.config.ts',
+        'frontend/apps/learn/src/app.tsx', 'frontend/apps/learn/vite.config.ts',
+        'frontend/apps/author/src/app.tsx', 'frontend/apps/author/vite.config.ts',
+        'frontend/packages/ui/src/index.tsx', 'frontend/packages/lab/src/index.ts',
+        'frontend/scripts/verify-build-determinism.mjs', 'uv.lock',
+        'examples/minimal-course/courseweave.json', 'examples/minimal-course/lesson.md',
+        'examples/cli-course/courseweave.json', 'examples/cli-course/lesson.md',
+        'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'AGENTS.md',
+        '.github/workflows/verify.yml',
+        THIRD_PARTY_NOTICE,
+    ]
+    with tarfile.open(archive_path) as archive:
+        names = {name.partition('/')[2] for name in archive.getnames()}
+        assert set(required) <= names
+        assert not any('/node_modules/' in name or '/test-results/' in name for name in names)
+        workstation_roots = (
+            re.compile(
+                rb"/Users/[A-Za-z0-9._-]+/"
+                rb"(?:Desktop|Documents|Projects|workspace|education)/"
+            ),
+            re.compile(rb"/Volumes/[A-Za-z0-9._-]+/(?:workspace|education)/"),
+        )
+        leaked_docs = []
+        for member in archive.getmembers():
+            relative = member.name.partition('/')[2]
+            if not relative.startswith('docs/') or not member.isfile():
+                continue
+            extracted = archive.extractfile(member)
+            assert extracted is not None
+            contents = extracted.read()
+            if any(pattern.search(contents) for pattern in workstation_roots):
+                leaked_docs.append(relative)
+        assert not leaked_docs, leaked_docs
+        notice_member = next(
+            member
+            for member in archive.getmembers()
+            if member.name.partition('/')[2] == THIRD_PARTY_NOTICE
+        )
+        notice_file = archive.extractfile(notice_member)
+        assert notice_file is not None
+        notice = notice_file.read()
+        for component in (
+            b"React 19.2.8",
+            b"ReactDOM 19.2.8",
+            b"scheduler 0.27.0",
+        ):
+            assert component in notice
+        assert REACT_MIT_LICENSE in notice

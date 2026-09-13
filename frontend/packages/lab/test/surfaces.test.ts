@@ -33,27 +33,24 @@ import {
 } from '../src/surfaces';
 
 const course: CourseSnapshot = {
+  schema_version: 2,
   id: 'course',
   title: 'Course',
-  policies: { max_shared_chars: 4 },
+  policies: { max_shared_chars: 4, allowed_share_kinds: ['selection','cell','output'] },
   modules: [{
     id: 'm01',
     title: 'Module',
     phases: [{
       id: 'p01',
       title: 'Phase',
-      capabilities: {
-        share_selection: true,
-        share_cell: true,
-        share_output: false
-      },
+      progress: 'required', teacher: {access:{mode:'available',requires:[]},sharing:{allow:['selection', 'cell']}},
       surfaces: [
         { id: 'html', type: 'html', path: 'lessons/a b.html' },
-        { id: 'video', type: 'video', url: 'https://video.test/watch?v=1' },
+        { id: 'video', type: 'video', src: 'https://video.test/watch?v=1' },
         { id: 'markdown', type: 'markdown', path: 'README.md' },
         { id: 'notebook', type: 'notebook', path: 'notebooks/lab.ipynb' },
         { id: 'source', type: 'source', path: 'src/main.py' },
-        { id: 'terminal', type: 'terminal', cwd: 'labs', argv: ['python', '-m', 'lab'] }
+        { id: 'terminal', type: 'terminal', cwd: 'labs', command: ['python', '-m', 'lab'] }
       ]
     }]
   }]
@@ -146,7 +143,7 @@ describe('CourseSurfaceFactory', () => {
   it('parses only the relay fields needed for exact course allowlisting', () => {
     expect(parseCourseSnapshot(course)).toEqual(course);
     expect(parseCourseSnapshot({ ...course, modules: [{ ...course.modules[0]!, id: '' }] })).toBeNull();
-    expect(parseCourseSnapshot({ ...course, policies: { max_shared_chars: 0 } })).toBeNull();
+    expect(parseCourseSnapshot({ ...course, policies: { max_shared_chars: 0, allowed_share_kinds: ['selection','cell','output'] } })).toBeNull();
   });
 
   it('opens rendered Markdown, notebook, and source with verified native factories', async () => {
@@ -184,7 +181,7 @@ describe('CourseSurfaceFactory', () => {
     expect(nativeTerminal.node.querySelector('.jp-Terminal')?.children).toHaveLength(0);
     expect(nativeTerminal.node.querySelectorAll('[data-courseweave-terminal-instructions]')).toHaveLength(1);
     const instructions = nativeTerminal.node.querySelector<HTMLElement>('[data-courseweave-terminal-instructions]')!;
-    const payload = '{\n  "cwd": "labs",\n  "argv": [\n    "python",\n    "-m",\n    "lab"\n  ]\n}';
+    const payload = '{\n  "cwd": "labs",\n  "command": [\n    "python",\n    "-m",\n    "lab"\n  ]\n}';
     expect(instructions.querySelector('[data-courseweave-terminal-command]')?.textContent).toBe(payload);
     expect(instructions.textContent).toContain('Terminal launch instructions');
     const copy = instructions.querySelector<HTMLButtonElement>('button')!;
@@ -198,7 +195,7 @@ describe('CourseSurfaceFactory', () => {
     expect(shell.activateById).toHaveBeenLastCalledWith('terminal-native');
   });
 
-  it('single-flights concurrent terminal opens and activates the same composed widget for every caller', async () => {
+  it('reuses one composed terminal when consecutive opens overlap', async () => {
     let resolveCreation!: (value: ReturnType<typeof widget>) => void;
     const { factory, commands, shell, nativeTerminal } = harness();
     commands.execute.mockReturnValue(new Promise((resolve) => {
@@ -207,7 +204,7 @@ describe('CourseSurfaceFactory', () => {
 
     const first = factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
     const second = factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'terminal' });
-    expect(commands.execute).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(commands.execute).toHaveBeenCalledOnce());
 
     resolveCreation(nativeTerminal);
     await expect(Promise.all([first, second])).resolves.toHaveLength(2);
@@ -276,9 +273,9 @@ describe('CourseSurfaceFactory', () => {
     const { factory, shell } = harness();
     const html = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'html' });
     const reader = shell.add.mock.calls[0]![0];
-    const iframe = reader.node.querySelector('iframe') as HTMLIFrameElement;
+    let iframe = reader.node.querySelector('iframe') as HTMLIFrameElement;
     expect(reader.id).toBe('courseweave-reader');
-    expect(html.htmlSource).toBe('https://lab.test/base/files/lessons/a%20b.html');
+    expect(html.htmlSource).toBe('https://lab.test/base/courseweave/reader/lessons/a%20b.html');
     expect(html.jupyterBaseUrl).toBe('https://lab.test/base/');
     expect(iframe.src).toBe(html.htmlSource);
     expect(iframe.referrerPolicy).toBe('same-origin');
@@ -287,6 +284,7 @@ describe('CourseSurfaceFactory', () => {
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-forms');
 
     const video = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'video' });
+    iframe = reader.node.querySelector('iframe') as HTMLIFrameElement;
     expect(video.htmlSource).toBe('https://video.test/watch?v=1');
     expect(video.jupyterBaseUrl).toBe('https://lab.test/base/');
     expect(iframe.src).toBe(video.htmlSource);
@@ -294,6 +292,9 @@ describe('CourseSurfaceFactory', () => {
     expect(iframe.getAttribute('sandbox')).toBe('');
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-scripts');
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin');
+    expect(iframe.inert).toBe(true);
+    iframe.dispatchEvent(new Event('load'));
+    expect(iframe.inert).toBe(false);
     expect(shell.add).toHaveBeenCalledOnce();
   });
 
@@ -312,7 +313,7 @@ describe('CourseSurfaceFactory', () => {
     const { factory, shell } = harness();
     await expect(factory.open({ moduleId: 'm01', phaseId: 'wrong', surfaceId: 'html' })).rejects.toThrow('not allowlisted');
     const unsafe = structuredClone(course);
-    unsafe.modules[0]!.phases[0]!.surfaces[1]!.url = 'https://user:secret@video.test/watch';
+    unsafe.modules[0]!.phases[0]!.surfaces[1]!.src = 'https://user:secret@video.test/watch';
     factory.setCourse(unsafe);
     await expect(factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'video' })).rejects.toThrow('invalid video');
     expect(shell.add).not.toHaveBeenCalled();
@@ -378,6 +379,29 @@ describe('CourseSurfaceFactory', () => {
 });
 
 describe('SurfaceRequestBroker', () => {
+  it('honors a repeated terminal selection after a different queued lesson', async () => {
+    const {factory, commands, shell, nativeTerminal} = harness();
+    let finish!: (value: ReturnType<typeof widget>) => void;
+    commands.execute.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const child = {postMessage: vi.fn()} as unknown as Window;
+    const broker = new SurfaceRequestBroker({hostWindow: window, childWindow: child, serviceOrigin: 'https://courseweave.test', sourceId: 'source-a', factory});
+    broker.start();
+    try {
+      for (const surfaceId of ['terminal', 'html', 'terminal']) {
+        window.dispatchEvent(new MessageEvent('message', {
+          origin: 'https://courseweave.test', source: child,
+          data: {type: 'courseweave.open-surface.v1', moduleId: 'm01', phaseId: 'p01', surfaceId},
+        }));
+      }
+      await vi.waitFor(() => expect(commands.execute).toHaveBeenCalledOnce());
+      finish(nativeTerminal);
+      await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(3));
+      expect((child.postMessage as ReturnType<typeof vi.fn>).mock.calls.map(([message]) => message.surfaceId)).toEqual(['terminal', 'html', 'terminal']);
+      expect(shell.activateById).toHaveBeenLastCalledWith('terminal-native');
+      expect(commands.execute).toHaveBeenCalledOnce();
+    } finally { broker.dispose(); }
+  });
+
   it('accepts one exact owned-child request and reports final reader URL only after open succeeds', async () => {
     const { factory } = harness();
     const child = { postMessage: vi.fn() } as unknown as Window;
@@ -402,12 +426,12 @@ describe('SurfaceRequestBroker', () => {
       phaseId: 'p01',
       surfaceId: 'html',
       jupyterBaseUrl: 'https://lab.test/base/',
-      htmlSource: 'https://lab.test/base/files/lessons/a%20b.html'
+      htmlSource: 'https://lab.test/base/courseweave/reader/lessons/a%20b.html'
     }, 'https://courseweave.test');
     broker.dispose();
   });
 
-  it('ignores wrong source, origin, schema, duplicate flight, and failed coordinates', async () => {
+  it('ignores wrong source, origin, schema, and failed coordinates', async () => {
     const { factory } = harness();
     const child = { postMessage: vi.fn() } as unknown as Window;
     const open = vi.spyOn(factory, 'open');
@@ -423,4 +447,14 @@ describe('SurfaceRequestBroker', () => {
     expect(child.postMessage).not.toHaveBeenCalled();
     broker.dispose();
   });
+});
+
+it('accepts canonical v2 policies and fragment metadata without legacy capabilities', () => {
+ const canonical = structuredClone(course) as any;
+ canonical.schema_version = 2;
+ const phase = canonical.modules[0].phases[0];
+ delete phase.capabilities;
+ phase.teacher = {access:{mode:'available',requires:[]},sharing:{allow:['cell']},guidance:{style:{type:'builtin',id:'explanatory'},hint_level:'gentle'},proposals:{allow:[]}};
+ phase.surfaces[0].fragment='self-check';
+ expect(parseCourseSnapshot(canonical)).not.toBeNull();
 });

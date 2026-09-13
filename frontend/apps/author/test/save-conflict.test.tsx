@@ -44,7 +44,7 @@ describe("Author Save and stale recovery", () => {
     const put = vi.fn();
     render(
       <SaveConflict
-        manifest={{ schema_version: 1 }}
+        manifest={{ schema_version: 2 }}
         etag={'"old"'}
         exists
         dirty
@@ -54,7 +54,7 @@ describe("Author Save and stale recovery", () => {
         onSaved={vi.fn()}
         onReviewed={reviewed}
         remote={{
-          manifest: { schema_version: 1 },
+          manifest: { schema_version: 2 },
           raw: '{\n  "title": "Remote"\n}\n',
           etag: '"remote"',
         }}
@@ -70,7 +70,9 @@ describe("Author Save and stale recovery", () => {
     keep.focus();
     fireEvent.click(keep);
     await waitFor(() =>
-      expect(screen.queryByLabelText("Remote conflict")).not.toBeInTheDocument(),
+      expect(
+        screen.queryByLabelText("Remote conflict"),
+      ).not.toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: "Save course" })).toHaveFocus();
     expect(reviewed).toHaveBeenCalledOnce();
@@ -82,7 +84,7 @@ describe("Author Save and stale recovery", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     render(
       <SaveConflict
-        manifest={{ schema_version: 1 }}
+        manifest={{ schema_version: 2 }}
         etag={'"old"'}
         exists
         dirty
@@ -91,7 +93,7 @@ describe("Author Save and stale recovery", () => {
         getLatest={vi.fn()}
         onSaved={saved}
         remote={{
-          manifest: { schema_version: 1, title: "Remote" },
+          manifest: { schema_version: 2, title: "Remote" },
           raw: '{\n  "title": "Remote"\n}\n',
           etag: '"remote"',
         }}
@@ -105,11 +107,13 @@ describe("Author Save and stale recovery", () => {
     latest.focus();
     fireEvent.click(latest);
     await waitFor(() =>
-      expect(screen.queryByLabelText("Remote conflict")).not.toBeInTheDocument(),
+      expect(
+        screen.queryByLabelText("Remote conflict"),
+      ).not.toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: "Save course" })).toHaveFocus();
     expect(saved).toHaveBeenCalledWith({
-      manifest: { schema_version: 1, title: "Remote" },
+      manifest: { schema_version: 2, title: "Remote" },
       raw: '{\n  "title": "Remote"\n}\n',
       etag: '"remote"',
     });
@@ -120,12 +124,15 @@ describe("Author Save and stale recovery", () => {
     app.validateCourse.mockReset();
     app.putCourse.mockReset();
     const manifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Saved",
       description: "",
       entry_module_id: null,
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -181,12 +188,15 @@ describe("Author Save and stale recovery", () => {
   });
   it("saves current canonical bytes, updates the baseline, and preserves a newer semantic selection", async () => {
     const manifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Saved",
       description: "",
       entry_module_id: "module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -203,24 +213,28 @@ describe("Author Save and stale recovery", () => {
             {
               id: "phase",
               title: "Phase",
-              kind: "read",
-              teacher_mode: "reading_companion",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "reading" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "surface",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "saved.md",
                 },
               ],
@@ -274,12 +288,15 @@ describe("Author Save and stale recovery", () => {
   });
   it("keeps a later real edit and selection when an in-flight PUT succeeds", async () => {
     const manifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Saved",
       description: "",
       entry_module_id: "module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -296,24 +313,28 @@ describe("Author Save and stale recovery", () => {
             {
               id: "phase",
               title: "Phase",
-              kind: "read",
-              teacher_mode: "reading_companion",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "reading" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "surface",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "saved.md",
                 },
               ],
@@ -369,12 +390,15 @@ describe("Author Save and stale recovery", () => {
     app.validateCourse.mockReset();
     app.putCourse.mockReset();
     const local = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Local",
       description: "",
       entry_module_id: null,
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -450,12 +474,15 @@ describe("Author Save and stale recovery", () => {
     app.validateCourse.mockReset();
     app.putCourse.mockReset();
     const manifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Local",
       description: "",
       entry_module_id: "module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -472,24 +499,28 @@ describe("Author Save and stale recovery", () => {
             {
               id: "phase",
               title: "Phase",
-              kind: "read",
-              teacher_mode: "reading_companion",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "reading" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "surface",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "local.md",
                 },
               ],
@@ -550,21 +581,21 @@ describe("Author Save and stale recovery", () => {
   });
   it("validates before one exact save and leaves a stale draft for an explicit later decision", async () => {
     const validate = vi.fn().mockResolvedValue({
-      manifest: { schema_version: 1 },
-      formatted_json: '{\n  "schema_version": 1\n}\n',
+      manifest: { schema_version: 2 },
+      formatted_json: '{\n  "schema_version": 2\n}\n',
     });
     const put = vi
       .fn()
       .mockRejectedValue(Object.assign(new Error("stale"), { status: 409 }));
     const latest = vi.fn().mockResolvedValue({
-      manifest: { schema_version: 1, title: "Remote" },
+      manifest: { schema_version: 2, title: "Remote" },
       raw: '{\n  "title": "Remote"\n}\n',
       etag: '"remote"',
     });
     const saved = vi.fn();
     render(
       <SaveConflict
-        manifest={{ schema_version: 1 }}
+        manifest={{ schema_version: 2 }}
         etag={'"old"'}
         exists
         dirty
@@ -581,7 +612,7 @@ describe("Author Save and stale recovery", () => {
     expect(validate).toHaveBeenCalledBefore(put as never);
     expect(put).toHaveBeenCalledTimes(1);
     expect(put).toHaveBeenCalledWith(
-      '{\n  "schema_version": 1\n}\n',
+      '{\n  "schema_version": 2\n}\n',
       '"old"',
       expect.anything(),
     );
@@ -602,7 +633,7 @@ describe("Author Save and stale recovery", () => {
     const put = vi.fn();
     render(
       <SaveConflict
-        manifest={{ schema_version: 1 }}
+        manifest={{ schema_version: 2 }}
         etag=""
         exists={false}
         dirty={false}
@@ -630,13 +661,13 @@ describe("Author Save and stale recovery", () => {
         ),
     );
     const put = vi.fn().mockResolvedValue({
-      manifest: { schema_version: 1, title: "Saved" },
+      manifest: { schema_version: 2, title: "Saved" },
       raw: '{\n  "title": "Saved"\n}\n',
       etag: '"saved"',
     });
     const saved = vi.fn();
     const props = {
-      manifest: { schema_version: 1 },
+      manifest: { schema_version: 2 },
       etag: '"old"',
       exists: true,
       dirty: true,
@@ -651,7 +682,7 @@ describe("Author Save and stale recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save course" }));
     view.rerender(<SaveConflict {...props} requestGeneration={1} />);
     finishValidation?.({
-      manifest: { schema_version: 1 },
+      manifest: { schema_version: 2 },
       formatted_json: "{}\n",
     });
     await Promise.resolve();
@@ -663,20 +694,20 @@ describe("Author Save and stale recovery", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const saved = vi.fn();
     const validate = vi.fn().mockResolvedValue({
-      manifest: { schema_version: 1 },
+      manifest: { schema_version: 2 },
       formatted_json: '{\n  "title": "Local"\n}\n',
     });
     const put = vi
       .fn()
       .mockRejectedValue(Object.assign(new Error("stale"), { status: 409 }));
     const getLatest = vi.fn().mockResolvedValue({
-      manifest: { schema_version: 1 },
+      manifest: { schema_version: 2 },
       raw: '{\n  "title": "Remote"\n}\n',
       etag: '"remote"',
     });
     render(
       <SaveConflict
-        manifest={{ schema_version: 1 }}
+        manifest={{ schema_version: 2 }}
         etag={'"old"'}
         exists
         dirty

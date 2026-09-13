@@ -1,4 +1,4 @@
-# CourseWeave v1 API contract
+# CourseWeave v2 API contract
 
 All `/api/*` requests require:
 
@@ -31,7 +31,7 @@ Expected codes include `not_found`, `validation_error`, `etag_mismatch`,
 
 - `200`
 - `ETag: "<sha256-of-exact-manifest-bytes>"`
-- Body is the schema-v1 manifest.
+- Body is the schema-v2 manifest.
 - If Author Studio opens a root without a manifest, it receives a valid unsaved
   empty draft and `ETag: ""`; the file is not created until an explicit save.
 
@@ -39,7 +39,7 @@ Expected codes include `not_found`, `validation_error`, `etag_mismatch`,
 
 - Headers: `If-Match`, `Idempotency-Key`, `X-CourseWeave-Origin:
   student_requested`
-- Body: complete schema-v1 manifest.
+- Body: complete schema-v2 manifest.
 - `200` returns the saved manifest and new ETag.
 - Reusing an idempotency key with byte-equivalent content returns the original
   response; using it with different content returns `409`.
@@ -95,70 +95,127 @@ discarded when the run finishes or is cancelled.
 
 ## Learner state
 
-`GET /api/state` returns `revision`, predictions, reflections, evidence
-receipts, explicitly accepted profile fields, phase completion records, and
-proposal audit summaries. It does not contain ephemeral navigation or chat
-history.
+`GET /api/state` returns the separately versioned durable state (schema 2),
+`revision`, bound `course_id`/`root_fingerprint`, `records`, reviewable legacy
+`imports`, structured formative `attempts`, explicit adaptation `preferences`,
+`time_budget_minutes`, and proposal audit summaries. Raw chat, navigation,
+shared excerpts, provider settings, and credentials are never durable fields.
 
-`PATCH /api/state`
+Responses add the current `curriculum_digest`, derived `progress`,
+`teacher_availability` keyed by `module_id/phase_id`, and `attempt_statuses`
+(index plus coordinates and valid/stale/orphan status). Bootstrap at
+`GET /api/bootstrap` adds the canonical `manifest` from the same locked read.
+Progress reports required totals, all phase/requirement results, and record
+valid/stale/orphan/invalid statuses. Artifacts are inspected on each request;
+removing a file makes its requirement incomplete. No result asserts mastery.
+
+`PATCH /api/state` requires `Idempotency-Key` and this closed request body.
+The canonical generated request schema is `state-request.schema.json`, also
+packaged with the Python runtime for frontend type generation:
 
 ```json
 {
   "expected_revision": 4,
   "origin": "student_requested",
   "operation": {
-    "type": "record_prediction",
-    "module_id": "s01",
-    "phase_id": "predict",
-    "record_id": "prediction-1",
-    "text": "The learner's own prediction"
+    "type": "put_record",
+    "coordinate": {"module_id": "s01", "phase_id": "predict", "requirement_id": "prediction-1"},
+    "curriculum_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "value": {"text": "The learner's own prediction"}
   }
 }
 ```
 
-Required header: `Idempotency-Key`. Direct operations are limited to
-`record_prediction`, `record_reflection`, `record_evidence`,
-`complete_phase`, and `set_time_budget`. Profile claims always use proposals.
+Use the digest returned by bootstrap/state, not the illustrative zero digest.
+The operation has no client kind/origin/requirement-digest authority. The server
+checks the manifest coordinate and closed value under the course lock, then
+assigns `kind`, `origin: direct_learner`, and `requirement_digest`. A coordinate
+has one current record. Other closed values are `{attested: boolean}` and
+`{references: [{label, path} | {label, url}], note?: string}`. False attestation
+is a valid submission that does not satisfy its requirement.
+
+Other operation shapes:
+
+- `clear_record`: coordinate + curriculum_digest, no value. Only a declared
+  learner-record requirement can be cleared; reset/delete removes orphan data.
+- `set_time_budget`: `minutes` (integer 1–1440, or null).
+- `set_preferences`: `preferences: {enabled: boolean, explanation?: concise | balanced | detailed, practice?: standard | extra}`.
+  Adaptation defaults off; disabling it revokes use of persistent evidence.
+- `check_attempt`: module_id, phase_id, check_id, option_id, curriculum_digest.
+  Only authored options are accepted. Stored deterministic correctness and
+  feedback bind both the full check and referenced objective revision. These
+  attempts do not satisfy completion requirements.
+- `reset_state` or `delete_state`: no further fields. Clears learner records,
+  imports, attempts, preferences, proposal/audit content and old idempotency
+  snapshots. A new revision and the reset's retry receipt remain.
+
+All state requests require a nonnegative integer expected revision. Exact
+retries are recognized before stale revision/curriculum checks, and return the
+original committed state revision; dynamic progress/availability are recomputed
+against the current manifest. A later GET obtains the latest complete state.
+Reusing a key for another request conflicts. Reset/delete deliberately purge
+old receipts to remove their learner payloads; only the reset receipt survives.
+
+`GET /api/state/export` exports durable data only. Course and requirement IDs
+are preserved; stale/orphan submissions and unbound imports remain inspectable.
+
+Personal state defaults to `~/Library/Application Support/CourseWeave` on
+macOS, `$XDG_DATA_HOME/courseweave` (or `~/.local/share/courseweave`) on Linux,
+and `%LOCALAPPDATA%/CourseWeave` on Windows. The suffix is
+`courses/<course-id>/<sha256-of-canonical-course-root>/courseweave.db`.
+`COURSEWEAVE_STATE_HOME` overrides the personal base; explicit `--state-dir`
+(or Python `state_dir=`) chooses a complete external directory. State inside
+course source is rejected. In-course `.courseweave/courseweave.db` is never
+implicitly read or upgraded.
+
+An unsaved empty Author session may choose its first course ID on Save: the
+API rebinds only an empty revision-zero draft with no durable proposals. Saved
+course identities never silently reuse another course's learner state.
+
+CLI paths:
+
+```text
+courseweave migrate --source courseweave.json
+courseweave migrate --source courseweave.json --apply --output courseweave.v2.json
+courseweave state inspect --course-root COURSE [--state-dir EXTERNAL]
+courseweave state export --course-root COURSE --output NEW.json
+courseweave state reset --course-root COURSE
+courseweave state delete --course-root COURSE
+courseweave state import-legacy --course-root COURSE --source OLD.db --mappings mapping.json
+```
+
+Migration preview includes canonical target data, semantic mappings, and issues;
+apply always writes a separate new file and never overwrites an existing file.
+Normal v1 load/save/launch errors point to this command. Legacy import copies a
+stable SQLite DB/WAL snapshot and opens only the copy. Mapping keys are exactly
+`predictions:module/phase/record`, `reflections:...`, `evidence:...`, or
+`completed_phases:...`; values are v2 coordinate objects. Mapped records are
+`unbound`, unmapped records are `orphan`, and neither counts. Explicit learner
+resubmission is required even when IDs and record kinds match. Import retains
+only the old durable record collections, not profile guesses, chat, settings,
+proposal payloads, or credentials.
 
 ## Proposals
 
-Proposal types:
+The active API accepts inert `manifest_replace` and `profile_patch` drafts.
+Profile patches contain only declared `explanation`/`practice` preferences and
+require visible adaptation opt-in before acceptance. Author manifest proposals
+remain independent of learner phase gates and use exact target hashes/CAS.
+Workspace proposals and model-authored phase records have no active creation or
+acceptance route. The low-level journal remains solely for existing recovery
+invariants and focused recovery tests.
 
-- `profile_patch`
-- `manifest_replace`
-- `workspace_file_replace`
-- `phase_record`
+`POST /api/proposals` creates a pending proposal. Teacher candidates must be
+issued by a successful authenticated guide run, bound to its session/role/
+source/context, and rechecked against current server policy before persistence.
+`POST /api/proposals/{id}/edit` creates a superseding revision.
+`POST /api/proposals/{id}/accept` applies the shown revision; `/reject` records
+rejection. All mutations require `Idempotency-Key`; decisions require the
+expected proposal revision. Retries return the original result, stale revisions
+or changed targets conflict without mutation.
 
-Every proposal contains `id`, `revision`, `origin`, `status`, `summary`,
-`created_at`, `target`, `payload`, `target_hash`, and `result`.
-
-Workspace proposals:
-
-- target one UTF-8 text file inside the course root;
-- target must match one course `workspace_write_globs` entry;
-- payload is the complete proposed replacement content plus a unified diff for
-  display;
-- target SHA-256 is checked while holding the course lock;
-- Git LFS pointers, binary files, symlinks, directories, and files larger than
-  1 MiB are rejected.
-
-`POST /api/proposals` creates a pending proposal.  
-`POST /api/proposals/{id}/edit` supersedes the pending revision and creates the
-next pending revision.  
-`POST /api/proposals/{id}/accept` applies the exact shown revision.  
-`POST /api/proposals/{id}/reject` records rejection and changes no target.
-
-Accept/Edit/Reject require `Idempotency-Key`. A second identical accept returns
-the original result. Stale proposal revisions and changed target hashes return
-`409` without mutation.
-
-The store uses SQLite `BEGIN IMMEDIATE` for cross-process serialization. A
-workspace accept writes a recoverable intent record before atomic file
-replacement. Startup recovery compares the recorded before/after hashes:
-
-- after hash present: finalize accepted without applying again;
-- before hash present: mark failed and leave the target unchanged;
-- any other hash: mark failed with `target_changed`.
+SQLite `BEGIN IMMEDIATE`, a root-specific external lock, exact-byte ETags,
+atomic replacement, and the prior recoverable workspace journal are preserved.
 
 ## Professor
 
@@ -171,11 +228,11 @@ and is a read-only Author boundary. Its JSON object body is exactly
 `runnable` additionally checks ordinary local surface files, terminal working
 directories, and local-video LFS pointers. It never fetches remote URLs.
 
-On success it returns the normalized schema-v1 `manifest` and canonical UTF-8
+On success it returns the normalized schema-v2 `manifest` and canonical UTF-8
 `formatted_json`. On failure it returns the normal `validation_error` envelope
 with `details.issues`, each containing a stable JSON Pointer `path`, a stable
-`code` (`schema_validation`, `path_escape`, `missing_artifact`,
-`wrong_artifact_type`, `lfs_pointer`, or `invalid_terminal_cwd`), and a redacted
+`code` (including `contract_invalid`, `path_symlink_rejected`, `source_missing`,
+`source_type_invalid`, `lfs_pointer`, or notebook selector diagnostics), and a redacted
 message. Malformed request objects, modes, and bodies use the ordinary top-level
 `validation_error` envelope. It never writes the manifest, store, proposal
 database, or filesystem.
@@ -184,10 +241,11 @@ database, or filesystem.
 system messages, tools, capabilities, phase state, and proposal status. Trusted
 dependencies are rebuilt from the manifest, ephemeral context, and store.
 
-- Before a required prediction, the server returns a deterministic prompt to
-  record one and does not call the provider for result-seeking questions.
-- In observer audit mode, the server does not call the provider for substantive
-  help.
+- Unmet explicit learner-record gates, disabled access, and observer-only
+  access block every provider call, including greetings. Display experience
+  never grants authority.
+- Share admission and guide candidate persistence use current server-bound
+  records; unbound, stale and orphan records cannot open gates.
 - The only model-side mutation-related tool creates an inert pending proposal.
 - Pre-stream failures use the common JSON error envelope.
 - Post-stream failures emit an AG-UI `RUN_ERROR`.
@@ -196,3 +254,12 @@ dependencies are rebuilt from the manifest, ephemeral context, and store.
 `POST /api/author/guide` uses the same transport and trust rules with a
 curriculum-designer system policy. Suggested manifest changes are pending
 `manifest_replace` proposals.
+
+## HTML section targets
+
+Only HTML surfaces may optionally include `fragment`, a 1–160 character anchor
+identifier matching `[A-Za-z][A-Za-z0-9_.:-]*` exactly. Supply no `#`, path,
+query, percent encoding, whitespace, or controls. The surface `path` remains
+the sole filesystem source; the fragment is presentation metadata and never
+changes progress or teacher authority. Frontends append it as the section
+target when opening the authored HTML.

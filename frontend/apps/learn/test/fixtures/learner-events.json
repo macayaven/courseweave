@@ -1,0 +1,278 @@
+{
+  "events": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "thread-one",
+      "runId": "run-one"
+    },
+    {
+      "type": "CUSTOM",
+      "name": "courseweave.turn_context",
+      "value": {
+        "consent": false,
+        "evidence_dependency": "c35ae0b5f159558c9851c7877f3ff7abc47e1671b558c83d3d32411454b0a9d5",
+        "evidence_references": [],
+        "lesson_scope_id": "ux9iN-DuMdB27m-odEJMvg",
+        "manifest_etag": "\"e4e56328e363a3caf6886ffc0e2febd22ce8bfdd914a9b8bded9f8137ecbab16\"",
+        "module_id": "module-one",
+        "phase_id": "phase-one",
+        "policy": {
+          "allowed_proposal_types": [],
+          "allowed_share_kinds": [
+            "selection",
+            "cell",
+            "output"
+          ],
+          "guidance": {
+            "hint_level": "graduated",
+            "style": {
+              "id": "explanatory",
+              "type": "builtin"
+            },
+            "text": null
+          },
+          "max_shared_chars": 8192,
+          "mode": "available",
+          "provider_callable": true,
+          "unmet_requirement_ids": []
+        },
+        "privacy_epoch": 0,
+        "run_id": "run-one",
+        "source_id": "lesson-source",
+        "state_revision": 0,
+        "surface_id": "lesson",
+        "teacher_mode": "available",
+        "version": "turn-context-v1",
+        "assistant_name": "Course assistant",
+        "lesson": {
+          "id": "ux9iN-DuMdB27m-odEJMvg",
+          "module_id": "module-one",
+          "phase_id": "phase-one",
+          "surface_id": "lesson",
+          "label": "lesson",
+          "digest": "3e194e94515fbd324d252cb2aa7fcd76dfdfbd2ac7b60c0353707b7cfeb7e119",
+          "truncated": false,
+          "omitted_sections": true,
+          "extractor_version": "lesson-visible-v1",
+          "reset_action": "reset_lesson"
+        },
+        "workspace_share": null
+      }
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "run-one-assistant",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-one-assistant",
+      "delta": "Pair "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-one-assistant",
+      "delta": "the "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-one-assistant",
+      "delta": "call "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-one-assistant",
+      "delta": "ID.\n\n "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-one-assistant",
+      "delta": " "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-one-assistant",
+      "delta": " "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-one-assistant",
+      "delta": " "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-one-assistant",
+      "delta": "messages.append(result)\n\nThen "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "run-one-assistant",
+      "delta": "continue."
+    },
+    {
+      "type": "CUSTOM",
+      "name": "courseweave.provider_outcome",
+      "value": {
+        "version": "provider-evidence-v1",
+        "status": "ok",
+        "profile": "stream-tools-v1",
+        "capability_version": "capabilities-v1",
+        "prompt_version": "course-assistant-v1",
+        "config_fingerprint": "75aad5298b59c70642647aaf8f42f7f14ee45d515a2363d144a12fc9d421d218",
+        "duration_ms": 3,
+        "input_tokens": 55,
+        "output_tokens": 13,
+        "requests": 1
+      }
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "run-one-assistant"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "thread-one",
+      "runId": "run-one"
+    }
+  ],
+  "shared_events": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "thread-one",
+      "runId": "shared-run"
+    },
+    {
+      "type": "CUSTOM",
+      "name": "courseweave.turn_context",
+      "value": {
+        "consent": false,
+        "evidence_dependency": "c35ae0b5f159558c9851c7877f3ff7abc47e1671b558c83d3d32411454b0a9d5",
+        "evidence_references": [],
+        "lesson_scope_id": "ux9iN-DuMdB27m-odEJMvg",
+        "manifest_etag": "\"e4e56328e363a3caf6886ffc0e2febd22ce8bfdd914a9b8bded9f8137ecbab16\"",
+        "module_id": "module-one",
+        "phase_id": "phase-one",
+        "policy": {
+          "allowed_proposal_types": [],
+          "allowed_share_kinds": [
+            "selection",
+            "cell",
+            "output"
+          ],
+          "guidance": {
+            "hint_level": "graduated",
+            "style": {
+              "id": "explanatory",
+              "type": "builtin"
+            },
+            "text": null
+          },
+          "max_shared_chars": 8192,
+          "mode": "available",
+          "provider_callable": true,
+          "unmet_requirement_ids": []
+        },
+        "privacy_epoch": 0,
+        "run_id": "shared-run",
+        "source_id": "lesson-source",
+        "state_revision": 0,
+        "surface_id": "lesson",
+        "teacher_mode": "available",
+        "version": "turn-context-v1",
+        "assistant_name": "Course assistant",
+        "lesson": {
+          "id": "ux9iN-DuMdB27m-odEJMvg",
+          "module_id": "module-one",
+          "phase_id": "phase-one",
+          "surface_id": "lesson",
+          "label": "lesson",
+          "digest": "3e194e94515fbd324d252cb2aa7fcd76dfdfbd2ac7b60c0353707b7cfeb7e119",
+          "truncated": false,
+          "omitted_sections": true,
+          "extractor_version": "lesson-visible-v1",
+          "reset_action": "reset_lesson"
+        },
+        "workspace_share": {
+          "scope": "current_run",
+          "kind": "text",
+          "label": null
+        }
+      }
+    },
+    {
+      "type": "TEXT_MESSAGE_START",
+      "messageId": "shared-run-assistant",
+      "role": "assistant"
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "shared-run-assistant",
+      "delta": "Pair "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "shared-run-assistant",
+      "delta": "the "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "shared-run-assistant",
+      "delta": "call "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "shared-run-assistant",
+      "delta": "ID.\n\n "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "shared-run-assistant",
+      "delta": " "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "shared-run-assistant",
+      "delta": " "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "shared-run-assistant",
+      "delta": " "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "shared-run-assistant",
+      "delta": "messages.append(result)\n\nThen "
+    },
+    {
+      "type": "TEXT_MESSAGE_CONTENT",
+      "messageId": "shared-run-assistant",
+      "delta": "continue."
+    },
+    {
+      "type": "CUSTOM",
+      "name": "courseweave.provider_outcome",
+      "value": {
+        "version": "provider-evidence-v1",
+        "status": "ok",
+        "profile": "stream-tools-v1",
+        "capability_version": "capabilities-v1",
+        "prompt_version": "course-assistant-v1",
+        "config_fingerprint": "75aad5298b59c70642647aaf8f42f7f14ee45d515a2363d144a12fc9d421d218",
+        "duration_ms": 2,
+        "input_tokens": 133,
+        "output_tokens": 22,
+        "requests": 1
+      }
+    },
+    {
+      "type": "TEXT_MESSAGE_END",
+      "messageId": "shared-run-assistant"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "thread-one",
+      "runId": "shared-run"
+    }
+  ]
+}

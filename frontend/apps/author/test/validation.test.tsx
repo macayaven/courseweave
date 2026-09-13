@@ -59,16 +59,6 @@ afterEach(cleanup);
 
 describe("Author validation presentation", () => {
   it("reveals every representative real Inspector pointer on its stable owning entity", async () => {
-    const capability = {
-      chat: false,
-      hint_level: "none" as const,
-      share_selection: false,
-      share_cell: false,
-      share_output: false,
-      create_profile_proposal: false,
-      create_course_proposal: false,
-      create_workspace_proposal: false,
-    };
     const phase = (
       id: string,
       completion: AuthorManifest["modules"][number]["phases"][number]["completion"],
@@ -76,19 +66,51 @@ describe("Author validation presentation", () => {
     ) => ({
       id,
       title: id,
-      kind: "read" as const,
-      teacher_mode: "reading_companion" as const,
+      progress: "required" as const,
+      experience: { type: "builtin" as const, id: "reading" as const },
+      teacher: {
+        access: { mode: "available" as const, requires: [] },
+        guidance: {
+          style: { type: "builtin" as const, id: "explanatory" as const },
+          hint_level: "graduated" as const,
+        },
+        sharing: {
+          allow: ["selection" as const, "cell" as const, "output" as const],
+        },
+        proposals: {
+          allow: ["profile" as const, "course" as const, "workspace" as const],
+        },
+      },
       completion,
-      capabilities: capability,
+      learning: {
+        objectives: [{ id: "understand", text: "Explain the behavior." }],
+        checks: [
+          {
+            id: "choose",
+            type: "single_choice" as const,
+            prompt: "Choose an answer.",
+            objective_ids: ["understand"],
+            options: [
+              { id: "a", text: "A", feedback: "Try again." },
+              { id: "b", text: "B", feedback: "Correct." },
+            ],
+            correct_option_id: "b",
+          },
+        ],
+      },
+
       surfaces,
     });
     const manifest: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Course",
       description: "",
       entry_module_id: "one",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -102,20 +124,21 @@ describe("Author validation presentation", () => {
           title: "One",
           description: "",
           phases: [
-            phase("notebook", { type: "manual" }, [
+            phase("notebook", { requirements: [] }, [
               {
                 id: "nb",
                 type: "notebook",
-                role: "primary",
+                purpose: "primary" as const,
+                label: "Content",
                 path: "n.ipynb",
-                match: { cell_ids: ["cell"], cell_tags: ["tag"] },
+                selector: { type: "cell_ids" as const, values: ["cell"] },
               },
               {
                 id: "term",
                 type: "terminal",
-                role: "exercise",
+                purpose: "supporting" as const,
                 label: "Run",
-                argv: ["pnpm"],
+                command: ["pnpm"],
                 cwd: ".",
               },
             ]),
@@ -129,15 +152,21 @@ describe("Author validation presentation", () => {
             phase(
               "complete",
               {
-                type: "artifact_exists",
-                record_id: "receipt",
-                path: "proof.txt",
+                requirements: [
+                  {
+                    id: "receipt",
+                    type: "artifact_exists" as const,
+                    prompt: "Describe your response.",
+                    path: "proof.txt",
+                  },
+                ],
               },
               [
                 {
                   id: "two-path",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "two.md",
                 },
               ],
@@ -163,21 +192,42 @@ describe("Author validation presentation", () => {
     render(<AuthorApp />);
     await screen.findByLabelText("Course title");
     const cases: Array<[string, string, string]> = [
+      ["/modules/1/phases/0", "group:Phase", "Select phase complete"],
+      [
+        "/modules/0/phases/0/surfaces/1",
+        "group:Surface",
+        "Select surface term",
+      ],
+      [
+        "/modules/1/phases/0/learning/objectives/0/text",
+        "Objective 1 text",
+        "Select phase complete",
+      ],
+      [
+        "/modules/1/phases/0/learning/checks/0/options/0/feedback",
+        "Check 1 option 1 feedback",
+        "Select phase complete",
+      ],
+      [
+        "/modules/1/phases/0/teacher/guidance/text",
+        "Teaching guidance",
+        "Select phase complete",
+      ],
       ["/title", "Course title", ""],
       ["/policies/max_shared_chars", "Max shared characters", ""],
       ["/modules/1/title", "Module title", "Select module Two"],
       [
-        "/modules/1/phases/0/teacher_mode",
-        "Teacher mode",
+        "/modules/1/phases/0/teacher/access/mode",
+        "Teacher access",
         "Select phase complete",
       ],
       [
-        "/modules/1/phases/0/completion/path",
-        "Artifact path",
+        "/modules/1/phases/0/completion/requirements/0/path",
+        "Requirement 1 artifact path",
         "Select phase complete",
       ],
       [
-        "/modules/0/phases/0/surfaces/0/match/cell_ids/0",
+        "/modules/0/phases/0/surfaces/0/selector/values/0",
         "Cell ID 1",
         "Select surface nb",
       ],
@@ -201,7 +251,11 @@ describe("Author validation presentation", () => {
       fireEvent.click(
         screen.getByRole("button", { name: "Focus first issue" }),
       );
-      const control = await screen.findByLabelText(label);
+      const control = label.startsWith("group:")
+        ? await screen.findByRole("group", {
+            name: label.slice(6),
+          })
+        : await screen.findByLabelText(label);
       expect(control).toHaveAttribute("id", pointerToControlId(path));
       expect(control).toHaveAttribute(
         "aria-describedby",
@@ -238,12 +292,15 @@ describe("Author validation presentation", () => {
   });
   it("registers deterministic JSON Pointer IDs on real course and policy controls", async () => {
     const manifest: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Course",
       description: "",
       entry_module_id: "module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -260,24 +317,28 @@ describe("Author validation presentation", () => {
             {
               id: "phase",
               title: "Phase",
-              kind: "read",
-              teacher_mode: "reading_companion",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "reading" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "surface",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "lesson.md",
                 },
               ],
@@ -324,12 +385,15 @@ describe("Author validation presentation", () => {
   });
   it("uses a later mapped course pointer after an unknown issue", async () => {
     const manifest: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Course",
       description: "",
       entry_module_id: null,
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -381,12 +445,15 @@ describe("Author validation presentation", () => {
   });
   it("keeps an unknown-only real AuthorApp issue summary focusable", async () => {
     const manifest: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Course",
       description: "",
       entry_module_id: null,
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -467,12 +534,15 @@ describe("Author validation presentation", () => {
 
   it("focuses the first mapped real Inspector field when an earlier server pointer is unknown", () => {
     const manifest: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Course",
       description: "",
       entry_module_id: "module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -489,24 +559,28 @@ describe("Author validation presentation", () => {
             {
               id: "phase",
               title: "Phase",
-              kind: "read",
-              teacher_mode: "reading_companion",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "reading" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "surface",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "lesson.md",
                 },
               ],
@@ -560,12 +634,15 @@ describe("Author validation presentation", () => {
 
   it("reveals and focuses the actual non-selected second-module Path field with its deterministic pointer association", async () => {
     const manifest: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Course",
       description: "",
       entry_module_id: "one",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -581,24 +658,25 @@ describe("Author validation presentation", () => {
           {
             id: "phase",
             title: "Phase",
-            kind: "read",
-            teacher_mode: "reading_companion",
-            completion: { type: "manual" as const },
-            capabilities: {
-              chat: false,
-              hint_level: "none" as const,
-              share_selection: false,
-              share_cell: false,
-              share_output: false,
-              create_profile_proposal: false,
-              create_course_proposal: false,
-              create_workspace_proposal: false,
+            progress: "required" as const,
+            experience: { type: "builtin" as const, id: "reading" as const },
+            teacher: {
+              access: { mode: "observer_only" as const, requires: [] },
+              guidance: {
+                style: { type: "builtin" as const, id: "explanatory" as const },
+                hint_level: "none" as const,
+              },
+              sharing: { allow: [] },
+              proposals: { allow: [] },
             },
+            completion: { requirements: [] },
+
             surfaces: [
               {
                 id: "surface",
                 type: "markdown" as const,
-                role: "primary" as const,
+                purpose: "primary" as const,
+                label: "Content",
                 path: `${id}.md`,
               },
             ],
@@ -660,12 +738,15 @@ describe("Author validation presentation", () => {
   });
   it("resolves an issue against an imported current tree rather than the initial draft", async () => {
     const initial: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Course",
       description: "",
       entry_module_id: "one",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -682,24 +763,28 @@ describe("Author validation presentation", () => {
             {
               id: "phase",
               title: "Phase",
-              kind: "read",
-              teacher_mode: "reading_companion",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "reading" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "one",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "one.md",
                 },
               ],
@@ -723,7 +808,8 @@ describe("Author validation presentation", () => {
                 {
                   id: "new",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "new.md",
                 },
               ],
@@ -799,12 +885,15 @@ describe("Author validation presentation", () => {
   });
   it("resolves a post-CRUD pointer to the surviving Outline entity after nested indices change", async () => {
     const manifest: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Course",
       description: "",
       entry_module_id: "deleted-module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -821,24 +910,28 @@ describe("Author validation presentation", () => {
             {
               id: "deleted-phase",
               title: "Deleted phase",
-              kind: "read",
-              teacher_mode: "reading_companion",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "reading" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "deleted-surface",
                   type: "markdown",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "deleted.md",
                 },
               ],
@@ -866,7 +959,9 @@ describe("Author validation presentation", () => {
     render(<AuthorApp />);
 
     fireEvent.click(
-      await screen.findByRole("button", { name: "Select module Deleted module" }),
+      await screen.findByRole("button", {
+        name: "Select module Deleted module",
+      }),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Duplicate module Deleted module" }),
@@ -1075,12 +1170,15 @@ describe("Author validation presentation", () => {
 
   it("routes collection issues to the selected repair control and begins each repair", async () => {
     const manifest: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Collections",
       description: "",
       entry_module_id: "module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -1097,26 +1195,29 @@ describe("Author validation presentation", () => {
             {
               id: "terminal-phase",
               title: "Terminal phase",
-              kind: "lab",
-              teacher_mode: "debugging_coach",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "practice" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "terminal",
                   type: "terminal",
-                  role: "exercise",
+                  purpose: "supporting" as const,
                   label: "Run",
-                  argv: [],
+                  command: [],
                   cwd: ".",
                 },
               ],
@@ -1207,7 +1308,7 @@ describe("Author validation presentation", () => {
       screen.getAllByRole("button", { name: "Select surface surface" }),
     ).toHaveLength(surfacesBeforeRepair + 1);
 
-    const argvPath = "/modules/0/phases/0/surfaces/0/argv";
+    const argvPath = "/modules/0/phases/0/surfaces/0/command";
     appMocks.validateCourse.mockRejectedValueOnce(
       Object.assign(new Error("invalid"), {
         details: {
@@ -1240,12 +1341,15 @@ describe("Author validation presentation", () => {
 
   it("falls back to the validation summary for nonempty duplicate array collection issues", async () => {
     const manifest: AuthorManifest = {
-      schema_version: 1,
+      runtime: { type: "jupyter", kernel: { type: "python_uv_project" } },
+      schema_version: 2,
       id: "course",
       title: "Duplicate arrays",
       description: "",
       entry_module_id: "module",
       policies: {
+        allowed_share_kinds: ["selection", "cell", "output"],
+        allowed_proposal_types: ["profile", "course", "workspace"],
         content_sharing: "explicit_only",
         durable_mutation: "proposal_or_direct_student_action",
         terminal_execution: "student_only",
@@ -1262,34 +1366,41 @@ describe("Author validation presentation", () => {
             {
               id: "phase",
               title: "Phase",
-              kind: "lab",
-              teacher_mode: "debugging_coach",
-              completion: { type: "manual" },
-              capabilities: {
-                chat: false,
-                hint_level: "none",
-                share_selection: false,
-                share_cell: false,
-                share_output: false,
-                create_profile_proposal: false,
-                create_course_proposal: false,
-                create_workspace_proposal: false,
+              progress: "required" as const,
+              experience: { type: "builtin" as const, id: "practice" as const },
+              teacher: {
+                access: { mode: "observer_only" as const, requires: [] },
+                guidance: {
+                  style: {
+                    type: "builtin" as const,
+                    id: "explanatory" as const,
+                  },
+                  hint_level: "none" as const,
+                },
+                sharing: { allow: [] },
+                proposals: { allow: [] },
               },
+              completion: { requirements: [] },
+
               surfaces: [
                 {
                   id: "terminal",
                   type: "terminal",
-                  role: "exercise",
+                  purpose: "supporting" as const,
                   label: "Run",
-                  argv: ["node", "node"],
+                  command: ["node", "node"],
                   cwd: ".",
                 },
                 {
                   id: "notebook",
                   type: "notebook",
-                  role: "primary",
+                  purpose: "primary" as const,
+                  label: "Content",
                   path: "lesson.ipynb",
-                  match: { cell_ids: ["cell", "cell"] },
+                  selector: {
+                    type: "cell_ids" as const,
+                    values: ["cell", "cell"],
+                  },
                 },
               ],
             },
@@ -1315,9 +1426,9 @@ describe("Author validation presentation", () => {
     await screen.findByLabelText("Course title");
 
     const duplicateCollectionIssues: Array<readonly [string, string]> = [
-      ["/modules/0/phases/0/surfaces/0/argv", "Duplicate arguments."],
+      ["/modules/0/phases/0/surfaces/0/command", "Duplicate arguments."],
       [
-        "/modules/0/phases/0/surfaces/1/match/cell_ids",
+        "/modules/0/phases/0/surfaces/1/selector/values",
         "Duplicate notebook cells.",
       ],
     ];
@@ -1344,4 +1455,103 @@ describe("Author validation presentation", () => {
       ).toHaveAttribute("aria-pressed", "true");
     }
   });
+});
+
+it("focuses and explains the canonical duration object error after Add duration is replaced by minute controls", async () => {
+  const manifest: AuthorManifest = {
+    schema_version: 2,
+    id: "duration-course",
+    title: "Duration course",
+    description: "",
+    entry_module_id: "module",
+    policies: {
+      content_sharing: "explicit_only",
+      allowed_share_kinds: [],
+      max_shared_chars: 100,
+      allowed_proposal_types: [],
+      durable_mutation: "proposal_or_direct_student_action",
+      terminal_execution: "student_only",
+      conversation_memory: "session_only",
+      workspace_write_globs: [],
+    },
+    modules: [
+      {
+        id: "module",
+        title: "Module",
+        description: "",
+        phases: [
+          {
+            id: "phase",
+            title: "Timed activity",
+            progress: "required",
+            experience: { type: "builtin", id: "reading" },
+            surfaces: [],
+            completion: { requirements: [] },
+            teacher: {
+              access: { mode: "disabled", requires: [] },
+              guidance: {
+                style: { type: "builtin", id: "explanatory" },
+                hint_level: "none",
+              },
+              sharing: { allow: [] },
+              proposals: { allow: [] },
+            },
+            learning: {},
+          },
+        ],
+      },
+    ],
+  };
+  appMocks.runtime.mockReturnValue({
+    status: "ready",
+    runtime: {
+      serviceOrigin: "https://course.test",
+      capabilityToken: "test-token",
+      sourceId: "author",
+    },
+    retry: appMocks.retry,
+  });
+  appMocks.getCourse.mockResolvedValue({
+    manifest,
+    raw: JSON.stringify(manifest),
+    etag: '"saved"',
+  });
+  render(<AuthorApp />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Select phase Timed activity" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Add duration" }));
+  fireEvent.change(screen.getByLabelText("Minimum minutes"), {
+    target: { value: "50" },
+  });
+  fireEvent.change(screen.getByLabelText("Maximum minutes"), {
+    target: { value: "10" },
+  });
+  expect(screen.queryByRole("button", { name: "Add duration" })).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Select course Duration course" }),
+  );
+  // Exact object-level diagnostic emitted by the canonical structural parser.
+  const path = "/modules/0/phases/0/learning/duration";
+  const message = "The manifest field or local source is invalid.";
+  appMocks.validateCourse.mockRejectedValueOnce(
+    Object.assign(new Error("invalid"), {
+      details: { issues: [{ path, code: "contract_invalid", message }] },
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
+  await screen.findByText(message);
+  fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
+  const duration = await screen.findByRole("group", { name: "Duration" });
+  expect(duration).toHaveAttribute("id", pointerToControlId(path));
+  expect(duration).toHaveAttribute(
+    "aria-describedby",
+    pointerToControlId(path, "issue"),
+  );
+  expect(duration).toHaveFocus();
+  expect(
+    screen.getByText("Minimum minutes must not exceed maximum minutes."),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("Minimum minutes")).toHaveValue(50);
+  expect(screen.getByLabelText("Maximum minutes")).toHaveValue(10);
 });

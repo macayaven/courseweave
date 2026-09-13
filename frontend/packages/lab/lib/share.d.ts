@@ -1,4 +1,4 @@
-import type { CourseSnapshot } from './surfaces';
+import type { CourseSnapshot } from "./surfaces";
 interface LabCaptureProviderOptions {
     hostWindow: Window;
     childWindow: Window;

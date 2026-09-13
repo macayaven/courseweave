@@ -4,9 +4,9 @@
 **Date:** 2026-09-01  
 **Repositories:**
 
-- Platform: `/Volumes/mac-studio-ssd/education/courseweave`
-- First course adapter: `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor`
-- Protected source checkout: `/Volumes/mac-studio-ssd/education/agentic-harnessing-companion`
+- Platform: CourseWeave repository
+- First course adapter: Agent Harness Path integration checkout
+- Protected source checkout: protected companion checkout
 
 ## 1. Purpose
 

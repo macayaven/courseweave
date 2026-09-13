@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import concurrent.futures
 import hashlib
 from pathlib import Path
@@ -9,55 +10,46 @@ from courseweave.store import CourseStore
 
 
 def _manifest_data(title: str = "Concurrent Course") -> dict:
-    return {
-        "schema_version": 1,
-        "id": "concurrent-course",
-        "title": title,
-        "description": "",
-        "entry_module_id": "start",
-        "policies": {
-            "content_sharing": "explicit_only",
-            "durable_mutation": "proposal_or_direct_student_action",
-            "terminal_execution": "student_only",
-            "conversation_memory": "session_only",
-            "max_shared_chars": 8192,
-            "workspace_write_globs": ["work/*.txt"],
-        },
-        "modules": [
-            {
-                "id": "start",
-                "title": "Start",
-                "description": "",
-                "phases": [
-                    {
-                        "id": "read",
-                        "title": "Read",
-                        "kind": "read",
-                        "teacher_mode": "reading_companion",
-                        "surfaces": [
-                            {
-                                "id": "lesson",
-                                "type": "markdown",
-                                "role": "primary",
-                                "path": "lesson.md",
-                            }
-                        ],
-                        "completion": {"type": "manual"},
-                        "capabilities": {
-                            "chat": True,
-                            "hint_level": "gentle",
-                            "share_selection": True,
-                            "share_cell": False,
-                            "share_output": False,
-                            "create_profile_proposal": True,
-                            "create_course_proposal": True,
-                            "create_workspace_proposal": True,
-                        },
-                    }
-                ],
-            }
-        ],
-    }
+    data = {'schema_version': 2,
+     'id': 'concurrent-course',
+     'title': 'Concurrent Course',
+     'description': '',
+     'entry_module_id': 'start',
+     'policies': {'content_sharing': 'explicit_only',
+                  'allowed_share_kinds': ['selection'],
+                  'max_shared_chars': 8192,
+                  'allowed_proposal_types': ['course', 'profile', 'workspace'],
+                  'durable_mutation': 'proposal_or_direct_student_action',
+                  'terminal_execution': 'student_only',
+                  'conversation_memory': 'session_only',
+                  'workspace_write_globs': ['work/*.txt']},
+     'modules': [{'id': 'start',
+                  'title': 'Start',
+                  'description': '',
+                  'phases': [{'id': 'read',
+                              'title': 'Read',
+                              'progress': 'required',
+                              'experience': {'type': 'builtin', 'id': 'reading'},
+                              'surfaces': [{'id': 'lesson',
+                                            'purpose': 'primary',
+                                            'type': 'markdown',
+                                            'label': 'lesson',
+                                            'path': 'lesson.md'}],
+                              'completion': {'requirements': [{'id': 'acknowledgement',
+                                                               'type': 'learner_record',
+                                                               'record_kind': 'attestation',
+                                                               'prompt': 'Confirm completion of '
+                                                                         'Read.'}]},
+                              'teacher': {'access': {'mode': 'available', 'requires': []},
+                                          'guidance': {'style': {'type': 'builtin',
+                                                                 'id': 'explanatory'},
+                                                       'hint_level': 'gentle'},
+                                          'sharing': {'allow': ['selection']},
+                                          'proposals': {'allow': ['profile',
+                                                                  'course',
+                                                                  'workspace']}}}]}]}
+    data['title'] = title
+    return data
 
 
 def _accept(root: str, key: str) -> tuple[str, str]:

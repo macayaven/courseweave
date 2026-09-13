@@ -36,20 +36,11 @@ function newBrowserModule(phaseTitle = "New phase"): Record<string, unknown> {
     phases: [{
       id: "phase",
       title: phaseTitle,
-      kind: "read",
-      teacher_mode: "reading_companion",
-      surfaces: [{ id: "surface", type: "markdown", role: "primary", path: "content.md" }],
-      completion: { type: "manual" },
-      capabilities: {
-        chat: false,
-        hint_level: "none",
-        share_selection: false,
-        share_cell: false,
-        share_output: false,
-        create_profile_proposal: false,
-        create_course_proposal: false,
-        create_workspace_proposal: false,
-      },
+      progress: "required",
+      experience: {type:"builtin",id:"reading"},
+      surfaces: [{id:"surface",type:"markdown",purpose:"primary",label:"Content",path:"content.md"}],
+      completion: {requirements:[]},
+      teacher: {access:{mode:"disabled",requires:[]},guidance:{style:{type:"builtin",id:"explanatory"},hint_level:"none"},sharing:{allow:[]},proposals:{allow:[]}},
     }],
   };
 }
@@ -162,16 +153,16 @@ for (const example of ["minimal-course", "cli-course"] as const) {
       expect(copiedPhases.map((phase) => phase.id)).toEqual(["read-copy"]);
       expect(copiedPhases[0]!.title).toBe("Read the lesson edited in browser");
       expect((copiedPhases[0]!.surfaces as Array<Record<string, unknown>>)).toEqual([
-        { id: "lesson-copy", type: "markdown", role: "primary", path: "lesson.md" },
+        { id: "lesson-copy", type: "markdown", purpose: "primary", label:"lesson", path: "lesson.md" },
       ]);
     } else {
       expect(savedModules.map((module) => module.id)).toEqual(["cli-copy", "browser-added"]);
       const copiedPhases = savedModules[0]!.phases as Array<Record<string, unknown>>;
       expect(copiedPhases.map((phase) => phase.id)).toEqual(["read-copy", "run-copy"]);
       expect(copiedPhases[0]!.title).toBe("Read the CLI lesson edited in browser");
-      expect(copiedPhases[1]!.completion).toEqual({ type: "artifact_exists", record_id: "cli-note", path: "notes/cli-result.md" });
+      expect(copiedPhases[1]!.completion).toEqual({requirements:[{id:"cli-note",type:"artifact_exists",prompt:"Create the artifact for Run the example command.",path:"notes/cli-result.md"}]});
       expect((copiedPhases[1]!.surfaces as Array<Record<string, unknown>>)).toEqual([
-        { id: "show-help-copy", type: "terminal", role: "exercise", label: "Show CourseWeave help", argv: ["courseweave", "--help"], cwd: "." },
+        { id: "show-help-copy", type: "terminal", purpose: "supporting", label: "Show CourseWeave help", command: ["courseweave", "--help"], cwd: "." },
       ]);
     }
     expect(savedModules[1]).toMatchObject({
@@ -580,11 +571,11 @@ test("renders hostile imported fields as inert text without fetch, navigation, m
   const phase = (module.phases as Array<Record<string, unknown>>)[0]!;
   phase.title = "<svg onload=window.__courseweaveScript=true>Imported phase</svg>";
   phase.surfaces = [
-    { id: "http-path", type: "markdown", role: "primary", path: "http://outside.example/artifact" },
-    { id: "data-video", type: "video", role: "reference", url: "data:text/html,<script>window.__courseweaveScript=true</script>" },
-    { id: "javascript-link", type: "external", role: "reference", url: "javascript:window.__courseweaveScript=true" },
-    { id: "file-video", type: "video", role: "reference", path: "file:///tmp/private-video" },
-    { id: "terminal", type: "terminal", role: "exercise", label: "Never execute", argv: ["sh", "-c", "window.__terminalExecuted=true"], cwd: "." },
+    { id: "http-path", type: "markdown", purpose: "primary", path: "http://outside.example/artifact" },
+    { id: "data-video", type: "video", purpose: "reference", src: "data:text/html,<script>window.__courseweaveScript=true</script>" },
+    { id: "javascript-link", type: "external", purpose: "reference", url: "javascript:window.__courseweaveScript=true" },
+    { id: "file-video", type: "video", purpose: "reference", src: "file:///tmp/private-video" },
+    { id: "terminal", type: "terminal", purpose: "supporting", label: "Never execute", command: ["sh", "-c", "window.__terminalExecuted=true"], cwd: "." },
   ];
 
   expectValidationRequest(api, "structural", hostile);

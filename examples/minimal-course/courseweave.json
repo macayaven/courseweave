@@ -1,15 +1,19 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "minimal-course",
   "title": "Minimal Course",
   "description": "The smallest runnable CourseWeave course.",
   "entry_module_id": "start",
   "policies": {
     "content_sharing": "explicit_only",
+    "allowed_share_kinds": [
+      "selection"
+    ],
+    "max_shared_chars": 8192,
+    "allowed_proposal_types": [],
     "durable_mutation": "proposal_or_direct_student_action",
     "terminal_execution": "student_only",
     "conversation_memory": "session_only",
-    "max_shared_chars": 8192,
     "workspace_write_globs": []
   },
   "modules": [
@@ -21,28 +25,50 @@
         {
           "id": "read",
           "title": "Read the lesson",
-          "kind": "read",
-          "teacher_mode": "reading_companion",
+          "progress": "required",
+          "experience": {
+            "type": "builtin",
+            "id": "reading"
+          },
           "surfaces": [
             {
               "id": "lesson",
+              "purpose": "primary",
               "type": "markdown",
-              "role": "primary",
+              "label": "lesson",
               "path": "lesson.md"
             }
           ],
           "completion": {
-            "type": "manual"
+            "requirements": [
+              {
+                "id": "acknowledgement",
+                "type": "learner_record",
+                "record_kind": "attestation",
+                "prompt": "Confirm completion of Read the lesson."
+              }
+            ]
           },
-          "capabilities": {
-            "chat": true,
-            "hint_level": "gentle",
-            "share_selection": true,
-            "share_cell": false,
-            "share_output": false,
-            "create_profile_proposal": false,
-            "create_course_proposal": false,
-            "create_workspace_proposal": false
+          "teacher": {
+            "access": {
+              "mode": "available",
+              "requires": []
+            },
+            "guidance": {
+              "style": {
+                "type": "builtin",
+                "id": "explanatory"
+              },
+              "hint_level": "gentle"
+            },
+            "sharing": {
+              "allow": [
+                "selection"
+              ]
+            },
+            "proposals": {
+              "allow": []
+            }
           }
         }
       ]

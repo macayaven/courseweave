@@ -1,0 +1,431 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "AdaptationPreferences": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "explanation": {
+          "default": "balanced",
+          "enum": [
+            "concise",
+            "balanced",
+            "detailed"
+          ],
+          "title": "Explanation",
+          "type": "string"
+        },
+        "practice": {
+          "default": "standard",
+          "enum": [
+            "standard",
+            "extra"
+          ],
+          "title": "Practice",
+          "type": "string"
+        }
+      },
+      "title": "AdaptationPreferences",
+      "type": "object"
+    },
+    "AttestationValue": {
+      "additionalProperties": false,
+      "properties": {
+        "attested": {
+          "title": "Attested",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "attested"
+      ],
+      "title": "AttestationValue",
+      "type": "object"
+    },
+    "CheckAttempt": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "check_attempt",
+          "title": "Type",
+          "type": "string"
+        },
+        "module_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Module Id",
+          "type": "string"
+        },
+        "phase_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Phase Id",
+          "type": "string"
+        },
+        "check_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Check Id",
+          "type": "string"
+        },
+        "option_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Option Id",
+          "type": "string"
+        },
+        "curriculum_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Curriculum Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "module_id",
+        "phase_id",
+        "check_id",
+        "option_id",
+        "curriculum_digest"
+      ],
+      "title": "CheckAttempt",
+      "type": "object"
+    },
+    "ClearRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "clear_record",
+          "title": "Type",
+          "type": "string"
+        },
+        "coordinate": {
+          "$ref": "#/$defs/Coordinate"
+        },
+        "curriculum_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Curriculum Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "coordinate",
+        "curriculum_digest"
+      ],
+      "title": "ClearRecord",
+      "type": "object"
+    },
+    "Coordinate": {
+      "additionalProperties": false,
+      "properties": {
+        "module_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Module Id",
+          "type": "string"
+        },
+        "phase_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Phase Id",
+          "type": "string"
+        },
+        "requirement_id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?![\\s\\S])",
+          "title": "Requirement Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "module_id",
+        "phase_id",
+        "requirement_id"
+      ],
+      "title": "Coordinate",
+      "type": "object"
+    },
+    "EvidenceValue": {
+      "additionalProperties": false,
+      "properties": {
+        "references": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LocalEvidence"
+              },
+              {
+                "$ref": "#/$defs/RemoteEvidence"
+              }
+            ]
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "References",
+          "type": "array"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "maxLength": 16384,
+              "minLength": 1,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "references"
+      ],
+      "title": "EvidenceValue",
+      "type": "object"
+    },
+    "LocalEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "pattern": "^(?!/)(?![\\s\\S]*[:\\\\\\x00-\\x1f\\x7f])(?![\\s\\S]*(?:^|/)(?:\\.{1,2})(?:/|$))[^/]+(?:/[^/]+)*(?![\\s\\S])",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "path"
+      ],
+      "title": "LocalEvidence",
+      "type": "object"
+    },
+    "PutRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "put_record",
+          "title": "Type",
+          "type": "string"
+        },
+        "coordinate": {
+          "$ref": "#/$defs/Coordinate"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextValue"
+            },
+            {
+              "$ref": "#/$defs/EvidenceValue"
+            },
+            {
+              "$ref": "#/$defs/AttestationValue"
+            }
+          ],
+          "title": "Value"
+        },
+        "curriculum_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Curriculum Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "coordinate",
+        "value",
+        "curriculum_digest"
+      ],
+      "title": "PutRecord",
+      "type": "object"
+    },
+    "RemoteEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Label",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2048,
+          "minLength": 1,
+          "pattern": "^(?![\\s\\S]*[\\x00-\\x20\\x7f\\\\])https://(?![^/?#]*@)(?:\\[[0-9A-Fa-f:.]+\\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::[0-9]+)?(?:[/?#][\\s\\S]*)?(?![\\s\\S])",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "url"
+      ],
+      "title": "RemoteEvidence",
+      "type": "object"
+    },
+    "ResetState": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "reset_state",
+            "delete_state"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ResetState",
+      "type": "object"
+    },
+    "SetPreferences": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "set_preferences",
+          "title": "Type",
+          "type": "string"
+        },
+        "preferences": {
+          "$ref": "#/$defs/AdaptationPreferences"
+        }
+      },
+      "required": [
+        "type",
+        "preferences"
+      ],
+      "title": "SetPreferences",
+      "type": "object"
+    },
+    "SetTimeBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "set_time_budget",
+          "title": "Type",
+          "type": "string"
+        },
+        "minutes": {
+          "anyOf": [
+            {
+              "maximum": 1440,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Minutes"
+        }
+      },
+      "required": [
+        "type",
+        "minutes"
+      ],
+      "title": "SetTimeBudget",
+      "type": "object"
+    },
+    "TextValue": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "TextValue",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "origin": {
+      "const": "student_requested",
+      "title": "Origin",
+      "type": "string"
+    },
+    "expected_revision": {
+      "minimum": 0,
+      "title": "Expected Revision",
+      "type": "integer"
+    },
+    "operation": {
+      "discriminator": {
+        "mapping": {
+          "check_attempt": "#/$defs/CheckAttempt",
+          "clear_record": "#/$defs/ClearRecord",
+          "delete_state": "#/$defs/ResetState",
+          "put_record": "#/$defs/PutRecord",
+          "reset_state": "#/$defs/ResetState",
+          "set_preferences": "#/$defs/SetPreferences",
+          "set_time_budget": "#/$defs/SetTimeBudget"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PutRecord"
+        },
+        {
+          "$ref": "#/$defs/ClearRecord"
+        },
+        {
+          "$ref": "#/$defs/SetTimeBudget"
+        },
+        {
+          "$ref": "#/$defs/SetPreferences"
+        },
+        {
+          "$ref": "#/$defs/CheckAttempt"
+        },
+        {
+          "$ref": "#/$defs/ResetState"
+        }
+      ],
+      "title": "Operation"
+    }
+  },
+  "required": [
+    "origin",
+    "expected_revision",
+    "operation"
+  ],
+  "title": "StateRequest",
+  "type": "object"
+}

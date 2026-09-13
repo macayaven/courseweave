@@ -1,6 +1,6 @@
 {
   "name": "courseweave-frontend",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.32.1",
@@ -16,7 +16,7 @@
     "test:e2e:installed-wheel": "COURSEWEAVE_INSTALLED_WHEEL=1 pnpm exec playwright test --config playwright.config.ts",
     "test:e2e:installed-adapter": "COURSEWEAVE_INSTALLED_ADAPTER=1 pnpm exec playwright test --config playwright.config.ts",
     "test:e2e:author": "pnpm exec playwright test --config playwright.author.config.ts",
-    "test:build-determinism": "node --test scripts/verify-build-determinism.test.mjs && node scripts/verify-build-determinism.mjs"
+    "test:build-determinism": "node --test scripts/build-library.test.mjs scripts/verify-build-determinism.test.mjs && node scripts/verify-build-determinism.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "6.1.1",

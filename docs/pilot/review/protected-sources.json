@@ -1,0 +1,26 @@
+{
+  "summary": "Sanitized historical protected-source comparison; private checkout paths are retained only in the original local receipt.",
+  "sources": [
+    {
+      "logical_role": "protected companion source checkout",
+      "head_unchanged": true,
+      "status_unchanged": true,
+      "snapshotted_dirty_files_unchanged": true,
+      "changed_dirty_paths": []
+    },
+    {
+      "logical_role": "divergent earlier CourseWeave fix worktree",
+      "head_unchanged": true,
+      "status_unchanged": true,
+      "snapshotted_dirty_files_unchanged": true,
+      "changed_dirty_paths": []
+    },
+    {
+      "logical_role": "original CourseWeave checkout",
+      "head_unchanged": true,
+      "status_unchanged": true,
+      "snapshotted_dirty_files_unchanged": true,
+      "changed_dirty_paths": []
+    }
+  ]
+}

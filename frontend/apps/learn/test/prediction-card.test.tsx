@@ -1,86 +1,44 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { StrictMode } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-import { PredictionCard } from '../src/prediction-card';
-
-const phase = { id: 'predict', title: 'Predict', kind: 'predict' as const, completion: { type: 'prediction_recorded' as const, record_id: 'prediction-1' }, capabilities: { chat: true, hint_level: 'none' as const, share_selection: false, share_cell: false, share_output: false, create_profile_proposal: false, create_course_proposal: false, create_workspace_proposal: false }, surfaces: [] };
-
-afterEach(() => cleanup());
-
-describe('PredictionCard', () => {
-  it('locks result-seeking help until server state contains the required prediction', () => {
-    const { rerender } = render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction: vi.fn() }} onState={vi.fn()} onRefresh={vi.fn()} />);
-    expect(screen.getByText('Record a prediction before requesting results.')).toBeInTheDocument();
-    rerender(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 3, predictions: { 's01/predict/prediction-1': { text: 'my prediction' } } }} client={{ recordPrediction: vi.fn() }} onState={vi.fn()} onRefresh={vi.fn()} />);
-    expect(screen.getByText('Prediction recorded')).toBeInTheDocument();
-  });
-
-  it('records the exact prediction request with the server revision', async () => {
-    const recordPrediction = vi.fn().mockResolvedValue({ revision: 3, predictions: { 's01/predict/prediction-1': { text: 'my prediction' } } });
-    render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction }} onState={vi.fn()} onRefresh={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'my prediction' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
-    expect(recordPrediction).toHaveBeenCalledWith({ expected_revision: 2, operation: { type: 'record_prediction', module_id: 's01', phase_id: 'predict', record_id: 'prediction-1', text: 'my prediction' } }, expect.any(AbortSignal));
-  });
-
-  it('preserves typed text and explicitly refreshes after a revision mismatch', async () => {
-    const onRefresh = vi.fn().mockResolvedValue(undefined);
-    const recordPrediction = vi.fn().mockRejectedValue({ code: 'revision_mismatch' });
-    render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction }} onState={vi.fn()} onRefresh={onRefresh} />);
-    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'retain me' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
-    expect(await screen.findByText('State changed; review the refreshed course state.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Your prediction')).toHaveValue('retain me');
-    expect(onRefresh).toHaveBeenCalledOnce();
-    expect(recordPrediction).toHaveBeenCalledOnce();
-  });
-
-  it('enters application recovery when a conflict refresh fails without an auth status', async () => {
-    const onRecovery = vi.fn();
-    render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction: vi.fn().mockRejectedValue({ code: 'revision_mismatch' }) }} onState={vi.fn()} onRefresh={vi.fn().mockRejectedValue(new Error('offline'))} onRecovery={onRecovery} />);
-    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'retain me' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
-    expect(await screen.findByText('State refresh failed. Reconnect to continue.')).toBeInTheDocument();
-    expect(onRecovery).toHaveBeenCalledOnce();
-  });
-
-  it('disables duplicate submission while its request is in flight', () => {
-    let resolve: (state: { revision: number }) => void = () => undefined;
-    const recordPrediction = vi.fn().mockImplementation(() => new Promise((done) => { resolve = done; }));
-    render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction }} onState={vi.fn()} onRefresh={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'one attempt' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
-    expect(screen.getByRole('button', { name: 'Saving prediction' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Saving prediction' }));
-    expect(recordPrediction).toHaveBeenCalledOnce();
-    resolve({ revision: 3 });
-  });
-
-  it('continues a successful prediction lifecycle under the real StrictMode entry behavior', async () => {
-    const onState = vi.fn();
-    const recordPrediction = vi.fn().mockResolvedValue({ revision: 3, predictions: {} });
-    render(<StrictMode><PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction }} onState={onState} onRefresh={vi.fn()} /></StrictMode>);
-    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'strict success' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
-    await vi.waitFor(() => expect(onState).toHaveBeenCalledOnce());
-    expect(screen.getByRole('button', { name: 'Save prediction' })).not.toBeDisabled();
-  });
-
-  it('clears a draft when a new trusted phase identity replaces the current phase', () => {
-    const { rerender } = render(<PredictionCard key="s01/predict-a" moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction: vi.fn() }} onState={vi.fn()} onRefresh={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'only phase A' } });
-    rerender(<PredictionCard key="s01/predict-b" moduleId="s01" phase={{ ...phase, id: 'predict-b', completion: { type: 'prediction_recorded', record_id: 'prediction-b' } }} state={{ revision: 2, predictions: {} }} client={{ recordPrediction: vi.fn() }} onState={vi.fn()} onRefresh={vi.fn()} />);
-    expect(screen.getByLabelText('Your prediction')).toHaveValue('');
-  });
-
-  it('keeps a prediction draft editable but does not write during recovery', () => {
-    const recordPrediction = vi.fn();
-    render(<PredictionCard moduleId="s01" phase={phase} state={{ revision: 2, predictions: {} }} client={{ recordPrediction }} onState={vi.fn()} onRefresh={vi.fn()} recovery />);
-    fireEvent.change(screen.getByLabelText('Your prediction'), { target: { value: 'keep it' } });
-    expect(screen.getByLabelText('Your prediction')).toHaveValue('keep it');
-    expect(screen.getByRole('button', { name: 'Save prediction' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Save prediction' }));
-    expect(recordPrediction).not.toHaveBeenCalled();
-  });
+import {cleanup,fireEvent,render,screen} from '@testing-library/react';
+import {StrictMode} from 'react';
+import {afterEach,describe,expect,it,vi} from 'vitest';
+import {PredictionCard} from '../src/prediction-card';
+import {state,digest} from './fixtures';
+import type {LearnerState,Requirement} from '@courseweave/ui/courseweave-types';
+afterEach(cleanup);
+const requirement:Requirement={id:'prediction-1',type:'learner_record',record_kind:'text',prompt:'Your prediction'};
+const common={moduleId:'s01',phaseId:'predict',requirement};
+const coordinate={module_id:'s01',phase_id:'predict',requirement_id:'prediction-1'};
+const saved=()=>state({revision:3,records:[{coordinate,value:{text:'my prediction'},kind:'text',origin:'direct_learner',requirement_digest:digest}],progress:{required_total:1,required_complete:1,phases:[],records:[{coordinate,status:'valid'}]}});
+describe('authored prediction record',()=>{
+ it('shows the valid server-recorded value instead of fabricating a generic prediction',()=>{
+  const view=render(<PredictionCard {...common} state={state({revision:2})}/>);expect(screen.queryByText('Saved response')).not.toBeInTheDocument();
+  view.rerender(<PredictionCard {...common} state={saved()}/>);expect(screen.getByText('Saved response')).toBeInTheDocument();expect(screen.getByText('my prediction')).toBeInTheDocument();
+ });
+ it('sends the exact requirement coordinate and curriculum digest',async()=>{
+  const save=vi.fn().mockResolvedValue(undefined);render(<PredictionCard {...common} state={state({revision:2})} onStateOperation={save}/>);
+  fireEvent.change(screen.getByLabelText('Your prediction'),{target:{value:'my prediction'}});fireEvent.click(screen.getByRole('button',{name:'Save response'}));
+  await vi.waitFor(()=>expect(save).toHaveBeenCalledWith({type:'put_record',coordinate,curriculum_digest:digest,value:{text:'my prediction'}},expect.any(AbortSignal)));
+ });
+ it('preserves typed text and refreshes once after a revision mismatch',async()=>{
+  const refresh=vi.fn().mockResolvedValue(undefined),save=vi.fn().mockRejectedValue({code:'revision_mismatch'});render(<PredictionCard {...common} state={state()} onStateOperation={save} onRefresh={refresh}/>);
+  fireEvent.change(screen.getByLabelText('Your prediction'),{target:{value:'retain me'}});fireEvent.click(screen.getByRole('button',{name:'Save response'}));
+  expect(await screen.findByText('State changed; review the refreshed course state.')).toBeInTheDocument();expect(screen.getByLabelText('Your prediction')).toHaveValue('retain me');expect(refresh).toHaveBeenCalledOnce();expect(save).toHaveBeenCalledOnce();
+ });
+ it('enters recovery when the conflict refresh fails',async()=>{
+  const recovery=vi.fn();render(<PredictionCard {...common} state={state()} onStateOperation={vi.fn().mockRejectedValue({code:'revision_mismatch'})} onRefresh={vi.fn().mockRejectedValue(Error('offline'))} onRecovery={recovery}/>);
+  fireEvent.change(screen.getByLabelText('Your prediction'),{target:{value:'retain me'}});fireEvent.click(screen.getByRole('button',{name:'Save response'}));expect(await screen.findByText('State refresh failed. Reconnect to continue.')).toBeInTheDocument();expect(recovery).toHaveBeenCalledOnce();
+ });
+ it('disables duplicate submission while a request is in flight',async()=>{
+  let resolve!:()=>void;const save=vi.fn(()=>new Promise<void>(done=>{resolve=done;}));render(<PredictionCard {...common} state={state()} onStateOperation={save}/>);
+  fireEvent.change(screen.getByLabelText('Your prediction'),{target:{value:'one attempt'}});fireEvent.click(screen.getByRole('button',{name:'Save response'}));expect(screen.getByRole('button',{name:'Saving response'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Saving response'}));expect(save).toHaveBeenCalledOnce();resolve();await screen.findByText('Response saved.');
+ });
+ it('continues a successful record lifecycle under StrictMode',async()=>{
+  const save=vi.fn().mockResolvedValue(undefined);render(<StrictMode><PredictionCard {...common} state={state()} onStateOperation={save}/></StrictMode>);fireEvent.change(screen.getByLabelText('Your prediction'),{target:{value:'strict success'}});fireEvent.click(screen.getByRole('button',{name:'Save response'}));expect(await screen.findByText('Response saved.')).toBeInTheDocument();expect(screen.getByRole('button',{name:'Save response'})).not.toBeDisabled();expect(save).toHaveBeenCalledOnce();
+ });
+ it('clears drafts for a different trusted activity',()=>{
+  const view=render(<PredictionCard key="a" {...common} state={state()}/>);fireEvent.change(screen.getByLabelText('Your prediction'),{target:{value:'only A'}});view.rerender(<PredictionCard key="b" {...common} phaseId="predict-b" state={state()}/>);expect(screen.getByLabelText('Your prediction')).toHaveValue('');
+ });
+ it('keeps a draft editable but does not write during recovery',()=>{
+  const save=vi.fn();render(<PredictionCard {...common} state={state()} onStateOperation={save} recovery/>);fireEvent.change(screen.getByLabelText('Your prediction'),{target:{value:'keep'}});expect(screen.getByLabelText('Your prediction')).toHaveValue('keep');expect(screen.getByRole('button',{name:'Save response'})).toBeDisabled();expect(save).not.toHaveBeenCalled();
+ });
 });
