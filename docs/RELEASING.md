@@ -89,9 +89,9 @@ UV_LINK_MODE=copy pnpm --dir frontend build
 
 The workflow uses read-only repository permissions, Python 3.11 and 3.12 for the
 Python suite, and Node 22 with pnpm 10.32.1 for frontend typecheck, tests, and
-build. It runs for pull requests, pushes to `main`, and manual dispatch. Hosted CI
-has not run for this unpublished preparation; require green jobs at the exact
-release commit before tagging.
+build. It runs for pull requests, pushes to `main`, and manual dispatch. Require
+green hosted jobs at the exact release commit before tagging; a passing earlier
+candidate does not establish the final commit's source gate.
 
 Review and commit the version, notes, lockfile and generated-output changes before
 the clean-archive build proof below. It builds `git archive HEAD`; uncommitted

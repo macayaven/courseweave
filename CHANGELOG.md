@@ -103,6 +103,9 @@ version is v0.2.0, subject to the gates in the [release runbook](docs/RELEASING.
 
 ### Fixed
 
+- Discarded unused Jupyter output directly at the process boundary so inherited
+  pipe writers cannot keep shutdown waiting or trigger a false cleanup failure.
+  Credential-bearing child output remains suppressed.
 - Prevented stale Author reads, draft identity handoffs, proposal actions, and
   concurrent state updates from overwriting newer authoritative data.
 - Preserved unsaved Author drafts and learner conversation/drafts through
