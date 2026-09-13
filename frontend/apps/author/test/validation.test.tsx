@@ -58,6 +58,37 @@ import {
 
 afterEach(cleanup);
 
+async function renderLoadedAuthorApp() {
+  const callsBeforeRender = appMocks.getCourse.mock.calls.length;
+  render(<AuthorApp />);
+  if (appMocks.getCourse.mock.calls.length !== callsBeforeRender + 1)
+    throw new Error("Initial course read did not start.");
+  const operation = appMocks.getCourse.mock.results[callsBeforeRender]?.value as
+    | Promise<unknown>
+    | undefined;
+  if (operation === undefined) throw new Error("Initial course read is missing.");
+  await act(async () => {
+    await operation;
+  });
+}
+
+async function runStructuralValidation() {
+  const callsBeforeClick = appMocks.validateCourse.mock.calls.length;
+  await act(async () => {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Validate structure" }),
+    );
+    if (appMocks.validateCourse.mock.calls.length !== callsBeforeClick + 1)
+      throw new Error("Structural validation did not start.");
+    const operation = appMocks.validateCourse.mock.results[callsBeforeClick]
+      ?.value as
+      | Promise<unknown>
+      | undefined;
+    if (operation === undefined) throw new Error("Validation result is missing.");
+    await operation.catch(() => undefined);
+  });
+}
+
 describe("Author validation presentation", () => {
   it("reveals every representative real Inspector pointer on its stable owning entity", async () => {
     const phase = (
@@ -190,7 +221,7 @@ describe("Author validation presentation", () => {
       raw: "{}",
       etag: '"etag"',
     });
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
     await screen.findByLabelText("Course title");
     const cases: Array<[string, string, string]> = [
       ["/modules/1/phases/0", "group:Phase", "Select phase complete"],
@@ -245,10 +276,8 @@ describe("Author validation presentation", () => {
           details: { issues: [{ path, code: "schema_validation", message }] },
         }),
       );
-      fireEvent.click(
-        screen.getByRole("button", { name: "Validate structure" }),
-      );
-      await screen.findByText(message);
+      await runStructuralValidation();
+      expect(screen.getByText(message)).toBeInTheDocument();
       fireEvent.click(
         screen.getByRole("button", { name: "Focus first issue" }),
       );
@@ -281,8 +310,8 @@ describe("Author validation presentation", () => {
         },
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
-    await screen.findByText("Second path.");
+    await runStructuralValidation();
+    expect(screen.getByText("Second path.")).toBeInTheDocument();
     expect(
       document.getElementById(pointerToControlId(first, "issue")),
     ).not.toBe(document.getElementById(pointerToControlId(second, "issue")));
@@ -362,7 +391,7 @@ describe("Author validation presentation", () => {
       raw: "{}",
       etag: '"etag"',
     });
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
     expect(await screen.findByLabelText("Course ID")).toHaveAttribute(
       "id",
       pointerToControlId("/id"),
@@ -436,11 +465,10 @@ describe("Author validation presentation", () => {
         },
       }),
     );
-    render(<AuthorApp />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Validate structure" }),
-    );
-    await screen.findByText("Title required.");
+    await renderLoadedAuthorApp();
+    await screen.findByRole("button", { name: "Validate structure" });
+    await runStructuralValidation();
+    expect(screen.getByText("Title required.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     expect(screen.getByLabelText("Course title")).toHaveFocus();
   });
@@ -491,11 +519,10 @@ describe("Author validation presentation", () => {
         },
       }),
     );
-    render(<AuthorApp />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Validate structure" }),
-    );
-    await screen.findByText("Server-only.");
+    await renderLoadedAuthorApp();
+    await screen.findByRole("button", { name: "Validate structure" });
+    await runStructuralValidation();
+    expect(screen.getByText("Server-only.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     expect(
       screen.getByRole("alert", { name: "Validation issues" }),
@@ -719,11 +746,10 @@ describe("Author validation presentation", () => {
         },
       }),
     );
-    render(<AuthorApp />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Validate structure" }),
-    );
-    await screen.findByText("Second path missing.");
+    await renderLoadedAuthorApp();
+    await screen.findByRole("button", { name: "Validate structure" });
+    await runStructuralValidation();
+    expect(screen.getByText("Second path missing.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     const path = await screen.findByLabelText("Path");
     expect(path).toHaveValue("two.md");
@@ -850,7 +876,7 @@ describe("Author validation presentation", () => {
           importStarted();
         }),
     );
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
     fireEvent.change(await screen.findByLabelText("Import course file"), {
       target: { files: [new File([JSON.stringify(imported)], "import.json")] },
     });
@@ -879,11 +905,7 @@ describe("Author validation presentation", () => {
         },
       }),
     );
-    await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Validate structure" }),
-      );
-    });
+    await runStructuralValidation();
     expect(screen.getByText("Imported path.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     const control = await screen.findByLabelText("Path");
@@ -980,7 +1002,7 @@ describe("Author validation presentation", () => {
       raw: "{}",
       etag: '"etag"',
     });
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
 
     fireEvent.click(
       await screen.findByRole("button", {
@@ -1138,8 +1160,8 @@ describe("Author validation presentation", () => {
         },
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
-    await screen.findByText("Target path is missing.");
+    await runStructuralValidation();
+    expect(screen.getByText("Target path is missing.")).toBeInTheDocument();
     expect(appMocks.validateCourse).toHaveBeenCalledWith(
       expect.objectContaining({
         modules: [
@@ -1264,7 +1286,7 @@ describe("Author validation presentation", () => {
       raw: "{}",
       etag: '"etag"',
     });
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
     await screen.findByLabelText("Course title");
 
     const phasePath = "/modules/0/phases";
@@ -1277,8 +1299,8 @@ describe("Author validation presentation", () => {
         },
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
-    await screen.findByText("Add a phase.");
+    await runStructuralValidation();
+    expect(screen.getByText("Add a phase.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     const addPhase = await screen.findByRole("button", { name: "Add phase" });
     expect(addPhase).toHaveAttribute("id", pointerToControlId(phasePath));
@@ -1309,8 +1331,8 @@ describe("Author validation presentation", () => {
         },
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
-    await screen.findByText("Add a surface.");
+    await runStructuralValidation();
+    expect(screen.getByText("Add a surface.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     const addSurface = await screen.findByRole("button", {
       name: "Add surface",
@@ -1346,8 +1368,8 @@ describe("Author validation presentation", () => {
         },
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
-    await screen.findByText("Add an argument.");
+    await runStructuralValidation();
+    expect(screen.getByText("Add an argument.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     const argument = await screen.findByLabelText("Argument 1");
     expect(argument).toHaveAttribute("id", pointerToControlId(argvPath));
@@ -1446,7 +1468,7 @@ describe("Author validation presentation", () => {
       raw: "{}",
       etag: '"etag"',
     });
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
     await screen.findByLabelText("Course title");
 
     const duplicateCollectionIssues: Array<readonly [string, string]> = [
@@ -1464,10 +1486,8 @@ describe("Author validation presentation", () => {
           },
         }),
       );
-      fireEvent.click(
-        screen.getByRole("button", { name: "Validate structure" }),
-      );
-      await screen.findByText(message);
+      await runStructuralValidation();
+      expect(screen.getByText(message)).toBeInTheDocument();
       fireEvent.click(
         screen.getByRole("button", { name: "Focus first issue" }),
       );
@@ -1540,7 +1560,7 @@ it("focuses and explains the canonical duration object error after Add duration 
     raw: JSON.stringify(manifest),
     etag: '"saved"',
   });
-  render(<AuthorApp />);
+  await renderLoadedAuthorApp();
   fireEvent.click(
     await screen.findByRole("button", { name: "Select phase Timed activity" }),
   );
@@ -1563,8 +1583,8 @@ it("focuses and explains the canonical duration object error after Add duration 
       details: { issues: [{ path, code: "contract_invalid", message }] },
     }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
-  await screen.findByText(message);
+  await runStructuralValidation();
+  expect(screen.getByText(message)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
   const duration = await screen.findByRole("group", { name: "Duration" });
   expect(duration).toHaveAttribute("id", pointerToControlId(path));
