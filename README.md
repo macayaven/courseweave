@@ -12,17 +12,18 @@ two optional notebook-free protocols.
 
 ## Release status
 
-CourseWeave v0.2.0 and its macOS student bundle are prepared but **not published
-yet**. Do not use the commands below until the
+Use the v0.2.0 macOS student bundle when the
 [v0.2.0 release page](https://github.com/macayaven/courseweave/releases/tag/v0.2.0)
 lists both `agent-harness-path-courseweave-0.2.0-macos.tar.gz` and
-`SHA256SUMS`. The public v0.1.0 wheel supports schema v1 and cannot load the
-current schema-v2 course.
+`SHA256SUMS` and is no longer marked **Pre-release**. That release record provides
+the publication date, exact artifacts and public-download acceptance evidence.
+The v0.1.0 wheel supports schema v1 and cannot load the current schema-v2 course.
 
 Until v0.2.0 is published and verified from its public download, use the
 [native course route](https://github.com/macayaven/agent-harness-path#quickstart).
-The local full-course acceptance records remain bounded evidence for older named
-artifacts; they are not proof that these future public URLs work.
+The earlier local full-course records remain bounded evidence for their named
+artifacts; the release record distinguishes reused checks from checks of the
+actual public download.
 
 ## Guided macOS setup after publication
 
@@ -129,16 +130,21 @@ uv run --frozen pytest
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for source workflows and
 [docs/RELEASING.md](docs/RELEASING.md) for installed-artifact and release gates.
+CourseWeave is source available under PolyForm Shield 1.0.0, not OSI open
+source. Read the
+[licensing guide](docs/LICENSING.md) before reuse or redistribution.
 
 ## Project documentation
 
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
+- [Licensing](docs/LICENSING.md)
 - [Release process](docs/RELEASING.md)
 - [Schema and API contract](docs/contracts/api.md)
 - [Engineering standard](docs/engineering.md)
 - [Historical v0.1.0 verification](docs/verification/v0.md)
 
-The repository does not yet contain a license. License selection remains a
-publication gate; this draft does not grant reuse or redistribution rights.
+The root [`LICENSE`](LICENSE) covers CourseWeave. The independently maintained
+Agent Harness Path course retains its Apache-2.0 software and CC BY 4.0 content
+licensing, and learner-created work remains the learner's.

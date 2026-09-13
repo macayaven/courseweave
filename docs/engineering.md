@@ -80,7 +80,7 @@ The repository now includes a source CI workflow using the existing Python and
 frontend checks, carries consistent 0.2.0 application metadata, retains the
 reproducible source inputs in its sdist, and has a portable provider-off student
 launcher plus an explicit-provider interface. Local checks validate those
-contracts; green hosted checks, the pending license choice, exact candidate
+contracts; green hosted checks, exact candidate
 artifacts, and fresh public-download acceptance remain release gates in
 [RELEASING](RELEASING.md). The two historical installation and CI observations
 above describe their dated assessment, not the current repository structure.

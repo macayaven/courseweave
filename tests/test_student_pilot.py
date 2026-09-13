@@ -167,18 +167,23 @@ def test_release_rejects_missing_or_unsafe_course_version(tmp_path, version):
         pilot.load_release(root)
 
 
-def test_builder_records_course_version_from_archive_and_keeps_seven_files(tmp_path):
+def test_builder_records_course_version_and_licenses_in_eight_file_bundle(tmp_path):
     package = builder()
     metadata = {
         'pyproject.toml': '[project]\nname = "agent-harness-path"\nversion = "0.2.0"\n',
         'courseweave.json': '{"schema_version": 2}',
+        'LICENSE': 'fixture course license\n',
     }
     receipt_path = receipt(tmp_path, metadata)
     output = tmp_path / 'portable release'
     package.build(receipt_path, output)
     release_data = json.loads((output / 'release.json').read_text())
     assert release_data['course_version'] == '0.2.0'
+    assert (output / 'LICENSE').read_bytes() == (ROOT / 'LICENSE').read_bytes()
+    with tarfile.open(output / 'course.tar') as archive:
+        assert archive.extractfile('LICENSE').read() == b'fixture course license\n'
     assert sorted(path.name for path in output.iterdir()) == [
+        'LICENSE',
         'README.md',
         'Start Course.command',
         'course.tar',
@@ -190,10 +195,11 @@ def test_builder_records_course_version_from_archive_and_keeps_seven_files(tmp_p
 
 
 @pytest.mark.parametrize('metadata, expected', [
-    ({'courseweave.json': '{"schema_version": 2}'}, 'pyproject.toml'),
-    ({'pyproject.toml': '[project]\nname = "agent-harness-path"\n', 'courseweave.json': '{}'}, 'version'),
-    ({'pyproject.toml': '[project]\nversion = "../escape"\n', 'courseweave.json': '{}'}, 'version'),
-    ({'pyproject.toml': '[project\nversion = "0.2.0"\n', 'courseweave.json': '{}'}, 'pyproject.toml'),
+    ({'courseweave.json': '{"schema_version": 2}', 'LICENSE': 'course'}, 'pyproject.toml'),
+    ({'pyproject.toml': '[project]\nname = "agent-harness-path"\n', 'courseweave.json': '{}', 'LICENSE': 'course'}, 'version'),
+    ({'pyproject.toml': '[project]\nversion = "../escape"\n', 'courseweave.json': '{}', 'LICENSE': 'course'}, 'version'),
+    ({'pyproject.toml': '[project\nversion = "0.2.0"\n', 'courseweave.json': '{}', 'LICENSE': 'course'}, 'pyproject.toml'),
+    ({'pyproject.toml': '[project]\nversion = "0.2.0"\n', 'courseweave.json': '{}'}, 'LICENSE'),
 ])
 def test_builder_rejects_missing_or_malformed_course_metadata(tmp_path, metadata, expected):
     package = builder()

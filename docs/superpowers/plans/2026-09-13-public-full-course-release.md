@@ -4,7 +4,7 @@
 
 **Goal:** Make the existing GitHub course URL sufficient for an engineer with basic generative-AI API experience to install, study S01–S14 with the optional continuous CourseWeave assistant, and provide convenient feedback.
 
-**Architecture:** Keep the native course and the guided application available from the existing course repository. Reuse the verified seven-file student package, standalone Python installer, deterministic engine, current course material and existing acceptance scripts. Publish CourseWeave independently as v0.2.0 and attach a macOS student bundle containing the exact application wheel and course archive. The bundle is provider-off unless the learner explicitly selects a provider. Retain all earlier local and public releases.
+**Architecture:** Keep the native course and the guided application available from the existing course repository. Reuse the verified student package, standalone Python installer, deterministic engine, current course material and existing acceptance scripts. The current eight-file package adds the platform license. Publish CourseWeave independently as v0.2.0 and attach a macOS student bundle containing the exact application wheel and course archive. The bundle is provider-off unless the learner explicitly selects a provider. Retain all earlier local and public releases.
 
 **Tech stack:** Existing Python/uv installer, JupyterLab, Node 22/Playwright acceptance, GitHub releases and source workflows. No new service or runtime dependency.
 
@@ -17,16 +17,16 @@
 - Retain lesson and notebook semantics, all cell identities and output-free sources. S13/S14 are optional notebook-free protocols; assistance restrictions and real-world evidence remain intact. Teacher/author expansion is outside this release task.
 - The default public setup must read no provider credentials, including inherited API keys and former maintainer custody. Provider use is explicit. Never put key values in shell arguments, logs, notebooks, saved course state, evidence or repository files.
 - Existing Python/frontend/source checks are reused. Synthetic and real-provider acceptance are distinct; neither fabricates student/human work. Reuse historical evidence only when inputs and covered behavior are unchanged.
-- The user has a pending platform license choice (Apache-2.0 recommended to match course code). Do not infer the answer or publish an OSS license grant without it. Independent preparation continues.
+- CourseWeave uses the unmodified PolyForm Shield License 1.0.0 with its required notice and CourseWeave line of business. The platform is source available, not OSI open source; the course keeps its independent licenses.
 - Review concrete changes before publication. GitHub candidate publication, fresh public-download acceptance and promotion are separate steps. No unverified latest-release claim.
 
 ### Task 1: Portable student launcher and package
 
 **Files:** `scripts/student_pilot.py`, `scripts/build_student_release.py`, `scripts/pilot`, `tests/test_student_pilot.py`, `tests/test_student_release_installed.py`, `tests/test_pilot_launcher.py`, `docs/pilot/STUDENT-README.md`. Add no product services. Existing delivered folders are immutable.
 
-**Consumes:** Existing receipt fields `platform_commit`, `course_commit`, `wheel`, `wheel_sha256`, `source_archives`, `runtime_constraints`, `runtime_constraints_sha256`; archive includes root `pyproject.toml` and `courseweave.json`.
+**Consumes:** Existing receipt fields `platform_commit`, `course_commit`, `wheel`, `wheel_sha256`, `source_archives`, `runtime_constraints`, `runtime_constraints_sha256`; archive includes root `pyproject.toml`, `courseweave.json` and `LICENSE`.
 
-**Produces:** Same seven-file package and `Start Course.command`; `release.json` adds `course_version` read from the course archive metadata. The default study home is `~/Library/Application Support/CourseWeave/Agent Harness Path v<course_version>` on macOS, and the analogous versioned XDG data location on Linux. Public support remains verified macOS. Explicit `--home` continues to preserve/refuse mismatched existing work.
+**Produces:** Eight-file package, including the selected application `LICENSE`, and `Start Course.command`; `release.json` adds `course_version` read from the course archive metadata. The default study home is `~/Library/Application Support/CourseWeave/Agent Harness Path v<course_version>` on macOS, and the analogous versioned XDG data location on Linux. Public support remains verified macOS. Explicit `--home` continues to preserve/refuse mismatched existing work.
 
 - [x] Extend existing unit regressions to fail on automatic credential custody or inherited provider use, to cover explicit OpenAI-compatible/Anthropic environment selection, and to verify a versioned fresh home without replacing an earlier study folder.
 - [x] Remove maintainer model, hostname and credential-file discovery from the public launcher. Retire the shared dependency in `scripts/pilot` by using the same explicit environment selection, with provider off by default; do not break the immutable earlier released launcher.
@@ -63,7 +63,7 @@
 
 ### Task 4: Freeze, build and validate candidates
 
-**Controller responsibility; files:** version-bearing source/package metadata and locks in both repositories; course static diagram receipt; platform license/metadata only after the user's answer; versioned public verification reports and release notes.
+**Controller responsibility; files:** version-bearing source/package metadata and locks in both repositories; course static diagram receipt; selected platform license/metadata; versioned public verification reports and release notes.
 
 - [x] Assign app/course v0.2.0 consistently, refresh locks and generated assets; regenerate and inspect the lock-bound diagram receipt without altering meaningful lesson diagrams.
 - [ ] Run the existing complete source gates; use a clean committed archive for build determinism. Build wheel/sdist and course archive from exact commits, record hashes and scan inventories. Obtain a bounded independent review of implementation, docs and final artifact boundaries.

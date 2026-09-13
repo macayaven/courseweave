@@ -4,7 +4,8 @@ dynamic = ["version"]
 description = "Local-first course platform with a phase-aware JupyterLab learner guide"
 readme = "README.md"
 requires-python = ">=3.11"
-license-files = ["THIRD_PARTY_LICENSES.md"]
+license = "LicenseRef-PolyForm-Shield-1.0.0"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 dependencies = [
     "fastapi==0.141.1",
     "uvicorn==0.52.4",
@@ -49,7 +50,7 @@ skip-excluded-dirs = true
 include = [
     "/src", "/tests", "/frontend", "/examples", "/uv.lock", "/README.md",
     "/CHANGELOG.md", "/CONTRIBUTING.md", "/SECURITY.md", "/AGENTS.md",
-    "/THIRD_PARTY_LICENSES.md",
+    "/LICENSE", "/THIRD_PARTY_LICENSES.md",
     "/.github", "/docs", "/scripts",
 ]
 exclude = ["/frontend/**/node_modules", "/frontend/test-results", "/frontend/playwright-report", "/frontend/**/.vite", "/frontend/packages/lab/lib", "**/*.tsbuildinfo"]

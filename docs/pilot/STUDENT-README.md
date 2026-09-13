@@ -6,6 +6,13 @@ observations and self-checks. S13/S14 are optional practical protocols on a syst
 you own; they have no notebooks. A single Course assistant stays with you across
 permitted activities. Teacher and course-author workflows are outside this release.
 
+The `LICENSE` file in this folder covers the CourseWeave platform. The included
+`course.tar` keeps the course's separate license, which appears as
+`course/LICENSE` after setup. CourseWeave's third-party notices remain in the
+application wheel. See the public
+[CourseWeave licensing guide](https://github.com/macayaven/courseweave/blob/main/docs/LICENSING.md)
+for an explanation; the license files control.
+
 ## Start
 
 **Double-click `Start Course.command` in this folder.** Keep all the release files

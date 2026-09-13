@@ -6,9 +6,9 @@ they must not create a competing completion or mutation path. Read the
 [engineering standard](docs/engineering.md) before architectural, state, security,
 or release changes.
 
-The project license is still being selected. A public release is blocked until a
-`LICENSE` file exists. Discuss substantial redistribution or reuse with the
-maintainer while that choice is pending.
+CourseWeave is source available under PolyForm Shield 1.0.0, not OSI open source.
+Read the [licensing guide](docs/LICENSING.md) and controlling
+[`LICENSE`](LICENSE) before reuse or redistribution.
 
 ## Local setup
 
@@ -24,6 +24,12 @@ Do not add generated dependency directories, credentials, learner data, raw
 provider logs, or private course material to a change. Provider-backed tests must
 be deliberately authorized and must use test-owned data; ordinary source checks
 do not require a provider.
+
+You must have the right to submit your work. Ordinary accepted contributions are
+distributed under the project license, while contributors retain copyright. The
+project does not require copyright assignment, a contributor license agreement,
+or an implied broad commercial relicensing grant. Discuss any different terms
+with the maintainer before submission.
 
 ## Validation
 

@@ -31,10 +31,13 @@ def course_version(archive_path: Path) -> str:
         with tarfile.open(archive_path) as archive:
             pyprojects = [member for member in archive.getmembers() if member.name == 'pyproject.toml']
             manifests = [member for member in archive.getmembers() if member.name == 'courseweave.json']
+            licenses = [member for member in archive.getmembers() if member.name == 'LICENSE']
             if len(pyprojects) != 1 or not pyprojects[0].isfile():
                 raise ValueError('Course archive must contain one regular root pyproject.toml.')
             if len(manifests) != 1 or not manifests[0].isfile():
                 raise ValueError('Course archive must contain one regular root courseweave.json.')
+            if len(licenses) != 1 or not licenses[0].isfile():
+                raise ValueError('Course archive must contain one regular root LICENSE.')
             if pyprojects[0].size > 256 * 1024:
                 raise ValueError('Course archive root pyproject.toml is unexpectedly large.')
             stream = archive.extractfile(pyprojects[0])
@@ -76,6 +79,7 @@ def build(receipt_path: Path, output: Path):
         shutil.copy2(path, output / name)
         files[key] = {'path': name, 'sha256': digest}
     project = Path(__file__).resolve().parents[1]
+    shutil.copy2(project / 'LICENSE', output / 'LICENSE')
     shutil.copy2(project / 'scripts/student_pilot.py', output / 'student_pilot.py')
     shutil.copy2(project / 'docs/pilot/STUDENT-README.md', output / 'README.md')
     start = output / 'Start Course.command'

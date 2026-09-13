@@ -24,6 +24,7 @@ These tests pin the wheel and bridge contract:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -44,6 +45,16 @@ FRONTEND_LOCK = REPO_ROOT / "frontend" / "pnpm-lock.yaml"
 FRONTEND_WORKSPACE = REPO_ROOT / "frontend" / "pnpm-workspace.yaml"
 
 THIRD_PARTY_NOTICE = "THIRD_PARTY_LICENSES.md"
+PROJECT_LICENSE = "LICENSE"
+PROJECT_LICENSE_EXPRESSION = "LicenseRef-PolyForm-Shield-1.0.0"
+POLYFORM_SHIELD_1_0_0_LENGTH = 5748
+POLYFORM_SHIELD_1_0_0_SHA256 = (
+    "67530f8e9adfcc5d2e9d72b804500cebb7472ff84c34a6729a80a2a9be901ee6"
+)
+PROJECT_LICENSE_SUFFIX = b"""
+Required Notice: Copyright 2026 Carlos Crespo Macaya
+Licensor Line of Business: CourseWeave software for AI-assisted course delivery, hands-on learning, and assessment.
+"""
 REACT_MIT_LICENSE = b"""MIT License
 
 Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -133,7 +144,34 @@ def _bridge_javascript(wheel_contents: dict[str, bytes]) -> list[bytes]:
     ]
 
 
+def _assert_exact_project_license(contents: bytes) -> None:
+    standard = contents[:POLYFORM_SHIELD_1_0_0_LENGTH]
+    assert hashlib.sha256(standard).hexdigest() == POLYFORM_SHIELD_1_0_0_SHA256
+    assert contents[POLYFORM_SHIELD_1_0_0_LENGTH:] == PROJECT_LICENSE_SUFFIX
+
+
 class TestWheelContents:
+    def test_wheel_contains_exact_project_license_and_expression(
+        self, wheel_contents: dict[str, bytes]
+    ) -> None:
+        license_entries = [
+            name
+            for name in wheel_contents
+            if name.endswith(f".dist-info/licenses/{PROJECT_LICENSE}")
+        ]
+        assert len(license_entries) == 1, license_entries
+        project_license = wheel_contents[license_entries[0]]
+        assert project_license == (REPO_ROOT / PROJECT_LICENSE).read_bytes()
+        _assert_exact_project_license(project_license)
+
+        metadata_entries = [
+            name for name in wheel_contents if name.endswith(".dist-info/METADATA")
+        ]
+        assert len(metadata_entries) == 1, metadata_entries
+        metadata = wheel_contents[metadata_entries[0]]
+        assert f"License-Expression: {PROJECT_LICENSE_EXPRESSION}".encode() in metadata
+        assert f"License-File: {PROJECT_LICENSE}".encode() in metadata
+
     def test_wheel_retains_bundled_react_license_notice(
         self, wheel_contents: dict[str, bytes]
     ) -> None:
@@ -489,6 +527,7 @@ def test_sdist_contains_source_rebuild_and_validation_inputs(tmp_path):
         'examples/cli-course/courseweave.json', 'examples/cli-course/lesson.md',
         'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'AGENTS.md',
         '.github/workflows/verify.yml',
+        PROJECT_LICENSE,
         THIRD_PARTY_NOTICE,
     ]
     with tarfile.open(archive_path) as archive:
@@ -516,6 +555,29 @@ def test_sdist_contains_source_rebuild_and_validation_inputs(tmp_path):
             if any(pattern.search(contents) for pattern in workstation_roots):
                 leaked_docs.append(relative)
         assert not leaked_docs, leaked_docs
+        license_members = [
+            member
+            for member in archive.getmembers()
+            if member.name.partition('/')[2] == PROJECT_LICENSE
+        ]
+        assert len(license_members) == 1, license_members
+        license_member = license_members[0]
+        license_file = archive.extractfile(license_member)
+        assert license_file is not None
+        project_license = license_file.read()
+        assert project_license == (REPO_ROOT / PROJECT_LICENSE).read_bytes()
+        _assert_exact_project_license(project_license)
+        metadata_member = next(
+            member
+            for member in archive.getmembers()
+            if member.name.partition('/')[2].endswith('PKG-INFO')
+        )
+        metadata_file = archive.extractfile(metadata_member)
+        assert metadata_file is not None
+        assert (
+            f"License-Expression: {PROJECT_LICENSE_EXPRESSION}".encode()
+            in metadata_file.read()
+        )
         notice_member = next(
             member
             for member in archive.getmembers()

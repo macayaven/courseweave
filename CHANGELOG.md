@@ -1,12 +1,16 @@
 # Changelog
 
-This file records user-visible CourseWeave changes. Dates and version headings are
-added only when a release is published.
+This file records user-visible CourseWeave changes. Version headings identify
+frozen contents; publication dates and status are recorded on the linked GitHub
+releases.
 
 ## Unreleased
 
-The changes below are relative to public v0.1.0. The recommended next public
-version is v0.2.0, subject to the gates in the [release runbook](docs/RELEASING.md).
+## [0.2.0](https://github.com/macayaven/courseweave/releases/tag/v0.2.0)
+
+The changes below are relative to public v0.1.0. A release marked Pre-release
+remains a verification candidate until the public-download gates in the
+[release runbook](docs/RELEASING.md) pass and the unchanged assets are promoted.
 
 ### Added
 
@@ -46,8 +50,9 @@ version is v0.2.0, subject to the gates in the [release runbook](docs/RELEASING.
 - Added generic installed-wheel checks, exact-course adapter checks, credential
   and owned-process cleanup sentinels, actual course-kernel isolation checks,
   build-determinism checks, and retained recovery/privacy cases.
-- Added a portable seven-file macOS student bundle with checksum-bound application
-  wheel, course archive and runtime constraints; first start creates isolated
+- Added a portable eight-file macOS student bundle with the CourseWeave license,
+  checksum-bound application wheel, separately licensed course archive and runtime
+  constraints; first start creates isolated
   application/course interpreters and a fresh study home named for the course
   version. Restart, redacted diagnostics, state inspection/export/reset and
   repeat setup preserve existing work.
@@ -65,7 +70,14 @@ version is v0.2.0, subject to the gates in the [release runbook](docs/RELEASING.
   separately authorized live text checks require one environment-configured
   provider and never discover a credential file.
 - Added public contributor, security, release, pull-request, and safe bug-report
-  guidance. The platform license is still a publication prerequisite.
+  guidance.
+- Licensed CourseWeave under the unmodified PolyForm Shield License 1.0.0 with
+  the project notice and CourseWeave line of business. Package metadata uses
+  `LicenseRef-PolyForm-Shield-1.0.0`; wheel, sdist, and student-bundle checks
+  preserve the exact license alongside third-party notices. Added a licensing
+  guide covering permitted evaluation and noncompeting use, the competition and
+  New Products boundaries, independent course and learner-work ownership,
+  contribution terms, and the route for separate commercial terms.
 - Added the existing MIT notice for bundled React 19.2.8, ReactDOM 19.2.8 and
   scheduler 0.27.0 to wheel and source-distribution metadata. It covers only
   those third-party components and does not grant a CourseWeave license.

@@ -7,13 +7,19 @@ Path remain separate repositories with independent versions: the course stays in
 CourseWeave is an optional interface.
 
 The selected release uses final v0.2.0 package bytes. Prepare changes under
-Unreleased/Draft, freeze the candidate commit and date for review, then publish
+Unreleased/Draft, freeze the candidate commit and versioned notes for review, then publish
 those v0.2.0 artifacts as an explicitly marked GitHub prerelease. Public-download
 acceptance promotes that same release and unchanged bytes to latest. A failed
 candidate stays a prerelease or draft and produces a newly built candidate; do
 not relabel release-candidate package bytes as final v0.2.0. Never reuse `0.1.0`:
 the compatible local pilot wheel has that metadata but differs from the public
 v0.1.0 artifact.
+
+At the freeze, move changes to a versioned changelog heading and link the GitHub
+release record for live status and publication date. Source notes must remain
+accurate before and after promotion; an absent release or Pre-release marker
+does not imply availability to learners. Record the actual date in the GitHub
+release when it is published, without rewriting tagged artifacts afterward.
 
 ## 1. Freeze release inputs
 
@@ -26,8 +32,9 @@ v0.1.0 artifact.
 - Record the application tree, course archive SHA-256, lockfile hashes, built
   wheel/sdist hashes, Python/Jupyter/Node/pnpm/uv versions, and all commands run.
 - Confirm the selected license is present in `LICENSE` and represented correctly
-  in package metadata and release assets. There is no license at present, so this
-  gate is open.
+  as `LicenseRef-PolyForm-Shield-1.0.0` in package metadata and release assets.
+  Verify that wheel and sdist retain `THIRD_PARTY_LICENSES.md`, and that the
+  student bundle's `LICENSE` matches the selected application source exactly.
 - Verify `SECURITY.md` names a working confidential reporting route. If GitHub private
   vulnerability reporting is enabled, test the repository advisory link; if it
   remains disabled, verify the documented maintainer address is current.
@@ -54,7 +61,7 @@ JupyterLab extension metadata, changelog, release-note title, and tag agree.
 
 ## 2. Make the public path portable
 
-- Use `scripts/build_student_release.py` to produce the same seven-file bundle
+- Use `scripts/build_student_release.py` to produce the same eight-file bundle
   described below. Its receipt is build metadata derived from the selected clean
   application and course commits; it is not a private `.pilot/` acceptance
   receipt and is not a public asset.
@@ -219,7 +226,7 @@ tar -C "$release_root" -czf \
   >> "$release_root/SHA256SUMS"
 ```
 
-Inspect `build-receipt.json`, `release.json`, both Python artifacts and all seven
+Inspect `build-receipt.json`, `release.json`, both Python artifacts and all eight
 bundle files. Require `course_version: "0.2.0"`, the two selected commit IDs,
 the expected hashes and exactly one archive top-level directory:
 
@@ -262,7 +269,7 @@ node --experimental-transform-types scripts/verify_student_release.mjs \
 ```
 
 Omitting both live flags is also synthetic-only. `RELEASE` must be the extracted
-seven-file package. `EVIDENCE` must be outside `RELEASE`; the test root can be a
+eight-file package. `EVIDENCE` must be outside `RELEASE`; the test root can be a
 shared parent but cannot be equal to or nested inside either. The verifier resolves
 aliases, rejects cloud-synced locations and unsafe overlap, creates only a unique
 owned child beneath the test root, and removes that child after the run.
@@ -315,8 +322,9 @@ rollback with copies before documenting either as supported.
 
 ## 6. Publish a candidate, verify its download, then promote
 
-- Confirm the committed notes name the candidate version and date, with its
-  prerelease status explicit until the public-download gate passes.
+- Confirm the committed notes name the candidate version and link the GitHub
+  release record for status and publication date, with prerelease status explicit
+  until the public-download gate passes.
 - Recheck that the published security-reporting route is available and matches
   `SECURITY.md`.
 - Link the exact public course release and commit; include migration, rollback,
