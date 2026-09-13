@@ -108,6 +108,34 @@ describe('Learn parent-origin trust bootstrap', () => {
     expect(view.result.current.runtime?.sourceId).toBe('notebook-b');
   });
 
+  it("keeps a reconnected session pending until trusted current-context confirmation", () => {
+    setReferrer("https://lab.test/");
+    const view = renderHook(() => useRuntimeBootstrap());
+    dispatchRuntime(VALID_RUNTIME);
+    dispatchRuntime({
+      type: "courseweave.context.changed.v1",
+      sourceId: "notebook-a",
+    });
+    act(() => view.result.current.retry());
+    dispatchRuntime({
+      type: "courseweave.context.pending.v1",
+      sourceId: "notebook-a",
+    });
+    dispatchRuntime(VALID_RUNTIME);
+    expect(view.result.current.status).toBe("ready");
+    expect(view.result.current.contextPending).toBe(true);
+    dispatchRuntime({
+      type: "courseweave.context.changed.v1",
+      sourceId: "wrong-source",
+    });
+    expect(view.result.current.contextPending).toBe(true);
+    dispatchRuntime({
+      type: "courseweave.context.changed.v1",
+      sourceId: "notebook-a",
+    });
+    expect(view.result.current.contextPending).toBe(false);
+  });
+
   it('keeps an accepted capability out of browser persistence', () => {
     setReferrer('https://lab.test/');
     const view = renderHook(() => useRuntimeBootstrap());

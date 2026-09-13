@@ -1,132 +1,21 @@
 import type { ChangeEvent, Dispatch } from "react";
-import type {
-  AuthorCapabilities,
-  AuthorCompletion,
-  AuthorPhase,
-  AuthorSurface,
-} from "@courseweave/ui";
-import type {
-  AuthorDocumentState,
-  DraftAction,
-  DraftPhase,
-  DraftSurface,
-} from "./draft";
+import type { AuthorSurface } from "@courseweave/ui";
+import type { AuthorDocumentState, DraftAction } from "./draft";
+import { ArrayFields, Choices, SelectField } from "./field-inputs";
+import { PhaseFields } from "./phase-fields";
+import { SurfaceFields } from "./surface-fields";
 import { pointerToControlId } from "./validation";
 
 type InspectorProps = {
   state: AuthorDocumentState;
   dispatch: Dispatch<DraftAction>;
 };
-const kinds: AuthorPhase["kind"][] = [
-  "orient",
-  "read",
-  "watch",
-  "predict",
-  "experiment",
-  "lab",
-  "review",
-  "audit",
-  "ship",
-];
-const modes: AuthorPhase["teacher_mode"][] = [
-  "orienter",
-  "reading_companion",
-  "socratic_guide",
-  "debugging_coach",
-  "reviewer",
-  "observer",
-  "curriculum_designer",
-];
-const surfaceTypes: AuthorSurface["type"][] = [
-  "html",
-  "markdown",
-  "source",
-  "notebook",
-  "video",
-  "terminal",
-  "external",
-];
-const roles: AuthorSurface["role"][] = [
-  "primary",
-  "reference",
-  "exercise",
-  "evidence",
-];
-const completions: AuthorCompletion["type"][] = [
-  "manual",
-  "prediction_recorded",
-  "receipt_recorded",
-  "artifact_exists",
-];
-const hints: AuthorCapabilities["hint_level"][] = [
-  "none",
-  "gentle",
-  "graduated",
-  "full",
-];
-
 function text(
   event: ChangeEvent<
     HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
   >,
 ): string {
   return event.currentTarget.value;
-}
-function ArrayFields({
-  label,
-  itemLabel,
-  values,
-  onChange,
-  pointer,
-}: {
-  label: string;
-  itemLabel: string;
-  values: string[];
-  onChange(values: string[]): void;
-  pointer?: string;
-}) {
-  const items = values.length > 0 ? values : [""];
-  return (
-    <fieldset>
-      <legend>{label}</legend>
-      {items.map((value, index) => (
-        <span key={index}>
-          <label>
-            {itemLabel} {index + 1}
-            <input
-              id={
-                pointer === undefined
-                  ? undefined
-                  : pointerToControlId(
-                      values.length === 0 ? pointer : `${pointer}/${index}`,
-                    )
-              }
-              aria-label={`${itemLabel} ${index + 1}`}
-              value={value}
-              onChange={(event) => {
-                const next = values.length === 0 ? [""] : [...values];
-                next[index] = text(event);
-                onChange(next);
-              }}
-            />
-          </label>
-          {values.length > 0 ? (
-            <button
-              type="button"
-              onClick={() =>
-                onChange(values.filter((_, valueIndex) => valueIndex !== index))
-              }
-            >
-              Remove {itemLabel.toLowerCase()} {index + 1}
-            </button>
-          ) : null}
-        </span>
-      ))}
-      <button type="button" onClick={() => onChange([...values, ""])}>
-        Add {itemLabel.toLowerCase()}
-      </button>
-    </fieldset>
-  );
 }
 function CourseInspector({ state, dispatch }: InspectorProps) {
   const course = state.draft;
@@ -183,8 +72,46 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
           ))}
         </select>
       </label>
+      <SelectField
+        label="Notebook runtime"
+        pointer="/runtime"
+        value={course.runtime ? "jupyter" : "none"}
+        options={["none", "jupyter"]}
+        onChange={(value) =>
+          dispatch({
+            type: "course.update",
+            patch: {
+              runtime:
+                value === "none"
+                  ? null
+                  : { type: "jupyter", kernel: { type: "python_uv_project" } },
+            },
+          })
+        }
+      />
       <fieldset>
         <legend>Policies</legend>
+        <Choices
+          label="Allowed sharing"
+          pointer="/policies/allowed_share_kinds"
+          values={course.policies.allowed_share_kinds}
+          options={["selection", "cell", "output"]}
+          onChange={(allowed_share_kinds) =>
+            dispatch({ type: "policy.update", patch: { allowed_share_kinds } })
+          }
+        />
+        <Choices
+          label="Allowed proposals"
+          pointer="/policies/allowed_proposal_types"
+          values={course.policies.allowed_proposal_types}
+          options={["profile", "course", "workspace"]}
+          onChange={(allowed_proposal_types) =>
+            dispatch({
+              type: "policy.update",
+              patch: { allowed_proposal_types },
+            })
+          }
+        />
         <label>
           Content sharing
           <select
@@ -343,474 +270,27 @@ function ModuleInspector({
     </fieldset>
   );
 }
-function CapabilitiesFields({
-  phase,
-  change,
-  pointer,
-}: {
-  phase: DraftPhase;
-  change(patch: Partial<AuthorCapabilities>): void;
-  pointer: string;
-}) {
-  const booleanFields: [
-    keyof Omit<AuthorCapabilities, "hint_level">,
-    string,
-  ][] = [
-    ["chat", "Chat"],
-    ["share_selection", "Share selection"],
-    ["share_cell", "Share cell"],
-    ["share_output", "Share output"],
-    ["create_profile_proposal", "Create profile proposal"],
-    ["create_course_proposal", "Create course proposal"],
-    ["create_workspace_proposal", "Create workspace proposal"],
-  ];
-  return (
-    <fieldset>
-      <legend>Capabilities</legend>
-      {booleanFields.map(([field, label]) => (
-        <label key={field}>
-          {label}
-          <input
-            id={pointerToControlId(`${pointer}/${field}`)}
-            type="checkbox"
-            checked={phase.capabilities[field]}
-            onChange={(event) =>
-              change({ [field]: event.currentTarget.checked })
-            }
-          />
-        </label>
-      ))}
-      <label>
-        Hint level
-        <select
-          id={pointerToControlId(`${pointer}/hint_level`)}
-          value={phase.capabilities.hint_level}
-          onChange={(event) =>
-            change({
-              hint_level: text(event) as AuthorCapabilities["hint_level"],
-            })
-          }
-        >
-          {hints.map((hint) => (
-            <option key={hint} value={hint}>
-              {hint}
-            </option>
-          ))}
-        </select>
-      </label>
-    </fieldset>
-  );
-}
-function CompletionFields({
-  completion,
-  change,
-  pointer,
-}: {
-  completion: AuthorCompletion;
-  change(completion: AuthorCompletion): void;
-  pointer: string;
-}) {
-  const changeType = (type: AuthorCompletion["type"]) => {
-    if (type === "manual") change({ type });
-    else if (type === "artifact_exists")
-      change({ type, record_id: "record", path: "artifact.txt" });
-    else change({ type, record_id: "record" });
-  };
-  return (
-    <fieldset>
-      <legend>Completion</legend>
-      <label>
-        Completion type
-        <select
-          id={pointerToControlId(`${pointer}/type`)}
-          value={completion.type}
-          onChange={(event) =>
-            changeType(text(event) as AuthorCompletion["type"])
-          }
-        >
-          {completions.map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
-      </label>
-      {completion.type !== "manual" ? (
-        <label>
-          Completion record ID
-          <input
-            id={pointerToControlId(`${pointer}/record_id`)}
-            value={completion.record_id}
-            onChange={(event) =>
-              change({ ...completion, record_id: text(event) })
-            }
-          />
-        </label>
-      ) : null}
-      {completion.type === "artifact_exists" ? (
-        <label>
-          Artifact path
-          <input
-            id={pointerToControlId(`${pointer}/path`)}
-            value={completion.path}
-            onChange={(event) => change({ ...completion, path: text(event) })}
-          />
-        </label>
-      ) : null}
-    </fieldset>
-  );
-}
 function PhaseInspector({
   state,
   dispatch,
   moduleKey,
   phaseKey,
 }: InspectorProps & { moduleKey: string; phaseKey: string }) {
-  const module = state.draft.modules.find(
-    (candidate) => candidate.clientKey === moduleKey,
-  );
-  const phase = module?.phases.find(
-    (candidate) => candidate.clientKey === phaseKey,
-  );
-  if (phase === undefined) return null;
-  const moduleIndex = state.draft.modules.findIndex(
-    (candidate) => candidate.clientKey === moduleKey,
-  );
-  const phaseIndex =
-    module?.phases.findIndex((candidate) => candidate.clientKey === phaseKey) ??
-    -1;
-  const pointer = `/modules/${moduleIndex}/phases/${phaseIndex}`;
-  const update = (
-    change: Partial<
-      Pick<
-        AuthorPhase,
-        "id" | "title" | "kind" | "teacher_mode" | "completion" | "capabilities"
-      >
-    >,
-  ) => dispatch({ type: "phase.update", moduleKey, phaseKey, patch: change });
+  const mi = state.draft.modules.findIndex((m) => m.clientKey === moduleKey);
+  const pi =
+    state.draft.modules[mi]?.phases.findIndex(
+      (p) => p.clientKey === phaseKey,
+    ) ?? -1;
+  const phase = state.draft.modules[mi]?.phases[pi];
+  if (!phase) return null;
   return (
-    <fieldset>
-      <legend>Phase</legend>
-      <label>
-        Phase ID
-        <input
-          id={pointerToControlId(`${pointer}/id`)}
-          value={phase.id}
-          onChange={(event) => update({ id: text(event) })}
-        />
-      </label>
-      <label>
-        Phase title
-        <input
-          id={pointerToControlId(`${pointer}/title`)}
-          value={phase.title}
-          onChange={(event) => update({ title: text(event) })}
-        />
-      </label>
-      <label>
-        Phase kind
-        <select
-          id={pointerToControlId(`${pointer}/kind`)}
-          value={phase.kind}
-          onChange={(event) =>
-            update({ kind: text(event) as AuthorPhase["kind"] })
-          }
-        >
-          {kinds.map((kind) => (
-            <option key={kind} value={kind}>
-              {kind}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Teacher mode
-        <select
-          id={pointerToControlId(`${pointer}/teacher_mode`)}
-          value={phase.teacher_mode}
-          onChange={(event) =>
-            update({ teacher_mode: text(event) as AuthorPhase["teacher_mode"] })
-          }
-        >
-          {modes.map((mode) => (
-            <option key={mode} value={mode}>
-              {mode}
-            </option>
-          ))}
-        </select>
-      </label>
-      <CapabilitiesFields
-        phase={phase}
-        pointer={`${pointer}/capabilities`}
-        change={(capabilities) =>
-          update({ capabilities: { ...phase.capabilities, ...capabilities } })
-        }
-      />
-      <CompletionFields
-        completion={phase.completion}
-        pointer={`${pointer}/completion`}
-        change={(completion) => update({ completion })}
-      />
-    </fieldset>
-  );
-}
-function changedSurface(
-  type: AuthorSurface["type"],
-  surface: DraftSurface,
-): AuthorSurface {
-  const common = { id: surface.id, type, role: surface.role } as const;
-  switch (type) {
-    case "html":
-    case "markdown":
-    case "source":
-      return { ...common, type, path: "content.md" };
-    case "notebook":
-      return { ...common, type, path: "notebook.ipynb" };
-    case "video":
-      return { ...common, type, path: "video.mp4" };
-    case "terminal":
-      return { ...common, type, label: "Command", argv: ["command"], cwd: "." };
-    case "external":
-      return { ...common, type, url: "https://example.test/" };
-  }
-}
-function SurfaceFields({
-  surface,
-  update,
-  replace,
-  pointer,
-}: {
-  surface: DraftSurface;
-  update(patch: Record<string, unknown>): void;
-  replace(surface: AuthorSurface): void;
-  pointer: string;
-}) {
-  const id = (field: string) => pointerToControlId(`${pointer}/${field}`);
-  const common = (
-    <>
-      <label>
-        Surface ID
-        <input
-          id={id("id")}
-          value={surface.id}
-          onChange={(event) => update({ id: text(event) })}
-        />
-      </label>
-      <label>
-        Surface type
-        <select
-          id={id("type")}
-          value={surface.type}
-          onChange={(event) =>
-            replace(
-              changedSurface(text(event) as AuthorSurface["type"], surface),
-            )
-          }
-        >
-          {surfaceTypes.map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Surface role
-        <select
-          id={id("role")}
-          value={surface.role}
-          onChange={(event) => update({ role: text(event) })}
-        >
-          {roles.map((role) => (
-            <option key={role} value={role}>
-              {role}
-            </option>
-          ))}
-        </select>
-      </label>
-    </>
-  );
-  if (
-    surface.type === "html" ||
-    surface.type === "markdown" ||
-    surface.type === "source"
-  )
-    return (
-      <>
-        {common}
-        <label>
-          Path
-          <input
-            id={id("path")}
-            value={surface.path}
-            onChange={(event) => update({ path: text(event) })}
-          />
-        </label>
-      </>
-    );
-  if (surface.type === "notebook") {
-    const updateMatch = (field: "cell_ids" | "cell_tags", values: string[]) => {
-      const other =
-        field === "cell_ids"
-          ? surface.match?.cell_tags === undefined
-            ? {}
-            : { cell_tags: surface.match.cell_tags }
-          : surface.match?.cell_ids === undefined
-            ? {}
-            : { cell_ids: surface.match.cell_ids };
-      const match = {
-        ...other,
-        ...(values.length === 0 ? {} : { [field]: values }),
-      };
-      update({ match: Object.keys(match).length === 0 ? undefined : match });
-    };
-    return (
-      <>
-        {common}
-        <label>
-          Path
-          <input
-            id={id("path")}
-            value={surface.path}
-            onChange={(event) => update({ path: text(event) })}
-          />
-        </label>
-        <ArrayFields
-          label="Cell IDs"
-          itemLabel="Cell ID"
-          values={surface.match?.cell_ids ?? []}
-          pointer={`${pointer}/match/cell_ids`}
-          onChange={(cell_ids) => updateMatch("cell_ids", cell_ids)}
-        />
-        <ArrayFields
-          label="Cell tags"
-          itemLabel="Cell tag"
-          values={surface.match?.cell_tags ?? []}
-          pointer={`${pointer}/match/cell_tags`}
-          onChange={(cell_tags) => updateMatch("cell_tags", cell_tags)}
-        />
-      </>
-    );
-  }
-  if (surface.type === "terminal")
-    return (
-      <>
-        {common}
-        <label>
-          Terminal label
-          <input
-            id={id("label")}
-            value={surface.label}
-            onChange={(event) => update({ label: text(event) })}
-          />
-        </label>
-        <ArrayFields
-          label="Arguments"
-          itemLabel="Argument"
-          values={surface.argv}
-          pointer={`${pointer}/argv`}
-          onChange={(argv) => update({ argv })}
-        />
-        <label>
-          Working directory
-          <input
-            id={id("cwd")}
-            value={surface.cwd}
-            onChange={(event) => update({ cwd: text(event) })}
-          />
-        </label>
-      </>
-    );
-  if (surface.type === "external")
-    return (
-      <>
-        {common}
-        <label>
-          External URL
-          <input
-            id={id("url")}
-            value={surface.url}
-            onChange={(event) => update({ url: text(event) })}
-          />
-        </label>
-      </>
-    );
-  const video = surface as Extract<DraftSurface, { type: "video" }>;
-  const remote = "url" in video;
-  return (
-    <>
-      {common}
-      <label>
-        Video location
-        <select
-          id={id("location")}
-          value={remote ? "remote" : "local"}
-          onChange={(event) =>
-            replace(
-              text(event) === "remote"
-                ? {
-                    id: video.id,
-                    type: "video",
-                    role: video.role,
-                    url: "https://example.test/video.mp4",
-                  }
-                : {
-                    id: video.id,
-                    type: "video",
-                    role: video.role,
-                    path: "video.mp4",
-                  },
-            )
-          }
-        >
-          <option value="local">local</option>
-          <option value="remote">remote</option>
-        </select>
-      </label>
-      {remote ? (
-        <label>
-          Video URL
-          <input
-            id={id("url")}
-            value={video.url}
-            onChange={(event) => update({ url: text(event) })}
-          />
-        </label>
-      ) : (
-        <label>
-          Path
-          <input
-            id={id("path")}
-            value={video.path}
-            onChange={(event) => update({ path: text(event) })}
-          />
-        </label>
-      )}
-      <label>
-        Start seconds
-        <input
-          id={id("start_seconds")}
-          type="number"
-          value={video.start_seconds ?? ""}
-          onChange={(event) => {
-            const value = text(event);
-            update({ start_seconds: value === "" ? undefined : Number(value) });
-          }}
-        />
-      </label>
-      <label>
-        End seconds
-        <input
-          id={id("end_seconds")}
-          type="number"
-          value={video.end_seconds ?? ""}
-          onChange={(event) => {
-            const value = text(event);
-            update({ end_seconds: value === "" ? undefined : Number(value) });
-          }}
-        />
-      </label>
-    </>
+    <PhaseFields
+      phase={phase}
+      pointer={`/modules/${mi}/phases/${pi}`}
+      update={(patch) =>
+        dispatch({ type: "phase.update", moduleKey, phaseKey, patch })
+      }
+    />
   );
 }
 function SurfaceInspector({
@@ -857,7 +337,12 @@ function SurfaceInspector({
       (candidate) => candidate.clientKey === surfaceKey,
     ) ?? -1;
   return (
-    <fieldset>
+    <fieldset
+      id={pointerToControlId(
+        `/modules/${moduleIndex}/phases/${phaseIndex}/surfaces/${surfaceIndex}`,
+      )}
+      tabIndex={-1}
+    >
       <legend>Surface</legend>
       <SurfaceFields
         surface={surface}

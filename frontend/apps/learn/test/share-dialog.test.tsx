@@ -10,7 +10,7 @@ describe('ShareDialog', () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined);
     render(<ShareDialog maxChars={4} allowedKinds={['text']} onCancel={vi.fn()} onConfirm={onConfirm} />);
     expect(screen.getByText(/one run only/i)).toBeInTheDocument();
-    expect(screen.getByText(/not saved to conversation history or proposals/i)).toBeInTheDocument();
+    expect(screen.getByText(/excludes it from server conversation replay and saved proposals/i)).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Share content'), { target: { value: 'secret' } });
     expect(screen.getByText('6 / 4 characters')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Share and ask' })).toBeDisabled();
@@ -22,7 +22,7 @@ describe('ShareDialog', () => {
   it('uses a modal consent dialog, focuses its first control, escapes, and counts Unicode code points', () => {
     const cancel = vi.fn();
     render(<ShareDialog maxChars={1} allowedKinds={['text']} onCancel={cancel} onConfirm={vi.fn()} />);
-    const dialog = screen.getByRole('dialog', { name: 'Share with teacher' });
+    const dialog = screen.getByRole('dialog', { name: 'Share with Course assistant' });
     expect(dialog).toHaveAttribute('aria-modal', 'true');
     expect(dialog).toHaveAttribute('aria-describedby');
     expect(screen.getByLabelText('Share kind')).toHaveFocus();

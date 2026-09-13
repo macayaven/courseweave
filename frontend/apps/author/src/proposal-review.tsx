@@ -15,7 +15,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function manifestPayload(proposal: Proposal): Record<string, unknown> | null {
   const manifest = proposal.payload.manifest;
-  return isRecord(manifest) && manifest.schema_version === 1 && Array.isArray(manifest.modules) ? manifest : null;
+  return isRecord(manifest) && manifest.schema_version === 2 && Array.isArray(manifest.modules) ? manifest : null;
 }
 
 function validHash(hash: unknown): hash is string | null {

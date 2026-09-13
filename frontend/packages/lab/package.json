@@ -1,6 +1,6 @@
 {
   "name": "@courseweave/lab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "CourseWeave JupyterLab prebuilt bridge: one sandboxed guide iframe, no React.",
   "keywords": [
@@ -13,9 +13,9 @@
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -b .",
-    "build:lib": "tsc -b .",
+    "build:lib": "tsc -b . --force",
     "build:labextension": "uv run --frozen jupyter-builder build .",
-    "build": "tsc -b . && uv run --frozen jupyter-builder build ."
+    "build": "pnpm run build:lib && uv run --frozen jupyter-builder build ."
   },
   "dependencies": {
     "@jupyterlab/application": "~4.6.3",

@@ -1,10 +1,11 @@
-import { access, chmod, lstat, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { scanFiles } from './credential-scan';
+import { access, chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer, type Socket } from 'node:net';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { OwnedProcessTracker, stopOwnedProcess } from './process-cleanup';
@@ -28,39 +29,32 @@ function runtimeEnvironment(
   };
 }
 
-function capabilities() {
-  return {
-    chat: false, hint_level: 'none', share_selection: false, share_cell: false,
-    share_output: false, create_profile_proposal: false,
-    create_course_proposal: false, create_workspace_proposal: false,
-  };
-}
-
-/** A schema-v1 fixture owned exclusively by this installed-wheel smoke. */
+/** A schema-v2 fixture owned exclusively by this installed-wheel smoke. */
 export async function makeRichCourse(root: string): Promise<void> {
   await mkdir(join(root, 'lessons'), { recursive: true });
   await mkdir(join(root, 'notebooks'), { recursive: true });
   await mkdir(join(root, 'source'), { recursive: true });
   await writeFile(join(root, 'lesson.md'), '# Installed markdown\n', 'utf8');
-  await writeFile(join(root, 'lessons', 'reader.html'), '<!doctype html><title>Installed reader</title><p>Reader fixture</p>', 'utf8');
-  await writeFile(join(root, 'notebooks', 'lab.ipynb'), JSON.stringify({ cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 }), 'utf8');
+  await writeFile(join(root, 'lessons', 'reader.html'), '<!doctype html><title>Installed reader</title><p>Reader fixture</p><script>window.courseweaveReaderScriptRan=true</script>', 'utf8');
+  await writeFile(join(root, 'notebooks', 'lab.ipynb'), JSON.stringify({ cells: [{id:'practice',cell_type:'markdown',metadata:{},source:['# Installed notebook practice\n']}], metadata: {}, nbformat: 4, nbformat_minor: 5 }), 'utf8');
   await writeFile(join(root, 'source', 'exercise.py'), 'print("fixture source")\n', 'utf8');
   const sentinel = 'terminal-argv-must-not-run';
   const surfaces = [
-    { id: 'markdown', type: 'markdown', role: 'primary', path: 'lesson.md' },
-    { id: 'html', type: 'html', role: 'reference', path: 'lessons/reader.html' },
-    { id: 'video', type: 'video', role: 'reference', url: 'https://video.example.test/video.mp4' },
-    { id: 'notebook', type: 'notebook', role: 'exercise', path: 'notebooks/lab.ipynb' },
-    { id: 'source', type: 'source', role: 'exercise', path: 'source/exercise.py' },
-    { id: 'terminal', type: 'terminal', role: 'exercise', cwd: '.', argv: ['/usr/bin/touch', sentinel], label: 'Terminal instructions' },
+    { id: 'markdown', label: 'markdown', type: 'markdown', purpose: 'primary', path: 'lesson.md' },
+    { id: 'html', label: 'html', type: 'html', purpose: 'reference', path: 'lessons/reader.html' },
+    { id: 'video', label: 'video', type: 'video', purpose: 'reference', src: 'https://video.example.test/video.mp4' },
+    { id: 'notebook', label: 'notebook', selector: {type:'whole_notebook'}, type: 'notebook', purpose: 'supporting', path: 'notebooks/lab.ipynb' },
+    { id: 'source', label: 'source', type: 'source', purpose: 'supporting', path: 'source/exercise.py' },
+    { id: 'terminal', type: 'terminal', purpose: 'supporting', cwd: '.', command: ['/usr/bin/touch', sentinel], label: 'Terminal instructions' },
   ];
   await writeFile(join(root, 'courseweave.json'), `${JSON.stringify({
-    schema_version: 1, id: 'installed-wheel-rich-course', title: 'Installed wheel rich course',
+    schema_version: 2, id: 'installed-wheel-rich-course', title: 'Installed wheel rich course',
     description: 'Ephemeral installed-wheel integration fixture.', entry_module_id: 'module',
-    policies: { content_sharing: 'explicit_only', durable_mutation: 'proposal_or_direct_student_action', terminal_execution: 'student_only', conversation_memory: 'session_only', max_shared_chars: 8192, workspace_write_globs: [] },
+    runtime: {type:'jupyter',kernel:{type:'python_uv_project'}},
+    policies: { allowed_share_kinds: [], allowed_proposal_types: [], content_sharing: 'explicit_only', durable_mutation: 'proposal_or_direct_student_action', terminal_execution: 'student_only', conversation_memory: 'session_only', max_shared_chars: 8192, workspace_write_globs: [] },
     modules: [{ id: 'module', title: 'Installed module', description: '', phases: [{
-      id: 'phase', title: 'Installed phase', kind: 'read', teacher_mode: 'reading_companion',
-      surfaces, completion: { type: 'manual' }, capabilities: capabilities(),
+      id: 'phase', title: 'Installed phase', progress: 'required', experience: {type:'builtin',id:'reading'},
+      surfaces, completion: {requirements:[{id:'acknowledgement',type:'learner_record',record_kind:'attestation',prompt:'Confirm completion of Installed phase.'}]}, teacher:{access:{mode:'disabled',requires:[]},guidance:{style:{type:'builtin',id:'explanatory'},hint_level:'none'},sharing:{allow:[]},proposals:{allow:[]}},
     }] }],
   }, null, 2)}\n`, 'utf8');
 }
@@ -403,36 +397,6 @@ export async function failingBootstrapProxy(secretToken: string): Promise<{ url:
   return { url: proxy.url, close: proxy.close };
 }
 
-async function scanFiles(root: string, credentials: readonly string[]): Promise<number> {
-  const needles = credentials.filter((credential) => credential.length > 0).map((credential) => Buffer.from(credential));
-  let files = 0;
-  let names: string[];
-  try { names = await readdir(root, { recursive: true }); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
-    throw error;
-  }
-  let cursor = 0;
-  const worker = async () => {
-    while (cursor < names.length) {
-      const name = names[cursor++];
-      if (name === undefined) return;
-      const path = join(root, name);
-      try {
-        if (!(await lstat(path)).isFile()) continue;
-        files += 1;
-        const bytes = await readFile(path);
-        if (needles.some((needle) => bytes.includes(needle))) {
-          throw new Error('Installed-wheel credential scan found a retained credential.');
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(8, names.length) }, worker));
-  return files;
-}
 
 export type CredentialAuditInput = {
   capabilityToken: string;
@@ -453,6 +417,8 @@ function assertNoNode(venv: string): void {
 export async function launchInstalledWorkspace(mode: LaunchMode, options: {
   emptyCourse?: boolean;
   courseRoot?: string;
+  stateDir?: string;
+  kernelPython?: string;
   providerEnvironment?: Record<string, string>;
   terminalCommandCanary?: { executable: string; markerName: string };
   shutdownCredentialCanary?: { value: string; fileName: string };
@@ -476,7 +442,16 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: {
     await mkdir(join(owned, 'tmp'));
     if (options.courseRoot === undefined && !options.emptyCourse) await makeRichCourse(courseRoot);
     await mkdir(wheelRoot);
-    setupOutput += await run('uv', ['build', '--wheel', '--out-dir', wheelRoot], { cwd: repoRoot });
+    const selectedWheel = process.env.COURSEWEAVE_TEST_WHEEL;
+    if (selectedWheel) {
+      const bytes = await readFile(selectedWheel);
+      if (createHash('sha256').update(bytes).digest('hex') !== process.env.COURSEWEAVE_TEST_WHEEL_SHA256) {
+        throw new Error('Selected installed acceptance wheel does not match its required SHA256.');
+      }
+      await writeFile(join(wheelRoot, basename(selectedWheel)), bytes);
+    } else {
+      setupOutput += await run('uv', ['build', '--wheel', '--out-dir', wheelRoot], { cwd: repoRoot });
+    }
     const wheelName = (await readdir(wheelRoot)).find((entry) => entry.endsWith('.whl'));
     if (wheelName === undefined) throw new Error('Fresh wheel build produced no wheel.');
     setupOutput += await run('uv', ['venv', '--python', '3.11', venv]);
@@ -503,7 +478,9 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: {
     await writeFile(browserHelper, `#!${join(venv, 'bin', 'python')}\nimport os, socket, sys\ns = socket.socket(socket.AF_UNIX)\ns.connect(os.environ['COURSEWEAVE_TEST_BOOTSTRAP_SOCKET'])\ns.sendall(sys.argv[-1].encode('utf-8'))\ns.close()\n`, 'utf8');
     await chmod(browserHelper, 0o700);
     const port = await availablePort();
-    launchProcess = spawn(join(venv, 'bin', 'courseweave'), [mode === 'learn' ? 'launch' : 'author', '--course-root', courseRoot, '--port', String(port)], { env: environment, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const stateDir = options.stateDir ?? join(owned, 'state');
+    const kernelArgs = options.kernelPython ? ['--kernel-python', options.kernelPython] : [];
+    launchProcess = spawn(join(venv, 'bin', 'courseweave'), [mode === 'learn' ? 'launch' : 'author', '--course-root', courseRoot, '--state-dir', stateDir, '--port', String(port), ...kernelArgs], { env: environment, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     const child = launchProcess;
     if (child.pid === undefined) throw new Error('Installed CourseWeave supervisor did not start.');
     launchTracker = new OwnedProcessTracker(child.pid);
@@ -564,7 +541,7 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: {
       if (input.pageConfig.token !== jupyterToken) throw new Error('Installed-wheel PageConfig did not contain the expected standard Jupyter token.');
       if (JSON.stringify(input.pageConfig).includes(input.capabilityToken)) throw new Error('CourseWeave capability entered PageConfig.');
       const configuredCanaries = Object.entries(options.providerEnvironment ?? {})
-        .filter(([name]) => name.endsWith('_API_KEY'))
+        .filter(([name]) => name.endsWith('_API_KEY') || name === 'AGENT_KB_LITELLM_KEY')
         .map(([, value]) => value);
       const shutdownCanaries = options.shutdownCredentialCanary === undefined ? [] : [options.shutdownCredentialCanary.value];
       const forbidden = [jupyterToken, input.capabilityToken, ...configuredCanaries, ...shutdownCanaries];
@@ -573,6 +550,7 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: {
       }
       let filesScanned = await scanFiles(owned, forbidden);
       if (options.courseRoot !== undefined) filesScanned += await scanFiles(courseRoot, forbidden);
+      if (options.stateDir !== undefined) filesScanned += await scanFiles(options.stateDir, forbidden);
       for (const root of input.artifactRoots ?? []) filesScanned += await scanFiles(root, forbidden);
       return { filesScanned, retainedCredentials: 0 };
     };
@@ -607,6 +585,8 @@ export async function launchInstalledWorkspace(mode: LaunchMode, options: {
       return closePromise;
     };
     return {
+      installedPython: join(venv, 'bin', 'python'),
+      stateDir,
       baseUrl: `http://127.0.0.1:${port}/courseweave/`,
       bootstrapUrl: () => bootstrapProxy!.url,
       jupyterBaseUrl: async () => {

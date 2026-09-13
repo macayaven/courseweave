@@ -2,7 +2,10 @@
 name = "courseweave"
 dynamic = ["version"]
 description = "Local-first course platform with a phase-aware JupyterLab learner guide"
+readme = "README.md"
 requires-python = ">=3.11"
+license = "LicenseRef-PolyForm-Shield-1.0.0"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 dependencies = [
     "fastapi==0.141.1",
     "uvicorn==0.52.4",
@@ -11,6 +14,12 @@ dependencies = [
     "pydantic-ai-slim[ag-ui,openai,anthropic]==2.37.0",
     "jsonschema==4.26.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/macayaven/courseweave"
+Documentation = "https://github.com/macayaven/courseweave#readme"
+Repository = "https://github.com/macayaven/courseweave"
+Issues = "https://github.com/macayaven/courseweave/issues"
 
 [project.scripts]
 courseweave = "courseweave.cli:app"
@@ -37,14 +46,14 @@ packages = ["src/courseweave"]
 "src/courseweave/labextension" = "share/jupyter/labextensions/@courseweave/lab"
 
 [tool.hatch.build.targets.sdist]
+skip-excluded-dirs = true
 include = [
-    "/src",
-    "/tests",
-    "/frontend/package.json",
-    "/frontend/pnpm-workspace.yaml",
-    "/frontend/pnpm-lock.yaml",
-    "/frontend/packages/lab",
+    "/src", "/tests", "/frontend", "/examples", "/uv.lock", "/README.md",
+    "/CHANGELOG.md", "/CONTRIBUTING.md", "/SECURITY.md", "/AGENTS.md",
+    "/LICENSE", "/THIRD_PARTY_LICENSES.md",
+    "/.github", "/docs", "/scripts",
 ]
+exclude = ["/frontend/**/node_modules", "/frontend/test-results", "/frontend/playwright-report", "/frontend/**/.vite", "/frontend/packages/lab/lib", "**/*.tsbuildinfo"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

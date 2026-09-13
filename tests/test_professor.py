@@ -7,6 +7,7 @@ the external-model boundary; policy and proposal assertions use real objects.
 
 from __future__ import annotations
 
+
 import asyncio
 from pathlib import Path
 
@@ -51,62 +52,64 @@ def manifest_for(
     course: bool = False,
     workspace: bool = False,
 ) -> CourseManifest:
-    return CourseManifest.model_validate(
-        {
-            "schema_version": 1,
-            "id": "demo-course",
-            "title": "Demo course",
-            "description": "",
-            "entry_module_id": "module-one",
-            "policies": {
-                "content_sharing": "explicit_only",
-                "durable_mutation": "proposal_or_direct_student_action",
-                "terminal_execution": "student_only",
-                "conversation_memory": "session_only",
-                "max_shared_chars": 8192,
-                "workspace_write_globs": ["notes/*.md"],
-            },
-            "modules": [
-                {
-                    "id": "module-one",
-                    "title": "Module one",
-                    "description": "",
-                    "phases": [
-                        {
-                            "id": "phase-one",
-                            "title": "Phase one",
-                            "kind": kind,
-                            "teacher_mode": teacher_mode,
-                            "surfaces": [
-                                {
-                                    "id": "lesson",
-                                    "type": "markdown",
-                                    "role": "primary",
-                                    "path": "lesson.md",
-                                }
-                            ],
-                            "completion": {
-                                "type": "prediction_recorded",
-                                "record_id": "prediction-one",
-                            }
-                            if kind == "predict"
-                            else {"type": "manual"},
-                            "capabilities": {
-                                "chat": chat,
-                                "hint_level": hint_level,
-                                "share_selection": False,
-                                "share_cell": False,
-                                "share_output": False,
-                                "create_profile_proposal": profile,
-                                "create_course_proposal": course,
-                                "create_workspace_proposal": workspace,
-                            },
-                        }
-                    ],
-                }
-            ],
-        }
-    )
+    data = {'schema_version': 2,
+     'id': 'demo-course',
+     'title': 'Demo course',
+     'description': '',
+     'entry_module_id': 'module-one',
+     'policies': {'content_sharing': 'explicit_only',
+                  'allowed_share_kinds': [],
+                  'max_shared_chars': 8192,
+                  'allowed_proposal_types': [],
+                  'durable_mutation': 'proposal_or_direct_student_action',
+                  'terminal_execution': 'student_only',
+                  'conversation_memory': 'session_only',
+                  'workspace_write_globs': ['notes/*.md']},
+     'modules': [{'id': 'module-one',
+                  'title': 'Module one',
+                  'description': '',
+                  'phases': [{'id': 'phase-one',
+                              'title': 'Phase one',
+                              'progress': 'required',
+                              'experience': {'type': 'builtin', 'id': 'reading'},
+                              'surfaces': [{'id': 'lesson',
+                                            'purpose': 'primary',
+                                            'type': 'markdown',
+                                            'label': 'lesson',
+                                            'path': 'lesson.md'}],
+                              'completion': {'requirements': [{'id': 'acknowledgement',
+                                                               'type': 'learner_record',
+                                                               'record_kind': 'attestation',
+                                                               'prompt': 'Confirm completion of Phase '
+                                                                         'one.'}]},
+                              'teacher': {'access': {'mode': 'available', 'requires': []},
+                                          'guidance': {'style': {'type': 'builtin',
+                                                                 'id': 'explanatory'},
+                                                       'hint_level': 'graduated'},
+                                          'sharing': {'allow': []},
+                                          'proposals': {'allow': []}}}]}]}
+    phase = data['modules'][0]['phases'][0]
+    phase['experience']['id'] = {'orient':'orientation','read':'reading','watch':'media','predict':'prediction','experiment':'experiment','lab':'practice','review':'review','audit':'review','ship':'project'}[kind]
+    phase['teacher']['access'] = {'mode':'disabled' if not chat else 'observer_only' if teacher_mode == 'observer' else 'available', 'requires':['prediction-one'] if kind == 'predict' and chat and teacher_mode != 'observer' else []}
+    if kind == 'predict':
+        phase['completion'] = {'requirements':[{'id':'prediction-one','type':'learner_record','record_kind':'text','prompt':'Record your prediction.'}]}
+    guidance = {
+        'orient':'Establish the goal, prior experience, and available time without persisting assumptions.',
+        'read':'Explain selected text, connect concepts, and cite the local section.',
+        'watch':'Clarify the current timestamp and connect it to canonical text.',
+        'predict':'Withhold results and solutions until the learner records a prediction.',
+        'experiment':'Interpret outputs and offer a graduated hint ladder.',
+        'lab':'Protect learner ownership: diagnose and review before proposing edits.',
+        'review':'Ask for restatement and compare evidence to claims.',
+        'audit':'Observe the audit without providing substantive help.',
+        'ship':'Present named verification and learner-recorded receipts without inflating claims.'}
+    phase['teacher']['guidance']['text'] = guidance[kind]
+    phase['teacher']['guidance']['hint_level'] = hint_level
+    proposals = [name for name, allowed in [('profile',profile),('course',course),('workspace',workspace)]] if chat and teacher_mode != 'observer' else []
+    proposals = [name for name in proposals if {'profile':profile,'course':course,'workspace':workspace}[name]]
+    phase['teacher']['proposals']['allow'] = proposals
+    data['policies']['allowed_proposal_types'] = proposals
+    return CourseManifest.model_validate(data)
 
 
 def resolved() -> ResolvedContext:
@@ -145,7 +148,7 @@ def test_policy_uses_the_required_posture_for_each_phase(kind: str, posture: str
 
     policy = build_professor_policy(manifest_for(kind), resolved(), LearnerState(), "learner")
 
-    assert policy.phase_kind == kind
+    assert policy.phase_kind == manifest_for(kind).modules[0].phases[0].experience.id
     assert policy.posture == posture
     assert posture in policy.instructions
 
@@ -209,7 +212,7 @@ def test_prediction_gate_requires_the_exact_prediction_record_before_model_call(
     outcome = professor.respond_sync("What is the result?")
 
     assert outcome.status == "blocked"
-    assert outcome.content == PREDICTION_REQUIRED_MESSAGE
+    assert outcome.content == PREDICTION_REQUIRED_MESSAGE + " Record your prediction."
     assert model.calls == 0
 
 
@@ -218,17 +221,11 @@ def test_prediction_gate_opens_after_the_exact_prediction_record_exists() -> Non
     from courseweave.professor import ProfessorService
 
     model = CountingTestModel(custom_output_text="model answer")
-    state = LearnerState(
-        predictions={
-            "module-one/phase-one/prediction-one": {
-                "type": "record_prediction",
-                "module_id": "module-one",
-                "phase_id": "phase-one",
-                "record_id": "prediction-one",
-                "text": "I predict a pass.",
-            }
-        }
-    )
+    from courseweave.engine import bind_record
+    from courseweave.contracts.records import Coordinate
+    state = LearnerState(records=(bind_record(manifest_for('predict', teacher_mode='socratic_guide'),
+        Coordinate(module_id='module-one',phase_id='phase-one',requirement_id='prediction-one'),
+        {'text':'I predict a pass.'}),))
     professor = ProfessorService(
         manifest_for("predict", teacher_mode="socratic_guide"), resolved(), state, "learner",
         ProviderConfig(provider="openai", model="local", api_key="not-a-secret"),
@@ -245,8 +242,8 @@ def test_prediction_gate_opens_after_the_exact_prediction_record_exists() -> Non
 @pytest.mark.parametrize(
     ("prompt", "allowed"),
     [
-        ("Hello", True),
-        ("Thanks!", True),
+        ("Hello", False),
+        ("Thanks!", False),
         ("Where do I record my prediction?", False),
         ("How do I submit a prediction?", False),
         ("I predict the loop will stop.", False),
@@ -287,7 +284,7 @@ def test_prediction_gate_blocks_every_substantive_request_before_the_exact_recor
         assert model.calls == 1
     else:
         assert outcome.status == "blocked"
-        assert outcome.content == PREDICTION_REQUIRED_MESSAGE
+        assert outcome.content == PREDICTION_REQUIRED_MESSAGE + " Record your prediction."
         assert model.calls == 0
 
 
@@ -316,8 +313,8 @@ def test_lab_policy_preserves_learner_ownership_and_hint_ladder() -> None:
     policy = build_professor_policy(manifest_for("lab", teacher_mode="debugging_coach"), resolved(), LearnerState(), "learner")
 
     assert "diagnose and review before proposing edits" in policy.instructions
-    assert "graduated hints" in policy.instructions
-    assert "never edit files or execute commands" in policy.instructions
+    assert "Hint level: graduated" in policy.instructions
+    assert "Never write files, execute commands" in policy.instructions
 
 
 def test_author_policy_is_curriculum_designer_and_only_exposes_manifest_proposals() -> None:
@@ -354,8 +351,8 @@ def test_empty_course_uses_general_policy_and_reports_missing_provider_without_c
     ("profile", "course", "workspace", "expected"),
     [
         (False, False, False, frozenset()),
-        (True, False, True, frozenset({"profile_patch", "workspace_file_replace"})),
-        (True, True, True, frozenset({"profile_patch", "manifest_replace", "workspace_file_replace"})),
+        (True, False, True, frozenset({"profile_patch"})),
+        (True, True, True, frozenset({"profile_patch", "manifest_replace"})),
     ],
 )
 def test_learner_proposal_types_follow_phase_capabilities_exactly(

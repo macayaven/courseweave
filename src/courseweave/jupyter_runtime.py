@@ -7,11 +7,16 @@ import ipaddress
 import json
 import os
 import re
+import stat
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 from urllib.parse import urlsplit
 
+from jupyter_client.kernelspec import KernelSpec, KernelSpecManager, NoSuchKernel
+from traitlets import Unicode
 from jupyter_server.base.handlers import APIHandler
+from jupyter_server.auth.decorator import authorized
 from jupyter_server.utils import url_path_join
 from pydantic import ValidationError
 from tornado import web
@@ -19,6 +24,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPRequest, HTTPResponse
 from tornado.httputil import HTTPHeaders
 
 from .models import WorkspaceContext
+from .reader import read_reader_file
 
 CONTEXT_BODY_LIMIT = 1024 * 1024
 _SETTINGS_KEY = "courseweave_runtime_settings"
@@ -41,6 +47,42 @@ _JSON_CONTENT_TYPE = re.compile(
 )
 _COURSE_ETAG = re.compile(r'(?:""|"[0-9a-f]{64}")')
 
+
+
+class CourseKernelSpecManager(KernelSpecManager):
+    """An explicit launch can see only its supervisor-owned course kernel.
+
+    Jupyter Client's kernel_dirs trait is deliberately not CLI-configurable.
+    Set the instance property through this narrow supported manager-class hook.
+    """
+    course_kernel_dir = Unicode(config=True)
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        root = Path(self.course_kernel_dir)
+        if not self.course_kernel_dir or not root.is_absolute():
+            raise ValueError("A private owned course kernel directory is required")
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            metadata = os.fstat(fd)
+            if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o700:
+                raise ValueError("A private owned course kernel directory is required")
+        finally:
+            os.close(fd)
+        self.kernel_dirs = [str(root)]
+        self.ensure_native_kernel = False
+        self.allowed_kernelspecs = {"python3"}
+
+    def get_kernel_spec(self, kernel_name: str) -> KernelSpec:
+        # The base implementation falls back to ipykernel RESOURCES even when
+        # ensure_native_kernel=False. Load only the owned spec through its public
+        # constructor, including when the requested name is the native python3.
+        if kernel_name != "python3":
+            raise NoSuchKernel(kernel_name)
+        try:
+            return self.kernel_spec_class.from_resource_dir(str(Path(self.course_kernel_dir) / "python3"))
+        except (OSError, ValueError):
+            raise NoSuchKernel(kernel_name) from None
 
 def _bounded_nonblank(value: str | None, maximum: int) -> bool:
     return (
@@ -248,6 +290,49 @@ class _CourseWeaveRelayHandler(APIHandler):
         self.finish(payload)
 
 
+class CourseWeaveReaderHandler(APIHandler):
+    """Authenticated, jailed course content with no executable document context.
+
+    Jupyter's generic /files CSP gives HTML an opaque origin. This separate
+    course-bound route keeps local image authentication and approved link
+    interception usable while both CSP and the embedding frame disable scripts.
+    """
+    auth_resource = "contents"
+
+    def initialize(self, course_root: str) -> None:
+        self.course_root = Path(course_root)
+
+    @property
+    def content_security_policy(self) -> str:
+        return ("default-src 'none'; frame-ancestors 'self'; sandbox allow-same-origin; "
+                "script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                "font-src 'self' data:; form-action 'none'; base-uri 'none'")
+
+    def set_cors_headers(self) -> None:
+        """Reader content is same-origin only."""
+
+    @web.authenticated
+    @authorized
+    def get(self, path: str, include_body: bool = True) -> None:
+        self.check_xsrf_cookie()
+        if self.request.query or self.request.body:
+            raise web.HTTPError(400, "Invalid reader request")
+        try:
+            data, media_type = read_reader_file(self.course_root, path)
+        except (OSError, ValueError, UnicodeError):
+            raise web.HTTPError(404, "Course reader content unavailable") from None
+        self.set_header("Cache-Control", "no-store")
+        self.set_header("X-Content-Type-Options", "nosniff")
+        self.set_header("Content-Type", media_type)
+        self.set_header("Content-Length", str(len(data)))
+        self.finish(data if include_body else b"", set_content_type=media_type)
+
+    @web.authenticated
+    @authorized
+    def head(self, path: str) -> None:
+        self.get(path, include_body=False)
+
+
 class CourseWeaveRuntimeHandler(_CourseWeaveRelayHandler):
     @web.authenticated
     async def get(self) -> None:
@@ -329,6 +414,12 @@ def _load_jupyter_server_extension(serverapp: Any) -> None:
     if any(key in os.environ for key in _SUPERVISED_ENVIRONMENT_KEYS):
         _guard_jupyter_runtime_files(serverapp)
     settings = RuntimeSettings.from_environ(os.environ)
+    if any(key in os.environ for key in _SUPERVISED_ENVIRONMENT_KEYS):
+        # IdentityProvider reads JUPYTER_TOKEN lazily. Capture it before clearing
+        # startup custody so authentication survives and new kernels inherit none.
+        _ = serverapp.identity_provider.token
+        for key in (*_SUPERVISED_ENVIRONMENT_KEYS, "JUPYTER_TOKEN"):
+            os.environ.pop(key, None)
     web_app = serverapp.web_app
     web_app.settings[_SETTINGS_KEY] = settings
     page_config = web_app.settings.setdefault("page_config_data", {})
@@ -350,4 +441,6 @@ def _load_jupyter_server_extension(serverapp: Any) -> None:
             CourseWeaveContextRelayHandler,
         ),
     ]
+    if settings is not None:
+        handlers.append((url_path_join(serverapp.base_url, "courseweave", "reader", "(.*)"), CourseWeaveReaderHandler, {"course_root": str(serverapp.root_dir)}))
     web_app.add_handlers(".*$", handlers)

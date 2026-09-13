@@ -1,15 +1,22 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "cli-course",
   "title": "CLI Course",
   "description": "A structurally distinct example with a display-only terminal surface.",
   "entry_module_id": "cli",
   "policies": {
     "content_sharing": "explicit_only",
+    "allowed_share_kinds": [
+      "output",
+      "selection"
+    ],
+    "max_shared_chars": 8192,
+    "allowed_proposal_types": [
+      "workspace"
+    ],
     "durable_mutation": "proposal_or_direct_student_action",
     "terminal_execution": "student_only",
     "conversation_memory": "session_only",
-    "max_shared_chars": 8192,
     "workspace_write_globs": []
   },
   "modules": [
@@ -21,42 +28,67 @@
         {
           "id": "read",
           "title": "Read the CLI lesson",
-          "kind": "read",
-          "teacher_mode": "reading_companion",
+          "progress": "required",
+          "experience": {
+            "type": "builtin",
+            "id": "reading"
+          },
           "surfaces": [
             {
               "id": "lesson",
+              "purpose": "primary",
               "type": "markdown",
-              "role": "primary",
+              "label": "lesson",
               "path": "lesson.md"
             }
           ],
           "completion": {
-            "type": "manual"
+            "requirements": [
+              {
+                "id": "acknowledgement",
+                "type": "learner_record",
+                "record_kind": "attestation",
+                "prompt": "Confirm completion of Read the CLI lesson."
+              }
+            ]
           },
-          "capabilities": {
-            "chat": true,
-            "hint_level": "gentle",
-            "share_selection": true,
-            "share_cell": false,
-            "share_output": false,
-            "create_profile_proposal": false,
-            "create_course_proposal": false,
-            "create_workspace_proposal": false
+          "teacher": {
+            "access": {
+              "mode": "available",
+              "requires": []
+            },
+            "guidance": {
+              "style": {
+                "type": "builtin",
+                "id": "explanatory"
+              },
+              "hint_level": "gentle"
+            },
+            "sharing": {
+              "allow": [
+                "selection"
+              ]
+            },
+            "proposals": {
+              "allow": []
+            }
           }
         },
         {
           "id": "run",
           "title": "Run the example command",
-          "kind": "lab",
-          "teacher_mode": "debugging_coach",
+          "progress": "required",
+          "experience": {
+            "type": "builtin",
+            "id": "practice"
+          },
           "surfaces": [
             {
               "id": "show-help",
+              "purpose": "supporting",
               "type": "terminal",
-              "role": "exercise",
               "label": "Show CourseWeave help",
-              "argv": [
+              "command": [
                 "courseweave",
                 "--help"
               ],
@@ -64,19 +96,37 @@
             }
           ],
           "completion": {
-            "type": "artifact_exists",
-            "record_id": "cli-note",
-            "path": "notes/cli-result.md"
+            "requirements": [
+              {
+                "id": "cli-note",
+                "type": "artifact_exists",
+                "prompt": "Create the artifact for Run the example command.",
+                "path": "notes/cli-result.md"
+              }
+            ]
           },
-          "capabilities": {
-            "chat": true,
-            "hint_level": "graduated",
-            "share_selection": false,
-            "share_cell": false,
-            "share_output": true,
-            "create_profile_proposal": false,
-            "create_course_proposal": false,
-            "create_workspace_proposal": true
+          "teacher": {
+            "access": {
+              "mode": "available",
+              "requires": []
+            },
+            "guidance": {
+              "style": {
+                "type": "builtin",
+                "id": "debugging"
+              },
+              "hint_level": "graduated"
+            },
+            "sharing": {
+              "allow": [
+                "output"
+              ]
+            },
+            "proposals": {
+              "allow": [
+                "workspace"
+              ]
+            }
           }
         }
       ]

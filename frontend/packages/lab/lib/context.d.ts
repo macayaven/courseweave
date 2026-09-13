@@ -40,7 +40,8 @@ interface ContextPublisherOptions {
     };
     childWindow: Window;
     serviceOrigin: string;
-    onRecovery?(reason: 'backend' | 'stale' | 'conflict'): void;
+    onRecovery?(reason: "backend" | "stale" | "conflict"): void;
+    onConfirmed?(): void;
 }
 export declare class ContextPublisher {
     private readonly options;
@@ -52,7 +53,7 @@ export declare class ContextPublisher {
     private childWindow;
     constructor(options: ContextPublisherOptions);
     publish(metadata: WorkspaceMetadata): Promise<void>;
-    retry(): Promise<void>;
+    retry(metadata?: WorkspaceMetadata): Promise<void>;
     setChildWindow(childWindow: Window): void;
     acceptedCoordinate(): {
         moduleId: string;
@@ -87,6 +88,7 @@ interface ContextObserverOptions {
     surfaceMetadata(widget: object | null): SurfaceMetadata | null;
     publisher: {
         publish(metadata: WorkspaceMetadata): Promise<void>;
+        retry?(metadata: WorkspaceMetadata): Promise<void>;
     };
 }
 export declare class ContextObserver {
@@ -94,6 +96,9 @@ export declare class ContextObserver {
     private started;
     private cellMetadata;
     constructor(options: ContextObserverOptions);
+    private currentMetadata;
+    publishCurrent(): Promise<void>;
+    retryCurrent(): Promise<void>;
     private readonly changed;
     private bindCellMetadata;
     private readonly activeCellChanged;

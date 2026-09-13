@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import hashlib
 import json
 import sqlite3
@@ -27,58 +28,59 @@ AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
 def _manifest_data(*, write_globs: list[str] | None = None) -> dict:
-    return {
-        "schema_version": 1,
-        "id": "store-course",
-        "title": "Store Course",
-        "description": "",
-        "entry_module_id": "module-one",
-        "policies": {
-            "content_sharing": "explicit_only",
-            "durable_mutation": "proposal_or_direct_student_action",
-            "terminal_execution": "student_only",
-            "conversation_memory": "session_only",
-            "max_shared_chars": 8192,
-            "workspace_write_globs": write_globs or ["work/*.txt"],
-        },
-        "modules": [
-            {
-                "id": "module-one",
-                "title": "Module One",
-                "description": "",
-                "phases": [
-                    {
-                        "id": "predict",
-                        "title": "Predict",
-                        "kind": "predict",
-                        "teacher_mode": "socratic_guide",
-                        "surfaces": [
-                            {
-                                "id": "lesson",
-                                "type": "markdown",
-                                "role": "primary",
-                                "path": "lesson.md",
-                            }
-                        ],
-                        "completion": {
-                            "type": "prediction_recorded",
-                            "record_id": "prediction-one",
-                        },
-                        "capabilities": {
-                            "chat": True,
-                            "hint_level": "gentle",
-                            "share_selection": True,
-                            "share_cell": False,
-                            "share_output": False,
-                            "create_profile_proposal": True,
-                            "create_course_proposal": True,
-                            "create_workspace_proposal": True,
-                        },
-                    }
-                ],
-            }
-        ],
-    }
+    data = {'schema_version': 2,
+     'id': 'store-course',
+     'title': 'Store Course',
+     'description': '',
+     'entry_module_id': 'module-one',
+     'policies': {'content_sharing': 'explicit_only',
+                  'allowed_share_kinds': ['selection'],
+                  'max_shared_chars': 8192,
+                  'allowed_proposal_types': ['course', 'profile', 'workspace'],
+                  'durable_mutation': 'proposal_or_direct_student_action',
+                  'terminal_execution': 'student_only',
+                  'conversation_memory': 'session_only',
+                  'workspace_write_globs': ['work/*.txt']},
+     'modules': [{'id': 'module-one',
+                  'title': 'Module One',
+                  'description': '',
+                  'phases': [{'id': 'predict',
+                              'title': 'Predict',
+                              'progress': 'required',
+                              'experience': {'type': 'builtin', 'id': 'prediction'},
+                              'surfaces': [{'id': 'lesson',
+                                            'purpose': 'primary',
+                                            'type': 'markdown',
+                                            'label': 'lesson',
+                                            'path': 'lesson.md'}],
+                              'completion': {'requirements': [{'id': 'prediction-one',
+                                                               'type': 'learner_record',
+                                                               'record_kind': 'text',
+                                                               'prompt': 'Record your prediction for '
+                                                                         'Predict.'},
+                                                              {'id': 'reflection-one',
+                                                               'type': 'learner_record',
+                                                               'record_kind': 'text',
+                                                               'prompt': 'Reflect on the result.'},
+                                                              {'id': 'receipt-one',
+                                                               'type': 'learner_record',
+                                                               'record_kind': 'evidence',
+                                                               'prompt': 'Record evidence.'},
+                                                              {'id': 'completion-one',
+                                                               'type': 'learner_record',
+                                                               'record_kind': 'attestation',
+                                                               'prompt': 'Acknowledge this '
+                                                                         'activity.'}]},
+                              'teacher': {'access': {'mode': 'available',
+                                                     'requires': ['prediction-one']},
+                                          'guidance': {'style': {'type': 'builtin', 'id': 'socratic'},
+                                                       'hint_level': 'gentle'},
+                                          'sharing': {'allow': ['selection']},
+                                          'proposals': {'allow': ['profile',
+                                                                  'course',
+                                                                  'workspace']}}}]}]}
+    data['policies']['workspace_write_globs'] = write_globs or ['work/*.txt']
+    return data
 
 
 @pytest.fixture
@@ -92,24 +94,19 @@ def course_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _prediction(text: str = "The loop keeps the state.") -> dict:
-    return {
-        "type": "record_prediction",
-        "module_id": "module-one",
-        "phase_id": "predict",
-        "record_id": "prediction-one",
-        "text": text,
-    }
+def _record(requirement_id, value):
+    from courseweave.contracts import CourseManifest
+    from courseweave.engine import curriculum_digest
+    return {'type':'put_record','coordinate':{'module_id':'module-one','phase_id':'predict','requirement_id':requirement_id},
+            'value':value, 'curriculum_digest':curriculum_digest(CourseManifest.model_validate(_manifest_data()))}
 
 
-def _reflection(text: str = "The API is stateless.") -> dict:
-    return {
-        "type": "record_reflection",
-        "module_id": "module-one",
-        "phase_id": "predict",
-        "record_id": "reflection-one",
-        "text": text,
-    }
+def _prediction(text: str = 'The loop keeps the state.') -> dict:
+    return _record('prediction-one', {'text':text})
+
+
+def _reflection(text: str = 'The API is stateless.') -> dict:
+    return _record('reflection-one', {'text':text})
 
 
 def _workspace_request(
@@ -138,17 +135,13 @@ class TestLearnerState:
     ) -> None:
         state = CourseStore(course_root).get_state()
         assert state.model_dump(mode="json") == {
-            "schema_version": 1,
-            "revision": 0,
-            "predictions": {},
-            "reflections": {},
-            "evidence": {},
-            "completed_phases": {},
-            "time_budget_minutes": None,
-            "profile": {},
-            "audit": [],
-        }
-        db = course_root / ".courseweave" / "courseweave.db"
+            'schema_version':2, 'course_id':'store-course',
+            'root_fingerprint':hashlib.sha256(str(course_root.resolve()).encode()).hexdigest(),
+            'revision':0, 'records':[], 'imports':[], 'attempts':[],
+            'preferences':{'enabled':False,'explanation':'balanced','practice':'standard'},
+            'time_budget_minutes':None, 'profile':{}, 'audit':[]}
+        db = CourseStore(course_root).db_path
+        assert not (course_root / '.courseweave').exists()
         assert db.is_file()
         db_text = db.read_bytes().lower()
         for forbidden in (b"active_path", b"chat_history", b"shared_excerpt"):
@@ -160,47 +153,35 @@ class TestLearnerState:
         store = CourseStore(course_root)
         state = store.apply_state(_prediction(), 0, "prediction-key")
         assert state.revision == 1
-        assert state.predictions["module-one/predict/prediction-one"]["text"].startswith(
+        assert state.records[0].value.text.startswith(
             "The loop"
         )
 
         state = store.apply_state(_reflection(), 1, "reflection-key")
         assert state.revision == 2
-        assert len(state.predictions) == 1
-        assert state.reflections["module-one/predict/reflection-one"]["text"].startswith(
+        assert len([r for r in state.records if r.coordinate.requirement_id == "prediction-one"]) == 1
+        assert state.records[1].value.text.startswith(
             "The API"
         )
 
         state = store.apply_state(
-            {
-                "type": "record_evidence",
-                "module_id": "module-one",
-                "phase_id": "predict",
-                "record_id": "receipt-one",
-                "reference": "work/result.txt",
-                "note": "Reopenable",
-            },
+            _record('receipt-one', {'references':[{'label':'Result','path':'work/result.txt'}],'note':'Reopenable'}),
             2,
             "evidence-key",
         )
         assert state.revision == 3
-        assert state.evidence["module-one/predict/receipt-one"]["reference"] == (
+        assert state.records[2].value.references[0].path == (
             "work/result.txt"
         )
 
         state = store.apply_state(
-            {
-                "type": "complete_phase",
-                "module_id": "module-one",
-                "phase_id": "predict",
-                "record_id": "completion-one",
-                "note": "Prediction recorded",
-            },
+            _record('completion-one', {'attested':True}),
             3,
             "complete-key",
         )
         assert state.revision == 4
-        assert "module-one/predict/completion-one" in state.completed_phases
+        assert state.records[3].coordinate.requirement_id == "completion-one"
+        assert state.records[3].value.attested
 
         state = store.apply_state(
             {"type": "set_time_budget", "minutes": 45},
@@ -217,8 +198,8 @@ class TestLearnerState:
         first = store.apply_state(_prediction("first"), 0, "first-key")
         second = store.apply_state(_prediction("second"), first.revision, "second-key")
         assert second.revision == 2
-        assert list(second.predictions) == ["module-one/predict/prediction-one"]
-        assert second.predictions["module-one/predict/prediction-one"]["text"] == "second"
+        assert [r.coordinate.requirement_id for r in second.records] == ["prediction-one"]
+        assert second.records[0].value.text == "second"
 
     def test_revision_and_idempotency_contract(self, course_root: Path) -> None:
         store = CourseStore(course_root)
@@ -264,7 +245,7 @@ class TestProposalLifecycle:
                 "origin": "teacher_suggested",
                 "summary": "Remember the preferred pace",
                 "target": "learner_profile",
-                "payload": {"changes": {"pace": "slow"}},
+                "payload": {"changes": {"explanation": "detailed"}},
                 "target_hash": None,
             },
             "create-profile",
@@ -276,7 +257,7 @@ class TestProposalLifecycle:
             1,
             {
                 "summary": "Remember the accepted pace",
-                "payload": {"changes": {"pace": "measured"}},
+                "payload": {"changes": {"explanation": "balanced"}},
             },
             "edit-profile",
         )
@@ -302,7 +283,7 @@ class TestProposalLifecycle:
             "origin": "teacher_suggested",
             "summary": "Remember preference",
             "target": "learner_profile",
-            "payload": {"changes": {"language": "English"}},
+            "payload": {"changes": {"practice": "extra"}},
             "target_hash": None,
         }
         created = store.create_proposal(request, "create-profile")
@@ -312,14 +293,16 @@ class TestProposalLifecycle:
             changed["summary"] = "Different"
             store.create_proposal(changed, "create-profile")
 
+        store.apply_state({"type":"set_preferences","preferences":{"enabled":True}}, 0, "consent")
         accepted = store.accept_proposal(
             "profile-one", 1, "accept-profile"
         )
         replay = store.accept_proposal("profile-one", 1, "accept-profile")
         assert replay == accepted
         state = store.get_state()
-        assert state.revision == 1
-        assert state.profile == {"language": "English"}
+        assert state.revision == 2
+        assert state.preferences.practice == "extra"
+        assert state.profile == {}
         assert len(state.audit) == 1
 
     def test_stale_and_missing_proposal_revisions_are_distinct(
@@ -333,7 +316,7 @@ class TestProposalLifecycle:
                 "origin": "teacher_suggested",
                 "summary": "Remember preference",
                 "target": "learner_profile",
-                "payload": {"changes": {"pace": "measured"}},
+                "payload": {"changes": {"explanation": "balanced"}},
                 "target_hash": None,
             },
             "create-profile",
@@ -348,26 +331,14 @@ class TestProposalLifecycle:
         with pytest.raises(ProposalNotFoundError):
             store.accept_proposal("missing", 1, "missing-accept")
 
-    def test_phase_record_accept_applies_exact_operation_once(
-        self, course_root: Path
-    ) -> None:
+    def test_model_phase_record_proposals_are_rejected_without_mutation(self, course_root):
         store = CourseStore(course_root)
-        store.create_proposal(
-            {
-                "id": "phase-one",
-                "type": "phase_record",
-                "origin": "teacher_suggested",
-                "summary": "Record the prediction",
-                "target": "learner_state",
-                "payload": {"operation": _prediction()},
-                "target_hash": None,
-            },
-            "create-phase",
-        )
-        store.accept_proposal("phase-one", 1, "accept-phase")
-        state = store.get_state()
-        assert state.revision == 1
-        assert state.predictions["module-one/predict/prediction-one"]["text"]
+        with pytest.raises(InvalidProposalError):
+            store.create_proposal({'id':'phase-one','type':'phase_record','origin':'teacher_suggested',
+                'summary':'Record prediction','target':'learner_state','payload':{'operation':_prediction()},'target_hash':None}, 'create-phase')
+        assert store.get_state().revision == 0
+        assert store.get_state().records == ()
+        assert store.list_proposals() == []
 
     @pytest.mark.parametrize(
         "changes",
@@ -468,7 +439,7 @@ class TestWorkspaceProposals:
 
 class TestManifestProposal:
     def test_missing_manifest_replace_can_edit_reject_then_accept_once(self, tmp_path: Path) -> None:
-        store = CourseStore(tmp_path)
+        store = CourseStore(tmp_path, course_id="store-course")
         initial = _manifest_data()
         initial["title"] = "Initial Course"
         request = {
@@ -609,19 +580,21 @@ class TestStateAndProposalAPI:
                 "origin": "student_requested",
                 "summary": "Remember pace",
                 "target": "learner_profile",
-                "payload": {"changes": {"pace": "measured"}},
+                "payload": {"changes": {"explanation": "balanced"}},
                 "target_hash": None,
             },
         )
         assert proposal.status_code == 201
+        consent = client.patch('/api/state', headers={**AUTH, 'Idempotency-Key':'consent'}, json={'origin':'student_requested','expected_revision':1,'operation':{'type':'set_preferences','preferences':{'enabled':True}}})
+        assert consent.status_code == 200
         accepted = client.post(
             "/api/proposals/api-profile/accept",
             headers={**AUTH, "Idempotency-Key": "api-accept-proposal"},
             json={"expected_revision": 1},
         )
         assert accepted.status_code == 200
-        assert client.get("/api/state", headers=AUTH).json()["profile"] == {
-            "pace": "measured"
+        assert client.get("/api/state", headers=AUTH).json()["preferences"] == {
+            "enabled": True, "explanation": "balanced", "practice": "standard"
         }
 
     def test_api_conflicts_are_sanitized(self, course_root: Path) -> None:
@@ -655,7 +628,7 @@ class TestStateAndProposalAPI:
                 "origin": "student_requested",
                 "summary": "Initial",
                 "target": "learner_profile",
-                "payload": {"changes": {"pace": "slow"}},
+                "payload": {"changes": {"explanation": "detailed"}},
                 "target_hash": None,
             },
         )
@@ -667,7 +640,7 @@ class TestStateAndProposalAPI:
                 "expected_revision": 1,
                 "request": {
                     "summary": "Edited",
-                    "payload": {"changes": {"pace": "measured"}},
+                    "payload": {"changes": {"explanation": "balanced"}},
                 },
             },
         )
@@ -700,7 +673,7 @@ class TestStateAndProposalAPI:
 def test_sqlite_contains_no_ephemeral_or_provider_columns(course_root: Path) -> None:
     store = CourseStore(course_root)
     store.get_state()
-    db = course_root / ".courseweave" / "courseweave.db"
+    db = CourseStore(course_root).db_path
     with sqlite3.connect(db) as connection:
         schema = "\n".join(
             row[0]
@@ -722,7 +695,7 @@ def test_corrupt_learner_state_is_preserved_and_reported(
     course_root: Path,
 ) -> None:
     CourseStore(course_root)
-    db = course_root / ".courseweave" / "courseweave.db"
+    db = CourseStore(course_root).db_path
     with sqlite3.connect(db) as connection:
         connection.execute(
             "UPDATE learner_state SET json = ? WHERE singleton = 1",

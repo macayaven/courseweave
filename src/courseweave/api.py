@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import hashlib
+import copy
 import json
 import os
 import secrets
@@ -48,6 +50,7 @@ from courseweave.context import (
     resolve_context,
 )
 from courseweave.manifest import (
+    load_manifest,
     ETagMismatchError,
     ManifestNotFoundError,
     ManifestValidationError,
@@ -63,10 +66,16 @@ from courseweave.professor import (
     ProfessorService,
     Role,
     build_professor_policy,
+    hints_disabled,
+    NO_HINTS_MESSAGE,
 )
-from courseweave.providers import ModelResult, ProviderConfig, create_model
+from courseweave.providers import ModelResult, ProviderConfig, create_model, _failure_for
+from courseweave.teaching import lesson_scope, lesson_unchanged, teaching_context, TurnContext, replay_dependency
+from courseweave.state_contracts import StateRequest
 from courseweave.store import (
     CourseStore,
+    CourseIdentityChangedError,
+    has_persisted_store,
     IdempotencyConflictError,
     ProposalConflictError,
     ProposalNotFoundError,
@@ -113,6 +122,7 @@ class _ProposalCandidate:
     session_id: str
     role: Role
     source_id: str | None
+    source_etag: str | None
     resolved: tuple[str | None, str | None, str | None]
     expires_at: float
     order: int
@@ -151,6 +161,7 @@ def create_app(
     course_root: Path | None = None,
     *,
     capability_token: str | None = None,
+    state_dir: Path | None = None,
 ) -> FastAPI:
     """Create the CourseWeave service application.
 
@@ -164,12 +175,21 @@ def create_app(
     app.state.context_registry = None
     app.state.context_manifest_etag = None
     app.state.course_store = None
+    app.state.state_dir = state_dir
     # All process-local state is lazily expired.  The clock is injectable so
     # expiry and deterministic oldest-entry eviction do not need a daemon.
     app.state.ephemeral_clock = time.monotonic
     app.state.ephemeral_order = 0
     app.state.shared_runs: dict[_SharedKey, _SharedRun] = {}
     app.state.guide_history: dict[_HistoryKey, list[ModelMessage]] = {}
+    app.state.lesson_scopes = {}
+    app.state.guide_busy = set()
+    app.state.guide_attribution = {}
+    app.state.session_actions = {}
+    app.state.hint_cursors = {}
+    app.state.declined_revisits = set()
+    app.state.privacy_epoch = 0
+    app.state.guide_dependencies = {}
     app.state.guide_history_access: dict[_HistoryKey, _EphemeralSlot] = {}
     app.state.guide_sessions: dict[str, _EphemeralSlot] = {}
     app.state.interrupted_runs: dict[_InterruptedKey, _EphemeralSlot] = {}
@@ -186,6 +206,14 @@ def create_app(
     ) -> JSONResponse:
         return _error(422, "validation_error", "The request is invalid.")
 
+    @app.exception_handler(StoreError)
+    async def store_error(_request: Request, exc: StoreError) -> JSONResponse:
+        return _store_error(exc)
+
+    @app.exception_handler(ManifestValidationError)
+    async def manifest_error(_request: Request, exc: ManifestValidationError) -> JSONResponse:
+        return _error(422, 'validation_error', 'The manifest is invalid.', exc)
+
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok", "service": "courseweave", "version": __version__}
@@ -200,7 +228,7 @@ def create_app(
         try:
             snapshot = read_manifest(root)
         except ManifestNotFoundError:
-            draft = empty_manifest_draft(root)
+            draft = _author_draft(app)
             return Response(
                 content=manifest_bytes(draft),
                 media_type="application/json",
@@ -244,7 +272,7 @@ def create_app(
             return _error(422, "validation_error", "The manifest is invalid.", exc)
 
         try:
-            snapshot = _course_store(app).save_course_manifest(
+            snapshot = _course_store(app, initial_course_id=manifest.id).save_course_manifest(
                 manifest, if_match, idempotency_key
             )
         except ETagMismatchError as exc:
@@ -340,6 +368,18 @@ def create_app(
             )
         return JSONResponse(resolved.model_dump(mode="json"))
 
+    @app.post("/api/guide/action")
+    async def authored_action(request: Request) -> Response:
+        return await _authored_action_response(app, request)
+
+    @app.post("/api/guide/lesson")
+    async def learner_lesson(request: Request) -> Response:
+        return await _lesson_response(app, request, "learner")
+
+    @app.post("/api/author/guide/lesson")
+    async def author_lesson(request: Request) -> Response:
+        return await _lesson_response(app, request, "author")
+
     @app.post("/api/share")
     async def post_share(request: Request) -> Response:
         return await _share_response(app, request, "learner")
@@ -367,10 +407,25 @@ def create_app(
     @app.get("/api/state")
     async def get_state() -> Response:
         try:
-            state = _course_store(app).get_state()
+            state = _course_store(app).state_view()
         except StoreError as exc:
             return _store_error(exc)
-        return JSONResponse(state.model_dump(mode="json"))
+        return JSONResponse(state)
+
+    @app.get("/api/bootstrap")
+    async def bootstrap() -> Response:
+        try:
+            store = _course_store(app)
+            return JSONResponse(store.state_view(include_manifest=True))
+        except StoreError as exc:
+            return _store_error(exc)
+
+    @app.get("/api/state/export")
+    async def export_state() -> Response:
+        try:
+            return JSONResponse(_course_store(app).get_state().model_dump(mode="json"))
+        except StoreError as exc:
+            return _store_error(exc)
 
     @app.patch("/api/state")
     async def patch_state(request: Request) -> Response:
@@ -390,27 +445,45 @@ def create_app(
                 "Direct learner-state changes require student_requested origin.",
             )
         try:
-            state = _course_store(app).apply_state(
-                body.get("operation"),
-                int(body.get("expected_revision")),
-                idempotency_key,
-            )
+            parsed = StateRequest.model_validate(body)
+            state = _course_store(app).apply_state(parsed.operation, parsed.expected_revision, idempotency_key)
         except (TypeError, ValueError):
             return _error(422, "validation_error", "The state request is invalid.")
         except StoreError as exc:
             return _store_error(exc)
-        return JSONResponse(state.model_dump(mode="json"))
+        session_id, new_session = _guide_session(app, request)
+        if parsed.operation.type in {'reset_state', 'delete_state', 'set_preferences'}:
+            app.state.privacy_epoch += 1
+            app.state.guide_history.clear()
+            app.state.guide_attribution.clear()
+            app.state.session_actions.clear()
+            app.state.proposal_candidates.clear()
+            app.state.shared_runs.clear()
+            app.state.hint_cursors.clear()
+            app.state.declined_revisits.clear()
+            if parsed.operation.type in {'reset_state', 'delete_state'}:
+                app.state.lesson_scopes.clear()
+        ledger = app.state.session_actions.setdefault(session_id, [])
+        if parsed.operation.type == 'check_attempt' and state.attempts:
+            ledger.append('attempt:' + hashlib.sha256(state.attempts[-1].model_dump_json().encode()).hexdigest())
+        elif parsed.operation.type == 'put_record':
+            for record in state.records:
+                if record.coordinate == parsed.operation.coordinate:
+                    ledger.append('record:' + hashlib.sha256(record.model_dump_json().encode()).hexdigest())
+        del ledger[:-64]
+        response = JSONResponse(_course_store(app).state_view(state))
+        if new_session:
+            response.set_cookie(_SESSION_COOKIE, session_id, httponly=True, samesite="lax")
+        return response
 
     @app.get("/api/proposals")
     async def list_proposals() -> Response:
         root = _configured_root(app)
-        if (
-            root is not None
-            and not (root / "courseweave.json").exists()
-            and not (root / ".courseweave" / "courseweave.db").exists()
-        ):
-            return JSONResponse([])
         try:
+            if (root is not None and app.state.course_store is None
+                and not (root / 'courseweave.json').exists()
+                and not has_persisted_store(root, state_dir=app.state.state_dir)):
+                return JSONResponse([])
             proposals = _course_store(app).list_proposals()
         except StoreError as exc:
             return _store_error(exc)
@@ -434,9 +507,9 @@ def create_app(
                 candidate_or_error = _authorized_candidate(app, request, candidate_id)
                 if isinstance(candidate_or_error, Response):
                     return candidate_or_error
-                proposal = _course_store(app).create_proposal(
-                    candidate_or_error.request, idempotency_key
-                )
+                candidate_request = candidate_or_error.request
+                initial_id = (candidate_request.payload['manifest']['id'] if candidate_request.type == 'manifest_replace' and not (_configured_root(app) / 'courseweave.json').exists() else None)
+                proposal = _course_store(app, initial_course_id=initial_id).create_proposal(candidate_request, idempotency_key)
                 return JSONResponse(proposal.model_dump(mode="json"), status_code=201)
             if body_or_error.get("origin") == "teacher_suggested":
                 return _error(
@@ -444,9 +517,12 @@ def create_app(
                     "forbidden",
                     "Teacher suggestions must be emitted by an authenticated guide run.",
                 )
-            proposal = _course_store(app).create_proposal(
-                body_or_error, idempotency_key
-            )
+            if body_or_error.get('type') == 'workspace_file_replace':
+                return _error(403, 'forbidden', 'Workspace proposals are unavailable.')
+            initial_id = None
+            if body_or_error.get('type') == 'manifest_replace' and not (_configured_root(app) / 'courseweave.json').exists():
+                initial_id = parse_manifest_data(body_or_error.get('payload', {}).get('manifest'), _configured_root(app)).id
+            proposal = _course_store(app, initial_course_id=initial_id).create_proposal(body_or_error, idempotency_key)
         except StoreError as exc:
             return _store_error(exc)
         return JSONResponse(
@@ -522,6 +598,13 @@ def _validation_issues_response(issues: list[dict[str, str]]) -> JSONResponse:
     )
 
 
+def _author_draft(app: FastAPI):
+    root = _configured_root(app)
+    if app.state.course_store is not None or has_persisted_store(root, state_dir=app.state.state_dir):
+        return _course_store(app).get_manifest()
+    return empty_manifest_draft(root)
+
+
 def _context_registry(app: FastAPI) -> ContextRegistry | Response:
     root = _configured_root(app)
     if root is None:
@@ -531,22 +614,25 @@ def _context_registry(app: FastAPI) -> ContextRegistry | Response:
         manifest = snapshot.manifest
         etag = snapshot.etag
     except ManifestNotFoundError:
-        manifest = empty_manifest_draft(root)
+        manifest = _author_draft(app)
         etag = '""'
     except ManifestValidationError as exc:
         return _error(422, "validation_error", "The manifest is invalid.", exc)
-    if app.state.context_registry is None or app.state.context_manifest_etag != etag:
+    if (app.state.context_registry is None or app.state.context_manifest_etag != etag
+        or app.state.context_registry.manifest.id != manifest.id):
         app.state.context_registry = ContextRegistry(manifest)
         app.state.context_manifest_etag = etag
     return app.state.context_registry
 
 
-def _course_store(app: FastAPI) -> CourseStore:
+def _course_store(app: FastAPI, *, initial_course_id: str | None = None) -> CourseStore:
     root = _configured_root(app)
     if root is None:
         raise StoreNotConfiguredError("No course root is configured")
     if app.state.course_store is None:
-        app.state.course_store = CourseStore(root)
+        app.state.course_store = CourseStore(root, state_dir=app.state.state_dir, course_id=initial_course_id)
+    if initial_course_id and app.state.course_store.course_id != initial_course_id:
+        app.state.course_store = app.state.course_store.rebind_empty_draft(initial_course_id)
     return app.state.course_store
 
 
@@ -561,6 +647,145 @@ async def _request_json(request: Request) -> dict[str, Any] | Response:
     if not isinstance(value, dict):
         return _error(422, "validation_error", "The request must be a JSON object.")
     return value
+
+
+async def _authored_action_response(app, request):
+    session_id, new_session = _guide_session(app, request)
+    body = await _request_json(request)
+    if isinstance(body, Response):
+        return body
+    if set(body) - {'thread_id', 'source_id', 'action', 'objective_id'} or not isinstance(body.get('action'), str) or body.get('action') not in {'hint', 'decline_revisit'} or not isinstance(body.get('thread_id'), str) or not 1 <= len(body['thread_id']) <= 160:
+        return _error(422, 'validation_error', 'The teaching action is invalid.')
+    key = (session_id, 'learner', body['thread_id'])
+    if key in app.state.guide_busy:
+        return _error(409, 'conversation_busy', 'Wait for the current Course assistant response to finish.')
+    registry = _context_registry(app)
+    if isinstance(registry, Response):
+        return registry
+    source = _server_source(registry, _source_id(body))
+    if isinstance(source, Response):
+        return source
+    resolved, _ = source
+    view = _course_store(app).state_view(include_manifest=True)
+    manifest = parse_manifest_data(view['manifest'], app.state.course_root)
+    state = LearnerState.model_validate({k:v for k,v in view.items() if k in LearnerState.model_fields})
+    try:
+        accepted_source = read_manifest(app.state.course_root)
+    except ManifestNotFoundError:
+        accepted_source = None
+    accepted_etag = accepted_source.etag if accepted_source else '""'
+    if accepted_etag != app.state.context_manifest_etag or (accepted_source and accepted_source.manifest != manifest):
+        return _error(409, 'context_changed', 'The course changed while preparing this action; try again.')
+    policy = build_professor_policy(manifest, resolved, state, 'learner')
+    phase = next((p for m in manifest.modules if m.id == resolved.module_id for p in m.phases if p.id == resolved.phase_id), None)
+    objective_id = body.get('objective_id')
+    if objective_id is not None and (not isinstance(objective_id, str) or phase is None or phase.learning is None or objective_id not in {o.id for o in phase.learning.objectives}):
+        return _error(422, 'validation_error', 'The selected objective is unavailable.')
+    _touch_history(app, key)
+    if body['action'] == 'decline_revisit':
+        app.state.declined_revisits.add((*key, resolved.module_id, resolved.phase_id))
+        # Exclude prior offers from future replay to prevent repeated suggestions.
+        app.state.guide_history.pop(key, None)
+        app.state.guide_attribution.pop(key, None)
+        result = {'status': 'declined', 'message': 'Continue at your own pace; this revisit offer is dismissed.'}
+    elif policy.capabilities and not policy.capabilities.provider_callable:
+        prompts = [r.prompt for r in phase.completion.requirements if r.id in policy.capabilities.unmet_requirement_ids] if phase and phase.completion else []
+        result = {'status': 'blocked', 'hint': None, 'message': 'Try your own response first. ' + ' '.join(prompts) if prompts else 'Assistance is unavailable for this activity.'}
+    elif hints_disabled(policy):
+        result = {'status': 'blocked', 'hint': None, 'message': NO_HINTS_MESSAGE}
+    else:
+        hints = [h for h in phase.learning.hints if objective_id is None or objective_id in h.objective_ids] if phase and phase.learning else []
+        cursor_key = (*key, resolved.module_id, resolved.phase_id, objective_id)
+        index = min(app.state.hint_cursors.get(cursor_key, 0) + 1, len(hints))
+        app.state.hint_cursors[cursor_key] = index
+        result = {'status': 'hint' if hints else 'unavailable', 'hint': hints[index-1].model_dump(mode='json') if hints else None, 'hint_index': index, 'message': 'Try this step before asking for another hint.' if hints else 'No authored hint is available for this activity.'}
+        if hints:
+            dependency = replay_dependency(manifest, state, {})
+            _update_replay_dependency(app, key, dependency)
+            scope = app.state.lesson_scopes.get(key)
+            attribution = TurnContext.capture(module_id=resolved.module_id, phase_id=resolved.phase_id,
+                surface_id=resolved.surface_id, source_id=_source_id(body),
+                manifest_etag=accepted_etag, curriculum_digest=view['curriculum_digest'],
+                state_revision=state.revision, consent=state.preferences.enabled,
+                teacher_mode=policy.teacher_mode, policy=policy.capabilities.model_dump(mode='json') if policy.capabilities else None,
+                lesson_scope_id=scope.id if scope else None, privacy_epoch=app.state.privacy_epoch,
+                action='hint', objective_id=objective_id, hint_id=hints[index-1].id, hint_index=index,
+                evidence_dependency=dependency.fingerprint, evidence_references=[])
+            _append_guide_turn(app, key,
+                'Request an authored hint' + (f' for objective {objective_id}.' if objective_id else '.'),
+                hints[index-1].text, attribution.public())
+    response = JSONResponse(result | {'thread_id': body['thread_id'], 'assistant_name': 'Course assistant', 'module_id': resolved.module_id, 'phase_id': resolved.phase_id})
+    if new_session:
+        response.set_cookie(_SESSION_COOKIE, session_id, httponly=True, samesite='lax')
+    return response
+
+
+def _update_replay_dependency(app, key, dependency):
+    previous = app.state.guide_dependencies.get(key)
+    if previous is not None and dependency.revokes(previous):
+        app.state.guide_history.pop(key, None)
+        app.state.guide_attribution.pop(key, None)
+    app.state.guide_dependencies[key] = dependency
+
+
+def _append_guide_turn(app, key, user_text, content, attribution):
+    """Retain only complete bounded turns, including their immutable attribution."""
+    messages = [ModelRequest(parts=[UserPromptPart(content=user_text)]), ModelResponse(parts=[TextPart(content=content)])]
+    if len(str(messages)) + len(json.dumps(attribution, sort_keys=True)) > 32000:
+        # A huge gated input is still answered, but cannot poison later replay.
+        return
+    history = app.state.guide_history.setdefault(key, [])
+    attributions = app.state.guide_attribution.setdefault(key, [])
+    history.extend(messages)
+    attributions.append(copy.deepcopy(attribution))
+    while history and (len(history) > _MAX_HISTORY_MESSAGES or len(str(history)) + len(json.dumps(attributions, sort_keys=True)) > 32000):
+        del history[:2]
+        del attributions[:1]
+    _touch_history(app, key)
+
+
+def _revoke_lesson(app, key):
+    app.state.lesson_scopes.pop(key, None)
+    # Grounded answers may paraphrase the lesson; discard the entire dependent replay chain.
+    app.state.guide_history.pop(key, None)
+    app.state.guide_attribution.pop(key, None)
+
+
+async def _lesson_response(app, request, role):
+    session_id, new_session = _guide_session(app, request)
+    body = await _request_json(request)
+    if isinstance(body, Response):
+        return body
+    if set(body) - {'thread_id', 'source_id', 'action'} or not isinstance(body.get('action'), str) or body.get('action') not in {'use_lesson', 'reset_lesson'} or not isinstance(body.get('thread_id'), str) or not 1 <= len(body['thread_id']) <= 160:
+        return _error(422, 'validation_error', 'The lesson request is invalid.')
+    key = (session_id, role, body['thread_id'])
+    if key in app.state.guide_busy:
+        return _error(409, 'conversation_busy', 'Wait for the current Course assistant response to finish.')
+    _revoke_lesson(app, key)
+    if body['action'] == 'reset_lesson':
+        response = JSONResponse({'status': 'reset', 'scope': None, 'message': 'This lesson will no longer be used in future context.'})
+    else:
+        registry = _context_registry(app)
+        if isinstance(registry, Response):
+            return registry
+        source = _server_source(registry, _source_id(body))
+        if isinstance(source, Response):
+            return source
+        resolved, _ = source
+        try:
+            view = _course_store(app).state_view(include_manifest=True)
+            manifest = parse_manifest_data(view['manifest'], app.state.course_root)
+            scope = lesson_scope(app.state.course_root, manifest, resolved, view['curriculum_digest'], secrets.token_urlsafe(16))
+        except StoreError as exc:
+            return _store_error(exc)
+        except (ValueError, UnicodeError):
+            return _error(422, 'lesson_unavailable', 'Choose an approved local HTML or Markdown lesson that can be read safely.')
+        app.state.lesson_scopes[key] = scope
+        _touch_history(app, key)
+        response = JSONResponse({'status': 'active', 'scope': scope.public()})
+    if new_session:
+        response.set_cookie(_SESSION_COOKIE, session_id, httponly=True, samesite="lax")
+    return response
 
 
 async def _share_response(app: FastAPI, request: Request, role: Role) -> Response:
@@ -603,7 +828,7 @@ async def _share_response(app: FastAPI, request: Request, role: Role) -> Respons
                     else:
                         resolved, history_source = source_or_error
                         policy = build_professor_policy(
-                            registry_or_error.manifest, resolved, LearnerState(), role
+                            registry_or_error.manifest, resolved, _course_store(app).get_state(), role
                         )
                         if not _share_is_allowed(policy, str(kind)):
                             response = _error(403, "forbidden", "Sharing is unavailable for the active phase.")
@@ -661,14 +886,59 @@ async def _guide_response(
         _clear_shared_run(app, session_id, role, run_input.run_id)
         return source_or_error
     resolved, history_source = source_or_error
-    history_key = (session_id, role, history_source)
+    if not run_input.thread_id or len(run_input.thread_id) > 160:
+        _clear_shared_run(app, session_id, role, run_input.run_id)
+        return _error(422, 'validation_error', 'A bounded conversation identifier is required.')
+    history_key = (session_id, role, run_input.thread_id)
+    if history_key in app.state.guide_busy:
+        _clear_shared_run(app, session_id, role, run_input.run_id)
+        return _error(409, 'conversation_busy', 'Wait for the current Course assistant response to finish.')
+    resolved = resolved.model_copy(deep=True)
     try:
         store = _course_store(app)
-        learner_state = store.get_state()
+        view = store.state_view(include_manifest=True)
+        learner_state = LearnerState.model_validate({k: v for k, v in view.items() if k in LearnerState.model_fields})
+        manifest = parse_manifest_data(view['manifest'], app.state.course_root)
     except StoreError as exc:
         _clear_shared_run(app, session_id, role, run_input.run_id)
         return _store_error(exc)
 
+    try:
+        accepted_source = read_manifest(app.state.course_root)
+    except ManifestNotFoundError:
+        accepted_source = None
+    accepted_etag = accepted_source.etag if accepted_source else '""'
+    if accepted_etag != app.state.context_manifest_etag or (accepted_source and accepted_source.manifest != manifest):
+        _clear_shared_run(app, session_id, role, run_input.run_id)
+        return _error(409, 'context_changed', 'The course changed while preparing this turn; send your request again.')
+    scope = app.state.lesson_scopes.get(history_key)
+    if scope and not lesson_unchanged(scope, app.state.course_root, manifest, view['curriculum_digest']):
+        _revoke_lesson(app, history_key)
+        _clear_shared_run(app, session_id, role, run_input.run_id)
+        return _error(409, 'lesson_changed', 'The lesson changed; use this lesson again to confirm its current content.')
+    props = run_input.forwarded_props if isinstance(run_input.forwarded_props, dict) else {}
+    action = props.get('action')
+    if (action is not None and not isinstance(action, str)) or action not in ({None, 'edit_learning'} if role == 'author' else {None, 'hint', 'decline_revisit'}):
+        _clear_shared_run(app, session_id, role, run_input.run_id)
+        return _error(422, 'validation_error', 'The teaching action is invalid.')
+    objective_id = props.get('objective_id')
+    phase = next((p for m in manifest.modules if m.id == resolved.module_id for p in m.phases if p.id == resolved.phase_id), None)
+    if objective_id is not None and (not isinstance(objective_id, str) or phase is None or phase.learning is None or objective_id not in {o.id for o in phase.learning.objectives}):
+        _clear_shared_run(app, session_id, role, run_input.run_id)
+        return _error(422, 'validation_error', 'The selected objective is unavailable.')
+    cursor_key = (*history_key, resolved.module_id, resolved.phase_id, objective_id)
+    hint_index = app.state.hint_cursors.get(cursor_key, 0) + (1 if action == 'hint' else 0)
+    decline_key = (*history_key, resolved.module_id, resolved.phase_id)
+    if action == 'decline_revisit':
+        app.state.declined_revisits.add(decline_key)
+        app.state.guide_history.pop(history_key, None)
+        app.state.guide_attribution.pop(history_key, None)
+    data = teaching_context(manifest, resolved, learner_state, view, app.state.session_actions.get(session_id, ()),
+        hint_index=hint_index, objective_id=objective_id, declined=decline_key in app.state.declined_revisits) if role == 'learner' else {}
+    if scope:
+        data['lesson'] = scope.public() | {'excerpt': scope.excerpt}
+    dependency = replay_dependency(manifest, learner_state, data)
+    _update_replay_dependency(app, history_key, dependency)
     model_factory = app.state.professor_model_factory
     professor = ProfessorService(
         manifest,
@@ -677,6 +947,11 @@ async def _guide_response(
         role,
         ProviderConfig(provider=None),
         model_factory=model_factory,
+        teaching_data=data,
+        course_root=app.state.course_root,
+        author_learning_edit=role == "author" and action == "edit_learning",
+        source_etag=accepted_etag,
+        request_action=action,
     )
     gate = professor.gate(request_text)
     shared, share_mismatch = _shared_for(
@@ -701,14 +976,39 @@ async def _guide_response(
     else:
         prepared = gate
 
+    model_request = _request_with_shared_content(request_text, shared)
+    _touch_history(app, history_key)
+    professor.turn_context = TurnContext.capture(module_id=resolved.module_id, phase_id=resolved.phase_id,
+        surface_id=resolved.surface_id, source_id=source_id, manifest_etag=professor.source_etag,
+        state_revision=learner_state.revision, consent=learner_state.preferences.enabled,
+        teacher_mode=professor.policy.teacher_mode,
+        policy=professor.policy.capabilities.model_dump(mode='json') if professor.policy.capabilities else None,
+        lesson_scope_id=scope.id if scope else None, privacy_epoch=app.state.privacy_epoch,
+        run_id=run_input.run_id, evidence_dependency=dependency.fingerprint,
+        evidence_references=[hashlib.sha256(json.dumps(f, sort_keys=True).encode()).hexdigest() for f in data.get('observations', []) + data.get('check_facts', [])])
+    professor.hint_commit = (cursor_key, min(hint_index, 20))
+    replay = copy.deepcopy(app.state.guide_history.get(history_key, ()))
+    attributions = app.state.guide_attribution.get(history_key, ())
+    for index, attribution in enumerate(attributions):
+        if index * 2 < len(replay):
+            replay[index * 2].parts.append(UserPromptPart(content='[Previous turn attribution; not current authority] ' + json.dumps(attribution, sort_keys=True)))
+    replay = professor.bounded_replay(model_request, replay)
+    app.state.guide_busy.add(history_key)
     if await request.is_disconnected():
+        app.state.guide_busy.discard(history_key)
         _clear_shared_run(app, session_id, role, run_input.run_id)
         _mark_interrupted(app, session_id, role, history_source, run_input.run_id)
         if isinstance(prepared, ModelResult) and prepared.adapter is not None:
             await prepared.adapter.aclose()
         return Response(status_code=204)
 
-    model_request = _request_with_shared_content(request_text, shared)
+    if app.state.privacy_epoch != professor.turn_context['privacy_epoch']:
+        app.state.guide_busy.discard(history_key)
+        _clear_shared_run(app, session_id, role, run_input.run_id)
+        if isinstance(prepared, ModelResult) and prepared.adapter is not None:
+            await prepared.adapter.aclose()
+        return _error(409, 'context_revoked', 'The teaching context changed; send your request again.')
+
     return StreamingResponse(
         _guide_events(
             app,
@@ -718,7 +1018,7 @@ async def _guide_response(
             model_request,
             prepared,
             request_text,
-            app.state.guide_history.get(history_key, ()),
+            tuple(replay),
             history_key,
             shared,
             session_id,
@@ -845,6 +1145,18 @@ def _cleanup_ephemeral_state(app: FastAPI) -> None:
         if key not in app.state.guide_history_access:
             app.state.guide_history.pop(key, None)
 
+    for mapping in (app.state.lesson_scopes, app.state.guide_attribution, app.state.guide_dependencies):
+        for key in tuple(mapping):
+            if key not in app.state.guide_history_access or key[0] not in app.state.guide_sessions:
+                mapping.pop(key, None)
+    for key in tuple(app.state.session_actions):
+        if key not in app.state.guide_sessions:
+            app.state.session_actions.pop(key, None)
+    for key in tuple(app.state.hint_cursors):
+        if key[:3] not in app.state.guide_history_access:
+            app.state.hint_cursors.pop(key, None)
+    app.state.declined_revisits.intersection_update(k for k in app.state.declined_revisits if k[:3] in app.state.guide_history_access)
+
 
 def _touch_history(app: FastAPI, key: _HistoryKey) -> None:
     app.state.guide_history_access[key] = _EphemeralSlot(
@@ -899,15 +1211,10 @@ def _recover_run_id(raw_request: bytes) -> str | None:
 
 def _share_is_allowed(policy, kind: str) -> bool:
     """Apply server-resolved phase capabilities immediately before provider use."""
+    if policy.role == 'author':
+        return kind in {'selection', 'cell', 'output', 'text'}
     capabilities = policy.capabilities
-    if capabilities is None:
-        return False
-    return {
-        "selection": capabilities.share_selection,
-        "cell": capabilities.share_cell,
-        "output": capabilities.share_output,
-        "text": capabilities.share_selection,
-    }[kind]
+    return capabilities is not None and ('selection' if kind == 'text' else kind) in capabilities.allowed_share_kinds
 
 
 def _request_with_shared_content(
@@ -942,8 +1249,10 @@ async def _guide_events(
     candidate_ids: list[str] = []
     completed = False
     terminal_emitted = False
+    provider_started = False
     try:
         yield encoder.encode(RunStartedEvent(threadId=thread_id, runId=run_id))
+        yield encoder.encode(CustomEvent(name='courseweave.turn_context', value=professor.turn_context.public() | {'assistant_name': 'Course assistant', 'lesson': professor.teaching_data.get('lesson', {}) and {k:v for k,v in professor.teaching_data['lesson'].items() if k != 'excerpt'}, 'workspace_share': {'scope': 'current_run', 'kind': shared.kind, 'label': shared.label} if shared else None}))
         if isinstance(prepared, ProfessorOutcome):
             content = _redact_shared_content(prepared.content or "", shared)
             yield encoder.encode(TextMessageStartEvent(messageId=message_id))
@@ -952,6 +1261,7 @@ async def _guide_events(
             chunks: list[str] = []
             started_message = False
             redactor = _SharedChunkRedactor(shared.content if shared is not None else None)
+            provider_started = True
             async with professor.stream_prepared(
                 request_text,
                 prepared,
@@ -979,9 +1289,17 @@ async def _guide_events(
                     TextMessageContentEvent(messageId=message_id, delta=safe_remainder)
                 )
             content = "".join(chunks) if shared is None else ""
+        if isinstance(prepared, ModelResult):
+            yield encoder.encode(CustomEvent(name='courseweave.provider_outcome', value=professor.provider_evidence))
         yield encoder.encode(TextMessageEndEvent(messageId=message_id))
+        if app.state.privacy_epoch != professor.turn_context['privacy_epoch']:
+            raise ValueError('privacy context revoked')
         if stager is not None:
             for candidate in stager.candidates():
+                _course_store(app).get_state()  # Preserve course_identity_changed classification.
+                current_etag = read_manifest(app.state.course_root).etag if (app.state.course_root / 'courseweave.json').exists() else '""'
+                if candidate.type == 'manifest_replace' and professor.source_etag != current_etag:
+                    raise TargetChangedError('The proposal source changed.')
                 _store_proposal_candidate(app, candidate, session_id, role, source_id, resolved)
                 candidate_ids.append(str(candidate.id))
                 yield encoder.encode(
@@ -990,17 +1308,16 @@ async def _guide_events(
                         value={"candidate": candidate.model_dump(mode="json")},
                     )
                 )
+        if app.state.privacy_epoch != professor.turn_context['privacy_epoch']:
+            raise ValueError('privacy context revoked')
         terminal_emitted = True
         yield encoder.encode(RunFinishedEvent(threadId=thread_id, runId=run_id))
+        if app.state.privacy_epoch != professor.turn_context['privacy_epoch']:
+            return
         if shared is None:
-            history = app.state.guide_history.setdefault(history_key, [])
-            history.extend(
-                [
-                    ModelRequest(parts=[UserPromptPart(content=user_text)]),
-                    ModelResponse(parts=[TextPart(content=content)]),
-                ]
-            )
-            del history[:-_MAX_HISTORY_MESSAGES]
+            _append_guide_turn(app, history_key, user_text, content, professor.turn_context.public())
+            if not isinstance(prepared, ProfessorOutcome) or prepared.status == "ok":
+                app.state.hint_cursors[professor.hint_commit[0]] = professor.hint_commit[1]
             _touch_history(app, history_key)
         completed = True
     except asyncio.CancelledError:
@@ -1009,15 +1326,22 @@ async def _guide_events(
     except GeneratorExit:
         _mark_interrupted(app, session_id, role, history_key[2], run_id)
         raise
-    except Exception:
+    except Exception as exc:
         if terminal_emitted:
             raise
-        yield encoder.encode(RunErrorEvent(message="The provider request failed."))
+        if isinstance(exc, CourseIdentityChangedError):
+            yield encoder.encode(RunErrorEvent(code='course_identity_changed', message='The draft identity changed; reopen the course to load its current state.'))
+        else:
+            failure = _failure_for(exc)
+            yield encoder.encode(RunErrorEvent(code=failure.kind, message=failure.message))
     finally:
         if not completed and stager is not None:
             stager.discard()
             for candidate_id in candidate_ids:
                 app.state.proposal_candidates.pop(candidate_id, None)
+        if not provider_started and isinstance(prepared, ModelResult) and prepared.adapter is not None:
+            await prepared.adapter.aclose()
+        app.state.guide_busy.discard(history_key)
         _clear_shared_run(app, session_id, role, run_id)
 
 
@@ -1092,6 +1416,7 @@ def _store_proposal_candidate(
         session_id=session_id,
         role=role,
         source_id=source_id,
+        source_etag=app.state.context_manifest_etag,
         resolved=(resolved.module_id, resolved.phase_id, resolved.surface_id),
         expires_at=now + _CANDIDATE_TTL_SECONDS,
         order=_next_ephemeral_order(app),
@@ -1110,6 +1435,8 @@ def _authorized_candidate(
     registry_or_error = _context_registry(app)
     if isinstance(registry_or_error, Response):
         return registry_or_error
+    if candidate.request.type == 'manifest_replace' and candidate.source_etag != app.state.context_manifest_etag:
+        return _error(409, 'target_changed', 'The proposal source changed; request a new suggestion.')
     source_or_error = _server_source(registry_or_error, candidate.source_id, require_existing=True)
     if isinstance(source_or_error, Response):
         return _error(403, "forbidden", "The proposal candidate context is no longer available.")
@@ -1117,7 +1444,7 @@ def _authorized_candidate(
     if (resolved.module_id, resolved.phase_id, resolved.surface_id) != candidate.resolved:
         return _error(403, "forbidden", "The proposal candidate no longer matches the active context.")
     policy = build_professor_policy(
-        registry_or_error.manifest, resolved, LearnerState(), candidate.role
+        registry_or_error.manifest, resolved, _course_store(app).get_state(), candidate.role
     )
     if (
         candidate.request.origin != "teacher_suggested"
@@ -1139,6 +1466,9 @@ async def _proposal_decision(
     try:
         revision = int(body_or_error.get("expected_revision"))
         store = _course_store(app)
+        history = store.proposal_history(proposal_id)
+        if any(p.type in {'workspace_file_replace', 'phase_record'} for p in history):
+            return _error(403, 'forbidden', 'This legacy proposal cannot be applied through the active API.')
         proposal = (
             store.accept_proposal(proposal_id, revision, idempotency_key)
             if action == "accept"
@@ -1152,6 +1482,8 @@ async def _proposal_decision(
 
 
 def _store_error(exc: StoreError) -> JSONResponse:
+    if isinstance(exc, CourseIdentityChangedError):
+        return _error(409, 'course_identity_changed', 'The draft identity changed; reopen the course to load its current state.')
     if isinstance(exc, StoreNotConfiguredError):
         return _error(409, "not_configured", "No course root is configured.")
     if isinstance(exc, RevisionMismatchError):
@@ -1185,7 +1517,7 @@ def _error(
     message: str,
     exc: Exception | None = None,
 ) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={"code": code, "message": message, "details": {}},
-    )
+    details = {}
+    if isinstance(exc, ManifestValidationError) and 'migrat' in str(exc):
+        details = {'migration': 'courseweave migrate --source courseweave.json; then --apply --output courseweave.v2.json'}
+    return JSONResponse(status_code=status_code, content={'code':code, 'message':message, 'details':details})

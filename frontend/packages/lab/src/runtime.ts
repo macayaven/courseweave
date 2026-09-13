@@ -131,6 +131,7 @@ export class RuntimeBroker {
 export function createCourseWeaveIframe(serviceOrigin: string, mode: 'learn' | 'author'): HTMLIFrameElement {
   const iframe = document.createElement('iframe');
   iframe.className = 'cw-Guide-iframe';
+  Object.assign(iframe.style, {width:'100%',height:'100%',border:'0',display:'block'});
   iframe.title = mode === 'learn' ? 'CourseWeave guide' : 'CourseWeave author';
   iframe.src = `${serviceOrigin}/${mode}/`;
   iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');

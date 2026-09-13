@@ -29,7 +29,6 @@ from courseweave.launch import (
     CourseLock,
     CourseLockError,
     LaunchSupervisor,
-    _redact_diagnostic,
     reserve_listener,
     serve_on_reserved_socket,
 )
@@ -348,6 +347,9 @@ class _FakeSocket:
         self.fail_bind = fail_bind
         self.bound: tuple[str, int] | None = None
         self.close_calls = 0
+
+    def setsockopt(self, level: int, option: int, value: int) -> None:
+        pass
 
     def bind(self, address: tuple[str, int]) -> None:
         self.bound = address
@@ -838,8 +840,8 @@ def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_ch
     assert kwargs["shell"] is False
     assert kwargs["cwd"] == state["course"].resolve()
     assert kwargs["stdin"] is subprocess.DEVNULL
-    assert kwargs["stdout"] is subprocess.PIPE
-    assert kwargs["stderr"] is subprocess.PIPE
+    assert kwargs["stdout"] is subprocess.DEVNULL
+    assert kwargs["stderr"] is subprocess.DEVNULL
     child_env = kwargs["env"]
     assert child_env["COURSEWEAVE_URL"] == "http://127.0.0.1:43123"
     assert child_env["COURSEWEAVE_CAPABILITY_TOKEN"] == "owned-course-secret"
@@ -1033,15 +1035,6 @@ def test_cleanup_step_errors_do_not_skip_later_independently_safe_actions(
 ) -> None:
     events: list[str] = []
 
-    class FaultingOutputThread:
-        def join(self, timeout: float | None = None) -> None:
-            del timeout
-            events.append("output.join")
-            raise RuntimeError("owned-jupyter-secret from output join")
-
-        def is_alive(self) -> bool:
-            return False
-
     class FaultingServer:
         @property
         def should_exit(self) -> bool:
@@ -1097,7 +1090,6 @@ def test_cleanup_step_errors_do_not_skip_later_independently_safe_actions(
     temporary = FaultingTemporaryDirectory()
     environment = FaultingEnvironment(secret="owned-course-secret")
     supervisor._jupyter_process = process
-    supervisor._output_threads = [FaultingOutputThread()]  # type: ignore[list-item]
     supervisor._api_server = FaultingServer()
     supervisor._api_thread = FaultingApiThread()  # type: ignore[assignment]
     supervisor._listener = ClosingListener()
@@ -1115,7 +1107,6 @@ def test_cleanup_step_errors_do_not_skip_later_independently_safe_actions(
     assert supervisor._cleanup() is False
 
     assert events == [
-        "output.join",
         "api.stop",
         "api.join",
         "listener.close",
@@ -1306,44 +1297,46 @@ def test_early_jupyter_exit_and_missing_hook_fail_closed_without_browser(
     assert len(missing_state["errors"]) == 1
 
 
-def test_diagnostic_redaction_covers_exact_secrets_and_token_url_variants() -> None:
-    course_token = "course-secret-value"
-    jupyter_token = "jupyter-secret-value"
-    message = (
-        "failed course-secret-value at "
-        "http://127.0.0.1:9999/lab?token=jupyter-secret-value&next=%2Flab "
-        "Authorization: token jupyter-secret-value"
-    )
-
-    redacted = _redact_diagnostic(message, (course_token, jupyter_token))
-
-    assert course_token not in redacted
-    assert jupyter_token not in redacted
-    assert "token=[REDACTED]" in redacted
-    assert "Authorization: [REDACTED]" in redacted
-
-
-def test_output_capture_swallows_secret_bearing_stream_exceptions(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_supervisor_discards_secret_bearing_child_output_at_os_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
 ) -> None:
-    supervisor = LaunchSupervisor(tmp_path)
-    supervisor.capability_token = "owned-course-secret"
-    supervisor.jupyter_token = "owned-jupyter-secret"
+    supervisor, state = _supervisor_fixture(tmp_path, monkeypatch)
+    children: list[subprocess.Popen[bytes]] = []
 
-    class FailingStream:
-        def read(self, _size: int) -> bytes:
-            raise RuntimeError("owned-jupyter-secret")
+    def process_factory(_argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        # Exercise real file descriptors without passing the fixture's fake lock.
+        kwargs["pass_fds"] = ()
+        child = subprocess.Popen(
+            [os.sys.executable, "-c", (
+                "import os; "
+                "message=(os.environ['JUPYTER_TOKEN'] + "
+                "os.environ['COURSEWEAVE_CAPABILITY_TOKEN']).encode()*4096; "
+                "os.write(1,message); os.write(2,message)"
+            )],
+            **kwargs,
+        )
+        children.append(child)
+        return child
 
-    supervisor._drain_output(FailingStream())
-
-    captured = capsys.readouterr()
-    assert "owned-jupyter-secret" not in captured.out
-    assert "owned-jupyter-secret" not in captured.err
+    supervisor._process_factory = process_factory
+    try:
+        assert supervisor.run() == 0
+        assert state["errors"] == []
+        assert children[0].returncode == 0
+        captured = capfd.readouterr()
+        assert "owned-jupyter-secret" not in captured.out + captured.err
+        assert "owned-course-secret" not in captured.out + captured.err
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
 
 
 @pytest.mark.parametrize("mode", ["learn", "author"])
 def test_real_jupyter_launch_keeps_live_runtime_files_secret_free_and_relays_work(
-    tmp_path: Path, mode: str,
+    tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Bounded proof of the exact Server 2.21 argv/env and extension hook."""
 
@@ -1416,12 +1409,38 @@ def test_real_jupyter_launch_keeps_live_runtime_files_secret_free_and_relays_wor
         shutdown_timeout=10.0,
     )
 
+    # Keep failure diagnostics structural: child output, URLs and environments
+    # can contain generated credentials and must not enter a CI assertion.
+    cleanup_stages: dict[str, object] = {}
+    for method_name in (
+        "_stop_jupyter", "_stop_api", "_close_listener", "_restore_signal_handlers"
+    ):
+        original = getattr(supervisor, method_name)
+
+        def record_stage(original=original, method_name=method_name):
+            try:
+                result = original()
+            except BaseException as exc:
+                cleanup_stages[method_name] = type(exc).__name__
+                raise
+            cleanup_stages[method_name] = result
+            return result
+
+        monkeypatch.setattr(supervisor, method_name, record_stage)
+
     assert supervisor.run() == 128 + signal.SIGTERM
 
-    assert errors == []
+    assert errors == [], {
+        "cleanup_stages": cleanup_stages,
+        "child_remaining": supervisor._jupyter_process is not None,
+        "api_thread_remaining": supervisor._api_thread is not None,
+        "runtime_remaining": supervisor._temporary_directory is not None,
+        "lock_remaining": supervisor._lock is not None,
+        "signal_handlers_remaining": len(supervisor._previous_handlers),
+    }
     assert observations["course_status"] == 200
     assert observations["course_etag"] == '""'
-    assert observations["course"]["schema_version"] == 1  # type: ignore[index]
+    assert observations["course"]["schema_version"] == 2  # type: ignore[index]
     assert observations["context_status"] == 200
     assert set(observations["context"]) == {  # type: ignore[arg-type]
         "module_id",
@@ -1432,3 +1451,22 @@ def test_real_jupyter_launch_keeps_live_runtime_files_secret_free_and_relays_wor
     assert sorted(path.relative_to(course) for path in course.rglob("*")) == before
     assert not (course / "courseweave.json").exists()
     assert not (course / ".courseweave").exists()
+
+
+def test_reserved_listener_restarts_immediately_after_a_served_connection() -> None:
+    first = reserve_listener(0)
+    port = first.getsockname()[1]
+    try:
+        first.listen()
+        with pytest.raises(OSError):
+            reserve_listener(port)
+        with socket.socket() as client:
+            client.settimeout(2)
+            client.connect(('127.0.0.1', port))
+            connection, _ = first.accept()
+            connection.close()
+            assert client.recv(1) == b''
+    finally:
+        first.close()
+    restarted = reserve_listener(port)
+    restarted.close()

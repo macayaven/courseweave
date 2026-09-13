@@ -32,8 +32,8 @@ export async function readImportFile(file: File): Promise<unknown> {
   }
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new Error("Imported course must be an object.");
-  if ((value as { schema_version?: unknown }).schema_version !== 1)
-    throw new Error("Imported course must use schema version 1.");
+  if ((value as { schema_version?: unknown }).schema_version !== 2)
+    throw new Error("Imported course must use schema version 2.");
   return value;
 }
 

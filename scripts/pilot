@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Start the installed local pilot using its durable, explicit artifact receipt."""
+from __future__ import annotations
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+from student_pilot import clean_environment, student_environment
+
+
+def main(argv: list[str] | None = None, *, root: Path | None = None) -> None:
+    parser = argparse.ArgumentParser(description='Installed CourseWeave pilot. Start with the S01 reading activity. Ctrl-C stops both owned services.')
+    parser.add_argument('command', nargs='?', default='start', choices=['start','author','inspect','export','reset','delete'])
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--no-provider', action='store_true', help='Use native lessons, records, checks, and authored hints with the assistant off.')
+    modes.add_argument('--provider-env', action='store_true', help='Use provider variables explicitly exported in this terminal.')
+    modes.add_argument('--provider', choices=['openai', 'anthropic'], help='Prompt securely for this provider API key for the current launch.')
+    parser.add_argument('--model', help='Provider model name; required with --provider.')
+    parser.add_argument('--base-url', help='Optional provider gateway base URL; only with --provider.')
+    parser.add_argument('--state-dir', type=Path, help='Separate study state; default is .pilot/user-state.')
+    parser.add_argument('--output', type=Path, help='New file for state export.')
+    parser.add_argument('--port', type=int, default=8765)
+    args = parser.parse_args(argv)
+    root = root or Path(__file__).resolve().parents[1]
+    owned = root / '.pilot'
+    try:
+        receipt = json.loads((owned/'receipt.json').read_text())
+        wheel = owned / receipt['wheel']
+        if hashlib.sha256(wheel.read_bytes()).hexdigest() != receipt['wheel_sha256']:
+            raise ValueError('Selected pilot artifact does not match its receipt.')
+        python = Path(receipt['platform_python'])
+        course = Path(receipt['course_root'])
+        kernel = Path(receipt['kernel_python'])
+        if not all(path.is_absolute() and path.exists() for path in (python,course,kernel)):
+            raise ValueError('Installed pilot paths are unavailable; follow docs/pilot/README.md.')
+    except (OSError, KeyError, json.JSONDecodeError):
+        raise ValueError('Installed pilot artifact receipt is unavailable; follow docs/pilot/README.md.') from None
+    state = args.state_dir.absolute() if args.state_dir else owned/'user-state'
+    launching = args.command in ('start','author')
+    if args.provider and not args.model:
+        parser.error('--provider requires --model')
+    if not args.provider and (args.model is not None or args.base_url is not None):
+        parser.error('--model and --base-url may only be used with --provider')
+    environment, assistant = student_environment(
+        no_provider=args.no_provider,
+        provider_env=args.provider_env,
+        provider=args.provider,
+        model=args.model,
+        base_url=args.base_url,
+    ) if launching else (clean_environment(), 'not used')
+    command = [str(python), '-I', '-m', 'courseweave']
+    if launching:
+        command += ['launch' if args.command=='start' else 'author','--course-root',str(course),'--kernel-python',str(kernel),'--state-dir',str(state),'--port',str(args.port)]
+        print(f'CourseWeave pilot · Assistant: {assistant}', flush=True)
+        print(f'Course Python: {kernel}\nStudy state: {state}\nStop: Ctrl-C. Restart with this same command.', flush=True)
+    else:
+        command += ['state',args.command,'--course-root',str(course),'--state-dir',str(state)]
+        if args.command == 'export':
+            if args.output is None: parser.error('export requires --output pointing to a new file')
+            command += ['--output', str(args.output.absolute())]
+    os.execve(str(python), command, environment)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None

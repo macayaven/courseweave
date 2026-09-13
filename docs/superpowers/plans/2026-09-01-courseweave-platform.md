@@ -19,8 +19,8 @@
 
 ## Global Constraints
 
-- Keep `/Volumes/mac-studio-ssd/education/agentic-harnessing-companion` byte- and status-unchanged.
-- Work only in `/Volumes/mac-studio-ssd/education/courseweave` and `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor`.
+- Keep the protected companion checkout byte- and status-unchanged.
+- Work only in the CourseWeave checkout and the Agent Harness Path integration checkout.
 - Automatic context is metadata-only; selection, cells, output, and source excerpts require an explicit Share action.
 - AG-UI carries conversation and inert proposal events only; authenticated REST is the sole durable mutation authority.
 - Never persist, print, log, or return credential values.
@@ -191,11 +191,11 @@
 ### Task 7: Agent Harness Path adapter and installed end-to-end proof
 
 **Files:**
-- Create: `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor/courseweave.json`
-- Create: `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor/scripts/courseweave`
-- Modify: `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor/.gitignore`
-- Modify: `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor/README.md`
-- Create: `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor/tests/test_courseweave_manifest.py`
+- Create in the Agent Harness Path integration checkout: `courseweave.json`
+- Create in the Agent Harness Path integration checkout: `scripts/courseweave`
+- Modify in the Agent Harness Path integration checkout: `.gitignore`
+- Modify in the Agent Harness Path integration checkout: `README.md`
+- Create in the Agent Harness Path integration checkout: `tests/test_courseweave_manifest.py`
 - Create: `frontend/e2e/agent-harness-path.spec.ts`
 - Create: `docs/verification/v0.md`
 - Modify: `README.md`

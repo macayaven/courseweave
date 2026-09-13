@@ -5,16 +5,17 @@ import type { CourseSnapshot } from '../src/surfaces';
 import { ContextPublisher, type WorkspaceMetadata } from '../src/context';
 
 const course: CourseSnapshot = {
+  schema_version: 2,
   id: 'course',
   title: 'Course',
-  policies: { max_shared_chars: 4 },
+  policies: { max_shared_chars: 4, allowed_share_kinds: ['selection','cell','output'] },
   modules: [{
     id: 'm01',
     title: 'Module',
     phases: [{
       id: 'p01',
       title: 'Phase',
-      capabilities: { share_selection: true, share_cell: true, share_output: true },
+      progress: 'required', teacher: {access:{mode:'available',requires:[]},sharing:{allow:['selection', 'cell', 'output']}},
       surfaces: [{ id: 'notebook', type: 'notebook', path: 'lesson.ipynb' }]
     }]
   }]
@@ -100,7 +101,7 @@ describe('LabCaptureProvider', () => {
 
   it('captures active cell and output only through their allowed public notebook models', async () => {
     const { provider, child, panel } = harness({ source: 'cell', outputs: [{ output_type: 'stream', text: 'x' }] });
-    provider.setCourse(() => ({ ...course, policies: { max_shared_chars: 100 } }));
+    provider.setCourse(() => ({ ...course, policies: { max_shared_chars: 100, allowed_share_kinds: ['selection','cell','output'] } }));
     dispatch(child, { ...request, requestId: 'cell-request', kind: 'cell' });
     await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledOnce());
     expect(child.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: 'cell-request', kind: 'cell', content: 'cell' }), 'https://courseweave.test');
@@ -133,7 +134,7 @@ describe('LabCaptureProvider', () => {
 
   it('enforces the manifest phase capability, server policy cap, active native surface, and disposal', async () => {
     const disabled = structuredClone(course);
-    disabled.modules[0]!.phases[0]!.capabilities.share_selection = false;
+    disabled.modules[0]!.phases[0]!.teacher.sharing.allow = ['cell','output'];
     const { provider, child } = harness({ active: 'terminal' });
     provider.setCourse(() => disabled);
     dispatch(child, request);
@@ -176,7 +177,7 @@ describe('LabCaptureProvider', () => {
 
   it('rejects a throwing output serializer without reflecting the exception', async () => {
     const { provider, child, panel } = harness();
-    provider.setCourse(() => ({ ...course, policies: { max_shared_chars: 100 } }));
+    provider.setCourse(() => ({ ...course, policies: { max_shared_chars: 100, allowed_share_kinds: ['selection','cell','output'] } }));
     panel.content.activeCell.model.outputs.toJSON.mockImplementationOnce(() => { throw new Error('serialized secret detail'); });
     dispatch(child, { ...request, requestId: 'output-error', kind: 'output', maxChars: 100 });
     await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledOnce());
@@ -234,7 +235,7 @@ describe('LabCaptureProvider', () => {
     dispatch(child, { ...request, requestId: 'after-invalid', kind: 'cell', maxChars: 100 });
     await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(5));
     expect(child.postMessage).toHaveBeenLastCalledWith({ type: 'courseweave.share.capture.rejected.v1', requestId: 'after-invalid', code: 'forbidden' }, 'https://courseweave.test');
-    expect(contextChild.postMessage).toHaveBeenCalledTimes(2);
+    expect((contextChild.postMessage as ReturnType<typeof vi.fn>).mock.calls.filter(([message])=>message.type==='courseweave.context.changed.v1')).toHaveLength(2);
     provider.dispose();
   });
 });

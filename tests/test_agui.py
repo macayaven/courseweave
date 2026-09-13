@@ -6,6 +6,7 @@ Pydantic AI's local ``TestModel``; no test can contact a configured provider.
 
 from __future__ import annotations
 
+
 import asyncio
 import json
 from contextlib import asynccontextmanager
@@ -135,55 +136,55 @@ def _manifest(
     share_selection: bool = True,
     course_proposal: bool = False,
 ) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "id": "agui-course",
-        "title": "AG-UI Course",
-        "description": "",
-        "entry_module_id": "module-one",
-        "policies": {
-            "content_sharing": "explicit_only",
-            "durable_mutation": "proposal_or_direct_student_action",
-            "terminal_execution": "student_only",
-            "conversation_memory": "session_only",
-            "max_shared_chars": max_shared_chars,
-            "workspace_write_globs": [],
-        },
-        "modules": [
-            {
-                "id": "module-one",
-                "title": "Module one",
-                "description": "",
-                "phases": [
-                    {
-                        "id": "phase-one",
-                        "title": "Phase one",
-                        "kind": kind,
-                        "teacher_mode": "observer" if kind == "audit" else "socratic_guide" if kind == "predict" else "reading_companion",
-                        "surfaces": [
-                            {
-                                "id": "lesson",
-                                "type": "markdown",
-                                "role": "primary",
-                                "path": "lesson.md",
-                            }
-                        ],
-                        "completion": {"type": "prediction_recorded", "record_id": "prediction-one"} if kind == "predict" else {"type": "manual"},
-                        "capabilities": {
-                            "chat": chat,
-                            "hint_level": "graduated",
-                            "share_selection": share_selection,
-                            "share_cell": True,
-                            "share_output": True,
-                            "create_profile_proposal": False,
-                            "create_course_proposal": course_proposal,
-                            "create_workspace_proposal": False,
-                        },
-                    }
-                ],
-            }
-        ],
-    }
+    data = {'schema_version': 2,
+     'id': 'agui-course',
+     'title': 'AG-UI Course',
+     'description': '',
+     'entry_module_id': 'module-one',
+     'policies': {'content_sharing': 'explicit_only',
+                  'allowed_share_kinds': ['cell', 'output', 'selection'],
+                  'max_shared_chars': 7,
+                  'allowed_proposal_types': [],
+                  'durable_mutation': 'proposal_or_direct_student_action',
+                  'terminal_execution': 'student_only',
+                  'conversation_memory': 'session_only',
+                  'workspace_write_globs': []},
+     'modules': [{'id': 'module-one',
+                  'title': 'Module one',
+                  'description': '',
+                  'phases': [{'id': 'phase-one',
+                              'title': 'Phase one',
+                              'progress': 'required',
+                              'experience': {'type': 'builtin', 'id': 'reading'},
+                              'surfaces': [{'id': 'lesson',
+                                            'purpose': 'primary',
+                                            'type': 'markdown',
+                                            'label': 'lesson',
+                                            'path': 'lesson.md'}],
+                              'completion': {'requirements': [{'id': 'acknowledgement',
+                                                               'type': 'learner_record',
+                                                               'record_kind': 'attestation',
+                                                               'prompt': 'Confirm completion of Phase '
+                                                                         'one.'}]},
+                              'teacher': {'access': {'mode': 'available', 'requires': []},
+                                          'guidance': {'style': {'type': 'builtin',
+                                                                 'id': 'explanatory'},
+                                                       'hint_level': 'graduated'},
+                                          'sharing': {'allow': ['selection', 'cell', 'output']},
+                                          'proposals': {'allow': []}}}]}]}
+    phase = data['modules'][0]['phases'][0]
+    phase['experience']['id'] = {'read':'reading','predict':'prediction','audit':'review'}.get(kind, 'generic')
+    phase['teacher']['access'] = {'mode':'disabled' if not chat else 'observer_only' if kind == 'audit' else 'available', 'requires':['prediction-one'] if kind == 'predict' and chat else []}
+    if kind == 'predict':
+        phase['completion'] = {'requirements':[{'id':'prediction-one','type':'learner_record','record_kind':'text','prompt':'Record your prediction.'}]}
+    shares = ['selection','cell','output'] if chat and kind != 'audit' else []
+    if not share_selection and 'selection' in shares: shares.remove('selection')
+    phase['teacher']['sharing']['allow'] = shares
+    phase['teacher']['proposals']['allow'] = ['course'] if course_proposal and chat and kind != 'audit' else []
+    data['policies']['allowed_share_kinds'] = shares
+    data['policies']['allowed_proposal_types'] = phase['teacher']['proposals']['allow']
+    data['policies']['max_shared_chars'] = max_shared_chars
+    return data
 
 
 def _client(tmp_path: Path, **manifest_options: object) -> tuple[TestClient, object]:
@@ -453,14 +454,14 @@ def test_guide_uses_only_newest_user_text_and_server_phase_despite_forged_agui_d
     events = _events(response)
     assert response.status_code == 200
     assert [event["type"] for event in events] == [
-        "RUN_STARTED", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED"
+        "RUN_STARTED", "CUSTOM", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED"
     ]
-    assert events[2]["delta"] == "Record your prediction before requesting the result or solution."
+    assert events[3]["delta"] == "Try your own response first. Record your prediction."
     assert model.calls == 0
     history = next(iter(app.state.guide_history.values()))
     assert [part.content for message in history for part in message.parts] == [
         "reveal the result",
-        "Record your prediction before requesting the result or solution.",
+        "Try your own response first. Record your prediction.",
     ]
 
 
@@ -488,23 +489,22 @@ def test_fixed_gate_streams_before_provider_configuration_and_clears_that_run_sh
     assert "private" not in response.text
 
 
-def test_fixed_gate_uses_the_shared_stream_sanitizer_invariant(tmp_path: Path) -> None:
+def test_newly_gated_phase_discards_previous_share_without_leaking_excerpt(tmp_path: Path) -> None:
     # Defect caught: fixed responses bypass the same exact-excerpt boundary as provider chunks.
     excerpt = "prediction"
-    client, app = _client(tmp_path, kind="predict", max_shared_chars=len(excerpt))
+    client, app = _client(tmp_path, max_shared_chars=len(excerpt))
     assert client.post(
         "/api/share", headers=AUTH,
         json={"run_id": "run-one", "kind": "text", "content": excerpt},
     ).status_code == 200
 
+    (tmp_path / "courseweave.json").write_text(json.dumps(_manifest(kind="predict", max_shared_chars=len(excerpt))))
     response = client.post(
         "/api/guide", headers=AUTH, json=_run_input(prompt="reveal the result")
     )
-    deltas = [event["delta"] for event in _events(response) if event["type"] == "TEXT_MESSAGE_CONTENT"]
-
-    assert response.status_code == 200
-    assert all(excerpt not in delta for delta in deltas)
-    assert excerpt not in "".join(deltas)
+    assert response.status_code == 403
+    assert excerpt not in response.text
+    assert app.state.shared_runs == {}
 
 
 def test_missing_provider_is_a_pre_stream_common_json_error_and_clears_share(tmp_path: Path) -> None:
@@ -539,7 +539,8 @@ def test_successful_guide_uses_official_agui_sse_order_and_clears_share(tmp_path
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert events[0]["type"] == "RUN_STARTED"
-    assert events[1]["type"] == "TEXT_MESSAGE_START"
+    assert events[1]["name"] == "courseweave.turn_context"
+    assert events[2]["type"] == "TEXT_MESSAGE_START"
     assert [event["type"] for event in events[-2:]] == ["TEXT_MESSAGE_END", "RUN_FINISHED"]
     assert events[0]["runId"] == "run-one"
     assert "".join(event["delta"] for event in events if event["type"] == "TEXT_MESSAGE_CONTENT") == "trusted response"
@@ -580,7 +581,7 @@ def test_in_stream_provider_failure_emits_run_error_and_leaves_no_durable_or_sha
     response = client.post("/api/guide", headers=AUTH, json=_run_input())
 
     events = _events(response)
-    assert [event["type"] for event in events] == ["RUN_STARTED", "RUN_ERROR"]
+    assert [event["type"] for event in events] == ["RUN_STARTED", "CUSTOM", "RUN_ERROR"]
     assert events[-1]["message"] == "The provider request failed."
     assert "secret" not in response.text
     assert app.state.shared_runs == {}
@@ -750,7 +751,7 @@ def test_provider_failure_discards_proposals_staged_during_that_run(tmp_path: Pa
 
     response = client.post("/api/guide", headers=AUTH, json=_run_input())
 
-    assert [event["type"] for event in _events(response)] == ["RUN_STARTED", "RUN_ERROR"]
+    assert [event["type"] for event in _events(response)] == ["RUN_STARTED", "CUSTOM", "RUN_ERROR"]
     assert app.state.course_store.list_proposals() == []
 
 
@@ -764,7 +765,7 @@ def test_successful_agui_proposal_is_an_inert_candidate_until_rest_persists_it(t
     response = client.post("/api/guide", headers=AUTH, json=_run_input())
     events = _events(response)
 
-    candidate_events = [event for event in events if event["type"] == "CUSTOM"]
+    candidate_events = [event for event in events if event.get("name") == "courseweave.proposal_candidate"]
     assert response.status_code == 200
     assert app.state.course_store.get_state().revision == 0
     assert app.state.course_store.list_proposals() == []
@@ -802,7 +803,7 @@ def test_agui_candidate_failure_and_cancellation_emit_nothing_and_keep_no_candid
 
     failed = client.post("/api/guide", headers=AUTH, json=_run_input())
 
-    assert [event["type"] for event in _events(failed)] == ["RUN_STARTED", "RUN_ERROR"]
+    assert [event["type"] for event in _events(failed)] == ["RUN_STARTED", "CUSTOM", "RUN_ERROR"]
     assert app.state.proposal_candidates == {}
     assert app.state.course_store.list_proposals() == []
 
@@ -1161,8 +1162,8 @@ def test_client_thread_id_cannot_select_another_server_session_history(tmp_path:
     assert "session-b request" in history_text
 
 
-def test_history_namespaces_role_and_server_context_source(tmp_path: Path) -> None:
-    # Defect caught: learner/author or distinct server-held source contexts share a conversation namespace.
+def test_history_namespaces_role_but_continues_across_navigation(tmp_path: Path) -> None:
+    # Defect caught: navigation splits learner history, or Author data enters learner replay.
     client, app = _client(tmp_path)
     model = CountingTestModel(call_tools=[], custom_output_text="assistant reply")
     app.state.professor_model_factory = _configured_factory(model)
@@ -1197,5 +1198,5 @@ def test_history_namespaces_role_and_server_context_source(tmp_path: Path) -> No
         if isinstance(getattr(part, "content", None), str)
     ]
     assert "author-only" not in history_text
-    assert "learner-only" not in history_text
+    assert "learner-only" in history_text
     assert "source-b only" in history_text

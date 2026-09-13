@@ -100,7 +100,7 @@ describe("Author API", () => {
     vi.stubGlobal("fetch", fetch);
     const client = createAuthorClient(runtime);
     const controllers = Array.from({ length: 7 }, () => new AbortController());
-    const manifest = { schema_version: 1, title: "Draft" };
+    const manifest = { schema_version: 2, title: "Draft" };
     const guide = { messages: [{ role: "user", content: "Help" }] };
     const edit = { expected_revision: 1, request: { summary: "Edited" } };
     const accept = { expected_revision: 2 };
@@ -166,4 +166,80 @@ describe("Author API", () => {
     expect(new Set(keys).size).toBe(4);
     expect(keys.every(Boolean)).toBe(true);
   });
+});
+
+it("registers and confirms a separately owned activity context and exact saved ETag", async () => {
+  const context = {
+    source_id: "author-learning-owned",
+    sequence: 1,
+    explicit_module_id: "m",
+    explicit_phase_id: "p",
+  };
+  const resolved = {
+    module_id: "m",
+    phase_id: "p",
+    surface_id: null,
+    reason: "explicit_phase",
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify(resolved)))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ context, resolved })))
+    .mockResolvedValueOnce(
+      new Response("{}", { headers: { etag: '"saved"' } }),
+    );
+  vi.stubGlobal("fetch", fetch);
+  await createAuthorClient(runtime).confirmActivity({
+    source_id: context.source_id,
+    sequence: 1,
+    module_id: "m",
+    phase_id: "p",
+    manifest_etag: '"saved"',
+  });
+  expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual(context);
+  expect(fetch.mock.calls[1]![0]).toContain(
+    "/api/context?source_id=author-learning-owned",
+  );
+  expect(fetch.mock.calls[0]![1]).toMatchObject({
+    method: "POST",
+    credentials: "include",
+  });
+  expect(
+    new Headers(fetch.mock.calls[0]![1].headers).get("Authorization"),
+  ).toBe("Bearer author-token");
+});
+it("rejects mismatched context confirmation and changed byte ETags before guide dispatch", async () => {
+  const selection = {
+    source_id: "author-learning-owned",
+    sequence: 1,
+    module_id: "m",
+    phase_id: "p",
+    manifest_etag: '"saved"',
+  };
+  const resolved = {
+    module_id: "m",
+    phase_id: "p",
+    surface_id: null,
+    reason: "explicit_phase",
+  };
+  const context = {
+    source_id: selection.source_id,
+    sequence: 1,
+    explicit_module_id: "m",
+    explicit_phase_id: "p",
+  };
+  for (const [stored, etag] of [
+    [{ context: { ...context, sequence: 2 }, resolved }, '"saved"'],
+    [{ context, resolved }, '"changed"'],
+  ] as const) {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(resolved)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(stored)))
+      .mockResolvedValueOnce(new Response("{}", { headers: { etag } }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(
+      createAuthorClient(runtime).confirmActivity(selection),
+    ).rejects.toMatchObject({ code: "context_changed" });
+  }
 });

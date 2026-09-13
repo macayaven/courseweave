@@ -25,6 +25,7 @@ from courseweave.jupyter_runtime import (
     CourseWeaveContextRelayHandler,
     CourseWeaveCourseRelayHandler,
     CourseWeaveRuntimeHandler,
+    CourseWeaveReaderHandler,
     RuntimeSettings,
     _jupyter_server_extension_points,
     _load_jupyter_server_extension,
@@ -103,7 +104,9 @@ class _FakeWebApp:
 
 @dataclass
 class _FakeServerApp:
+    identity_provider: IdentityProvider = field(default_factory=IdentityProvider)
     base_url: str = "/jupyter/base/"
+    root_dir: str = "/safe/course"
     web_app: _FakeWebApp = field(default_factory=_FakeWebApp)
     log: logging.Logger = field(default_factory=lambda: logging.getLogger("courseweave-test"))
     no_browser_open_file: bool = False
@@ -143,6 +146,7 @@ def test_extension_hooks_register_base_url_handlers_and_only_three_page_values(
                 ("/jupyter/base/courseweave/runtime", CourseWeaveRuntimeHandler),
                 ("/jupyter/base/courseweave/course", CourseWeaveCourseRelayHandler),
                 ("/jupyter/base/courseweave/context", CourseWeaveContextRelayHandler),
+                ("/jupyter/base/courseweave/reader/(.*)", CourseWeaveReaderHandler, {"course_root":"/safe/course"}),
             ],
         )
     ]
@@ -386,7 +390,7 @@ class TestCourseWeaveJupyterHandlers(AsyncHTTPTestCase):
         assert COURSEWEAVE_SENTINEL not in response.body.decode()
 
     def test_course_relay_is_exact_read_only_server_side_bearer_request(self) -> None:
-        course = {"schema_version": 1, "id": "course", "title": "Course"}
+        course = {"schema_version": 2, "id": "course", "title": "Course"}
         self.fetcher.respond(
             200,
             json.dumps(course).encode(),
@@ -415,7 +419,7 @@ class TestCourseWeaveJupyterHandlers(AsyncHTTPTestCase):
     def test_course_relay_accepts_empty_draft_etag(self) -> None:
         self.fetcher.respond(
             200,
-            b'{"schema_version":1,"modules":[]}',
+            b'{"schema_version":2,"modules":[]}',
             {"Content-Type": "application/json", "ETag": '""'},
         )
         response = self.fetch("/base/courseweave/course", headers=self.auth_headers)
@@ -431,7 +435,7 @@ class TestCourseWeaveJupyterHandlers(AsyncHTTPTestCase):
             with self.subTest(content_type=content_type):
                 self.fetcher.respond(
                     200,
-                    b'{"schema_version":1,"modules":[]}',
+                    b'{"schema_version":2,"modules":[]}',
                     {"Content-Type": content_type, "ETag": VALID_COURSE_ETAG},
                 )
                 response = self.fetch(
@@ -616,3 +620,45 @@ class TestCourseWeaveJupyterHandlers(AsyncHTTPTestCase):
         )
         assert response.code == 502
         assert COURSEWEAVE_SENTINEL not in response.body.decode()
+
+
+class TestCourseWeaveReader(AsyncHTTPTestCase):
+    def get_app(self):
+        from tempfile import TemporaryDirectory
+        from test_reader import course
+        self.directory = TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.course_root = Path(self.directory.name)
+        course(self.course_root)
+        identity = PasswordIdentityProvider(token=JUPYTER_AUTH_SENTINEL)
+        return Application(
+            [(r'/base/courseweave/reader/(.*)', CourseWeaveReaderHandler, {'course_root':str(self.course_root)})],
+            base_url='/base/',login_url='/login',cookie_secret=b'courseweave-test-cookie-secret-32',
+            identity_provider=identity,authorizer=AllowAllAuthorizer(identity_provider=identity),
+            token=JUPYTER_AUTH_SENTINEL,allow_remote_access=True,allow_unauthenticated_access=False,
+            disable_check_xsrf=False,xsrf_cookies=True,log=logging.getLogger('reader-test'))
+
+    def test_authentication_exact_bytes_and_scripts_disabled_same_origin_csp(self):
+        assert self.fetch('/base/courseweave/reader/lessons/one.html',follow_redirects=False).code==403
+        response=self.fetch('/base/courseweave/reader/lessons/one.html',headers={'Authorization':f'token {JUPYTER_AUTH_SENTINEL}'})
+        assert response.code==200
+        assert response.body==(self.course_root/'lessons/one.html').read_bytes()
+        policy=response.headers['Content-Security-Policy']
+        assert "sandbox allow-same-origin" in policy and "script-src 'none'" in policy and 'allow-scripts' not in policy
+        assert "default-src 'none'" in policy and "form-action 'none'" in policy and "base-uri 'none'" in policy
+        assert response.headers['Cache-Control']=='no-store' and response.headers['X-Content-Type-Options']=='nosniff'
+        assert 'Access-Control-Allow-Origin' not in response.headers
+        assert JUPYTER_AUTH_SENTINEL.encode() not in response.body
+        image=self.fetch('/base/courseweave/reader/assets/diagram.svg',headers={'Authorization':f'token {JUPYTER_AUTH_SENTINEL}'})
+        assert image.code==200 and image.headers['Content-Type']=='image/svg+xml'
+        assert image.body==(self.course_root/'assets/diagram.svg').read_bytes()
+
+    def test_no_unlisted_files_query_writes_or_symlink_images(self):
+        headers={'Authorization':f'token {JUPYTER_AUTH_SENTINEL}'}
+        for path in ('courseweave.json','assets/unlisted.svg','lessons/not-declared.html','assets/%252e%252e/secret.svg'):
+            assert self.fetch('/base/courseweave/reader/'+path,headers=headers).code==404
+        assert self.fetch('/base/courseweave/reader/lessons/one.html?download=1',headers=headers).code==400
+        assert self.fetch('/base/courseweave/reader/lessons/one.html',method='POST',body='{}',headers=headers).code==405
+        (self.course_root/'assets/diagram.svg').unlink()
+        (self.course_root/'assets/diagram.svg').symlink_to(self.course_root/'courseweave.json')
+        assert self.fetch('/base/courseweave/reader/assets/diagram.svg',headers=headers).code==404

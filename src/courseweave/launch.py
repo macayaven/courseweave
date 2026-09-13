@@ -8,7 +8,6 @@ import hashlib
 import html
 import json
 import os
-import re
 import secrets
 import shutil
 import signal
@@ -46,17 +45,6 @@ _SAFE_ENVIRONMENT_KEYS = (
     "TMPDIR",
     "USER",
 )
-_TOKEN_QUERY = re.compile(r"([?&](?:token|auth|key)=)[^&\s\"'<>]+", re.IGNORECASE)
-_AUTHORIZATION = re.compile(r"(authorization\s*:\s*)[^\r\n]+", re.IGNORECASE)
-
-
-def _redact_diagnostic(message: str, secrets: tuple[str, ...]) -> str:
-    redacted = _AUTHORIZATION.sub(r"\1[REDACTED]", message)
-    redacted = _TOKEN_QUERY.sub(r"\1[REDACTED]", redacted)
-    for secret in secrets:
-        if secret:
-            redacted = redacted.replace(secret, "[REDACTED]")
-    return redacted
 
 
 class CourseLockError(RuntimeError):
@@ -231,6 +219,8 @@ def _private_lock_file(directory_fd: int, name: str) -> int:
 def reserve_listener(port: int, *, socket_factory: Any = socket.socket) -> Any:
     listener = socket_factory(socket.AF_INET, socket.SOCK_STREAM)
     try:
+        # Reuse a stopped server's TIME_WAIT connections, never another listener.
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind(("127.0.0.1", port))
     except BaseException:
         listener.close()
@@ -396,6 +386,8 @@ class LaunchSupervisor:
         course_root: Path,
         *,
         port: int = 8765,
+        state_dir: Path | None = None,
+        kernel_python: Path | None = None,
         mode: Literal["learn", "author"] = "learn",
         lock_factory: Callable[[Path], Any] = CourseLock,
         listener_factory: Callable[[int], Any] = reserve_listener,
@@ -418,7 +410,25 @@ class LaunchSupervisor:
             raise ValueError("course_root must be a directory")
         if mode not in {"learn", "author"}:
             raise ValueError("mode must be learn or author")
+        self.kernel_python = None
+        self._kernel_root: Path | None = None
+        if kernel_python is not None:
+            # Keep the venv symlink: resolve() can silently select base Python.
+            candidate = Path(kernel_python)
+            if not candidate.is_absolute() or not candidate.is_file() or not os.access(candidate, os.X_OK):
+                raise ValueError("kernel_python must be an absolute executable Python path")
+            try:
+                subprocess.run(
+                    [str(candidate), "-I", "-c", "import ipykernel"],
+                    env={key: os.environ[key] for key in _SAFE_ENVIRONMENT_KEYS if key in os.environ},
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, timeout=10, check=True,
+                )
+            except (OSError, subprocess.SubprocessError):
+                raise ValueError("Course Python must have ipykernel installed") from None
+            self.kernel_python = candidate
         self.port = port
+        self.state_dir = state_dir
         self.mode = mode
         self._lock_factory = lock_factory
         self._listener_factory = listener_factory
@@ -446,7 +456,6 @@ class LaunchSupervisor:
         self._api_failed = False
         self._jupyter_process: Any | None = None
         self._jupyter_shutdown_attempted = False
-        self._output_threads: list[threading.Thread] = []
         self._temporary_directory: _PrivateRuntimeDirectory | None = None
         self._child_environment: dict[str, str] | None = None
         self._requested_signal: int | None = None
@@ -461,6 +470,15 @@ class LaunchSupervisor:
     def run(self) -> int:
         exit_code = 1
         try:
+            from courseweave.manifest import load_manifest, ManifestValidationError
+            if (self.course_root / 'courseweave.json').is_file():
+                try:
+                    load_manifest(self.course_root)
+                except ManifestValidationError as exc:
+                    if 'migrat' in str(exc):
+                        self._error_sink(str(exc))
+                        self._reported_error = True
+                    raise _LaunchFailure() from None
             self._install_signal_handlers()
             self._lock = self._lock_factory(self.course_root)
             self._lock.acquire()
@@ -469,7 +487,7 @@ class LaunchSupervisor:
             service_url = f"http://{_HOST}:{api_port}"
             self.capability_token = self._secret_factory(32)
             application = create_app(
-                self.course_root, capability_token=self.capability_token
+                self.course_root, capability_token=self.capability_token, state_dir=self.state_dir
             )
             self._api_server = self._api_server_factory(application, api_port)
             self._start_api()
@@ -479,6 +497,8 @@ class LaunchSupervisor:
             self.runtime_id = self._secret_factory(32)
             self._temporary_directory = _PrivateRuntimeDirectory()
             runtime_root = Path(self._temporary_directory.name)
+            if self.kernel_python is not None:
+                self._prepare_course_kernel(runtime_root / "kernels")
             config_dir = runtime_root / "config"
             jupyter_runtime_dir = runtime_root / "runtime"
             config_dir.mkdir(mode=0o700)
@@ -494,13 +514,15 @@ class LaunchSupervisor:
                 cwd=self.course_root,
                 env=self._child_environment,
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                # Jupyter output can contain credentials. It is never surfaced;
+                # discard it directly so inherited writers cannot hold a reader
+                # thread open after the owned server exits.
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 shell=False,
                 start_new_session=False,
                 pass_fds=(self._lock.fileno(),),
             )
-            self._start_output_drains()
             self._wait_for_jupyter(jupyter_url, service_url)
             if self._requested_signal is not None:
                 exit_code = 128 + self._requested_signal
@@ -554,7 +576,29 @@ class LaunchSupervisor:
         )
         return environment
 
+    def _prepare_course_kernel(self, root: Path) -> None:
+        assert self.kernel_python is not None
+        root.mkdir(mode=0o700)
+        spec_dir = root / "python3"
+        spec_dir.mkdir(mode=0o700)
+        (spec_dir / "kernel.json").write_text(json.dumps({
+            "argv": [str(self.kernel_python), "-m", "ipykernel_launcher", "-f", "{connection_file}"],
+            "display_name": "Course Python", "language": "python",
+        }), encoding="utf-8")
+        self._kernel_root = root
+
     def _build_jupyter_argv(self, port: int) -> list[str]:
+        kernel_args = []
+        if self.kernel_python is not None:
+            if self._kernel_root is None:
+                raise ValueError("Course kernel has not been prepared")
+            kernel_args = [
+                "--ServerApp.kernel_spec_manager_class=courseweave.jupyter_runtime.CourseKernelSpecManager",
+                "--CourseKernelSpecManager.course_kernel_dir=" + str(self._kernel_root),
+                '--KernelSpecManager.allowed_kernelspecs=["python3"]',
+                "--KernelSpecManager.ensure_native_kernel=False",
+                "--MappingKernelManager.default_kernel_name=python3",
+            ]
         return [
             sys.executable,
             "-m",
@@ -570,6 +614,7 @@ class LaunchSupervisor:
             "--ServerApp.use_redirect_file=False",
             "--ServerApp.jpserver_extensions=courseweave.jupyter_runtime=True",
             "--ServerApp.reraise_server_extension_failures=True",
+            *kernel_args,
         ]
 
     def _install_signal_handlers(self) -> None:
@@ -673,39 +718,6 @@ class LaunchSupervisor:
             if child_exit is not None:
                 return _normalized_exit_code(child_exit)
             self._sleep(0.1)
-
-    def _start_output_drains(self) -> None:
-        for name in ("stdout", "stderr"):
-            stream = getattr(self._jupyter_process, name, None)
-            if stream is None:
-                continue
-            thread = threading.Thread(
-                target=self._drain_output,
-                args=(stream,),
-                name=f"courseweave-jupyter-{name}",
-                daemon=False,
-            )
-            thread.start()
-            self._output_threads.append(thread)
-
-    def _drain_output(self, stream: Any) -> None:
-        while True:
-            try:
-                chunk = stream.read(64 * 1024)
-                if not chunk:
-                    return
-                if isinstance(chunk, bytes):
-                    chunk = chunk.decode("utf-8", errors="replace")
-                _redact_diagnostic(
-                    chunk,
-                    tuple(
-                        value
-                        for value in (self.capability_token, self.jupyter_token)
-                        if value is not None
-                    ),
-                )
-            except BaseException:
-                return
 
     def _report_failure(self) -> None:
         if self._reported_error:
@@ -821,21 +833,6 @@ class LaunchSupervisor:
             else:
                 cleanup_ok = False
 
-        remaining_threads: list[threading.Thread] = []
-        for thread in self._output_threads:
-            try:
-                thread.join(timeout=self._shutdown_timeout)
-            except BaseException:
-                cleanup_ok = False
-            try:
-                thread_alive = thread.is_alive()
-            except BaseException:
-                cleanup_ok = False
-                thread_alive = True
-            if thread_alive:
-                cleanup_ok = False
-                remaining_threads.append(thread)
-        self._output_threads = remaining_threads
         return process_stopped, cleanup_ok
 
     def _stop_api(self) -> tuple[bool, bool]:

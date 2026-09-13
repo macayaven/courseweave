@@ -1,6 +1,7 @@
-"""Task 1 manifest behavior, driven by literal schema-v1 fixtures."""
+"""Task 1 manifest behavior, driven by literal canonical v2 fixtures."""
 
 from __future__ import annotations
+
 
 import hashlib
 import json
@@ -46,158 +47,165 @@ CAPABILITIES = {
     "create_workspace_proposal": True,
 }
 
-VALID_ALL_VARIANTS = {
-    "schema_version": 1,
-    "id": "all-variants",
-    "title": "All manifest variants",
-    "description": "A literal fixture covering every surface and completion form.",
-    "entry_module_id": "module-one",
-    "policies": POLICIES,
-    "modules": [
-        {
-            "id": "module-one",
-            "title": "Module One",
-            "description": "",
-            "phases": [
-                {
-                    "id": "read-html",
-                    "title": "Read HTML",
-                    "kind": "read",
-                    "teacher_mode": "reading_companion",
-                    "surfaces": [
-                        {
-                            "id": "lesson-html",
-                            "type": "html",
-                            "role": "primary",
-                            "path": "lesson.html",
-                        },
-                        {
-                            "id": "lesson-markdown",
-                            "type": "markdown",
-                            "role": "reference",
-                            "path": "lesson.md",
-                        },
-                        {
-                            "id": "lesson-source",
-                            "type": "source",
-                            "role": "evidence",
-                            "path": "src/example.py",
-                        },
-                    ],
-                    "completion": {"type": "manual"},
-                    "capabilities": CAPABILITIES,
-                },
-                {
-                    "id": "predict-notebook",
-                    "title": "Predict in notebook",
-                    "kind": "predict",
-                    "teacher_mode": "socratic_guide",
-                    "surfaces": [
-                        {
-                            "id": "exercise-notebook",
-                            "type": "notebook",
-                            "role": "exercise",
-                            "path": "notebooks/exercise.ipynb",
-                            "match": {
-                                "cell_ids": ["cell-real-uuid"],
-                                "cell_tags": ["prediction"],
-                            },
-                        }
-                    ],
-                    "completion": {
-                        "type": "prediction_recorded",
-                        "record_id": "prediction-one",
-                    },
-                    "capabilities": CAPABILITIES,
-                },
-                {
-                    "id": "watch-local",
-                    "title": "Watch local segment",
-                    "kind": "watch",
-                    "teacher_mode": "orienter",
-                    "surfaces": [
-                        {
-                            "id": "local-video",
-                            "type": "video",
-                            "role": "primary",
-                            "path": "media/lesson.mp4",
-                            "start_seconds": 2.5,
-                            "end_seconds": 8.0,
-                        }
-                    ],
-                    "completion": {
-                        "type": "receipt_recorded",
-                        "record_id": "video-receipt",
-                    },
-                    "capabilities": CAPABILITIES,
-                },
-                {
-                    "id": "watch-remote",
-                    "title": "Watch remote segment",
-                    "kind": "watch",
-                    "teacher_mode": "orienter",
-                    "surfaces": [
-                        {
-                            "id": "remote-video",
-                            "type": "video",
-                            "role": "reference",
-                            "url": "https://cdn.example.test/lesson.mp4",
-                            "start_seconds": 0,
-                            "end_seconds": 12,
-                        }
-                    ],
-                    "completion": {"type": "manual"},
-                    "capabilities": CAPABILITIES,
-                },
-                {
-                    "id": "lab-terminal",
-                    "title": "Run the lab",
-                    "kind": "lab",
-                    "teacher_mode": "debugging_coach",
-                    "surfaces": [
-                        {
-                            "id": "lab-terminal",
-                            "type": "terminal",
-                            "role": "exercise",
-                            "label": "Run tests",
-                            "argv": ["uv", "run", "pytest", "-q"],
-                            "cwd": ".",
-                        },
-                        {
-                            "id": "reference-link",
-                            "type": "external",
-                            "role": "reference",
-                            "url": "https://docs.example.test/course",
-                        },
-                    ],
-                    "completion": {
-                        "type": "artifact_exists",
-                        "record_id": "lab-artifact",
-                        "path": "work/result.json",
-                    },
-                    "capabilities": CAPABILITIES,
-                },
-            ],
-        }
-    ],
-}
+VALID_ALL_VARIANTS = {'schema_version': 2,
+ 'id': 'all-variants',
+ 'title': 'All manifest variants',
+ 'description': 'A literal fixture covering every surface and completion form.',
+ 'entry_module_id': 'module-one',
+ 'runtime': {'type': 'jupyter', 'kernel': {'type': 'python_uv_project'}},
+ 'policies': {'content_sharing': 'explicit_only',
+              'allowed_share_kinds': ['cell', 'selection'],
+              'max_shared_chars': 8192,
+              'allowed_proposal_types': ['workspace'],
+              'durable_mutation': 'proposal_or_direct_student_action',
+              'terminal_execution': 'student_only',
+              'conversation_memory': 'session_only',
+              'workspace_write_globs': ['work/*.py', 'notes/*.md']},
+ 'modules': [{'id': 'module-one',
+              'title': 'Module One',
+              'description': '',
+              'phases': [{'id': 'read-html',
+                          'title': 'Read HTML',
+                          'progress': 'required',
+                          'experience': {'type': 'builtin', 'id': 'reading'},
+                          'surfaces': [{'id': 'lesson-html',
+                                        'purpose': 'primary',
+                                        'type': 'html',
+                                        'label': 'lesson-html',
+                                        'path': 'lesson.html'},
+                                       {'id': 'lesson-markdown',
+                                        'purpose': 'reference',
+                                        'type': 'markdown',
+                                        'label': 'lesson-markdown',
+                                        'path': 'lesson.md'},
+                                       {'id': 'lesson-source',
+                                        'purpose': 'supporting',
+                                        'type': 'source',
+                                        'label': 'lesson-source',
+                                        'path': 'src/example.py'}],
+                          'completion': {'requirements': [{'id': 'acknowledgement',
+                                                           'type': 'learner_record',
+                                                           'record_kind': 'attestation',
+                                                           'prompt': 'Confirm completion of Read '
+                                                                     'HTML.'}]},
+                          'teacher': {'access': {'mode': 'available', 'requires': []},
+                                      'guidance': {'style': {'type': 'builtin',
+                                                             'id': 'explanatory'},
+                                                   'hint_level': 'graduated'},
+                                      'sharing': {'allow': ['selection', 'cell']},
+                                      'proposals': {'allow': ['workspace']}}},
+                         {'id': 'predict-notebook',
+                          'title': 'Predict in notebook',
+                          'progress': 'required',
+                          'experience': {'type': 'builtin', 'id': 'prediction'},
+                          'surfaces': [{'id': 'exercise-notebook',
+                                        'purpose': 'supporting',
+                                        'type': 'notebook',
+                                        'label': 'exercise-notebook',
+                                        'path': 'notebooks/exercise.ipynb',
+                                        'selector': {'type': 'cell_ids',
+                                                     'values': ['cell-real-uuid']}},
+                                       {'id': 'exercise-notebook-tags',
+                                        'purpose': 'supporting',
+                                        'type': 'notebook',
+                                        'label': 'exercise-notebook-tags',
+                                        'path': 'notebooks/exercise.ipynb',
+                                        'selector': {'type': 'cell_tags',
+                                                     'values': ['prediction'],
+                                                     'match': 'any'}}],
+                          'completion': {'requirements': [{'id': 'prediction-one',
+                                                           'type': 'learner_record',
+                                                           'record_kind': 'text',
+                                                           'prompt': 'Record your prediction for '
+                                                                     'Predict in notebook.'}]},
+                          'teacher': {'access': {'mode': 'available',
+                                                 'requires': ['prediction-one']},
+                                      'guidance': {'style': {'type': 'builtin', 'id': 'socratic'},
+                                                   'hint_level': 'graduated'},
+                                      'sharing': {'allow': ['selection', 'cell']},
+                                      'proposals': {'allow': ['workspace']}}},
+                         {'id': 'watch-local',
+                          'title': 'Watch local segment',
+                          'progress': 'required',
+                          'experience': {'type': 'builtin', 'id': 'media'},
+                          'surfaces': [{'id': 'local-video',
+                                        'purpose': 'primary',
+                                        'type': 'video',
+                                        'label': 'local-video',
+                                        'src': 'media/lesson.mp4',
+                                        'start_seconds': 2,
+                                        'end_seconds': 8}],
+                          'completion': {'requirements': [{'id': 'video-receipt',
+                                                           'type': 'learner_record',
+                                                           'record_kind': 'evidence',
+                                                           'prompt': 'Record your evidence for '
+                                                                     'Watch local segment.'}]},
+                          'teacher': {'access': {'mode': 'available', 'requires': []},
+                                      'guidance': {'style': {'type': 'builtin', 'id': 'orienting'},
+                                                   'hint_level': 'graduated'},
+                                      'sharing': {'allow': ['selection', 'cell']},
+                                      'proposals': {'allow': ['workspace']}}},
+                         {'id': 'watch-remote',
+                          'title': 'Watch remote segment',
+                          'progress': 'required',
+                          'experience': {'type': 'builtin', 'id': 'media'},
+                          'surfaces': [{'id': 'remote-video',
+                                        'purpose': 'reference',
+                                        'type': 'video',
+                                        'label': 'remote-video',
+                                        'src': 'https://cdn.example.test/lesson.mp4',
+                                        'start_seconds': 0,
+                                        'end_seconds': 12}],
+                          'completion': {'requirements': [{'id': 'acknowledgement',
+                                                           'type': 'learner_record',
+                                                           'record_kind': 'attestation',
+                                                           'prompt': 'Confirm completion of Watch '
+                                                                     'remote segment.'}]},
+                          'teacher': {'access': {'mode': 'available', 'requires': []},
+                                      'guidance': {'style': {'type': 'builtin', 'id': 'orienting'},
+                                                   'hint_level': 'graduated'},
+                                      'sharing': {'allow': ['selection', 'cell']},
+                                      'proposals': {'allow': ['workspace']}}},
+                         {'id': 'lab-terminal',
+                          'title': 'Run the lab',
+                          'progress': 'required',
+                          'experience': {'type': 'builtin', 'id': 'practice'},
+                          'surfaces': [{'id': 'lab-terminal',
+                                        'purpose': 'supporting',
+                                        'type': 'terminal',
+                                        'label': 'Run tests',
+                                        'command': ['uv', 'run', 'pytest', '-q'],
+                                        'cwd': '.'},
+                                       {'id': 'reference-link',
+                                        'purpose': 'reference',
+                                        'type': 'external',
+                                        'label': 'reference-link',
+                                        'url': 'https://docs.example.test/course'}],
+                          'completion': {'requirements': [{'id': 'lab-artifact',
+                                                           'type': 'artifact_exists',
+                                                           'prompt': 'Create the artifact for Run '
+                                                                     'the lab.',
+                                                           'path': 'work/result.json'}]},
+                          'teacher': {'access': {'mode': 'available', 'requires': []},
+                                      'guidance': {'style': {'type': 'builtin', 'id': 'debugging'},
+                                                   'hint_level': 'graduated'},
+                                      'sharing': {'allow': ['selection', 'cell']},
+                                      'proposals': {'allow': ['workspace']}}}]}]}
 
-EMPTY_COURSE = {
-    "schema_version": 1,
-    "id": "empty-course",
-    "title": "Empty Course",
-    "description": "",
-    "entry_module_id": None,
-    "policies": {
-        "content_sharing": "explicit_only",
-        "durable_mutation": "proposal_or_direct_student_action",
-        "terminal_execution": "student_only",
-        "conversation_memory": "session_only",
-        "max_shared_chars": 4096,
-        "workspace_write_globs": [],
-    },
-    "modules": [],
-}
+EMPTY_COURSE = {'schema_version': 2,
+ 'id': 'empty-course',
+ 'title': 'Empty Course',
+ 'description': '',
+ 'policies': {'content_sharing': 'explicit_only',
+              'allowed_share_kinds': [],
+              'max_shared_chars': 4096,
+              'allowed_proposal_types': [],
+              'durable_mutation': 'proposal_or_direct_student_action',
+              'terminal_execution': 'student_only',
+              'conversation_memory': 'session_only',
+              'workspace_write_globs': []},
+ 'modules': [],
+ 'entry_module_id': None}
 
 
 def _write_runnable_files(root: Path) -> None:
@@ -208,7 +216,7 @@ def _write_runnable_files(root: Path) -> None:
     (root / "lesson.html").write_text("<h1>Lesson</h1>\n", encoding="utf-8")
     (root / "lesson.md").write_text("# Lesson\n", encoding="utf-8")
     (root / "src/example.py").write_text("answer = 42\n", encoding="utf-8")
-    (root / "notebooks/exercise.ipynb").write_text("{}\n", encoding="utf-8")
+    (root / "notebooks/exercise.ipynb").write_text(json.dumps({"nbformat":4,"cells":[{"id":"cell-real-uuid","cell_type":"code","metadata":{"tags":["prediction"]}}]}), encoding="utf-8")
     (root / "media/lesson.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42video")
 
 
@@ -222,25 +230,26 @@ class TestNormativeAndCrossRecordValidation:
             "markdown",
             "source",
             "notebook",
+            "notebook",
             "video",
             "video",
             "terminal",
             "external",
         ]
-        assert [phase.completion.type for phase in manifest.modules[0].phases] == [
-            "manual",
-            "prediction_recorded",
-            "receipt_recorded",
-            "manual",
+        assert [phase.completion.requirements[0].type for phase in manifest.modules[0].phases] == [
+            "learner_record",
+            "learner_record",
+            "learner_record",
+            "learner_record",
             "artifact_exists",
         ]
 
     @pytest.mark.parametrize(
         ("mutation", "expected_fragment"),
         [
-            (("module-duplicate",), "duplicate module id"),
-            (("phase-duplicate",), "duplicate phase id"),
-            (("surface-duplicate",), "duplicate surface id"),
+            (("module-duplicate",), "/modules/1/id"),
+            (("phase-duplicate",), "/modules/0/phases/5/id"),
+            (("surface-duplicate",), "/modules/0/phases/0/surfaces/1/id"),
             (("missing-entry",), "entry_module_id"),
             (("null-entry-with-modules",), "entry_module_id"),
             (("non-null-entry-empty",), "entry_module_id"),
@@ -267,21 +276,22 @@ class TestNormativeAndCrossRecordValidation:
             data = deepcopy(EMPTY_COURSE)
             data["entry_module_id"] = "not-a-module"
 
-        with pytest.raises(ManifestValidationError, match=expected_fragment):
+        with pytest.raises(ManifestValidationError) as raised:
             parse_manifest_data(data, tmp_path)
+        assert any(expected_fragment in issue["path"] for issue in raised.value.issues)
 
     def test_empty_course_is_structurally_valid(self, tmp_path: Path) -> None:
         manifest = parse_manifest_data(EMPTY_COURSE, tmp_path)
-        assert manifest.modules == []
+        assert manifest.modules == ()
         assert manifest.entry_module_id is None
 
     @pytest.mark.parametrize(
         ("change", "expected_fragment"),
         [
-            ({"unexpected": True}, "Additional properties"),
-            ({"schema_version": 2}, "1 was expected"),
-            ({"title": "   "}, "does not match"),
-            ({"id": "Not A Slug"}, "does not match"),
+            ({"unexpected": True}, "/unexpected"),
+            ({"schema_version": 3}, "schema_version"),
+            ({"title": "   "}, "/title"),
+            ({"id": "Not A Slug"}, "/id"),
         ],
     )
     def test_normative_schema_rejects_unexpected_or_malformed_fields(
@@ -289,42 +299,18 @@ class TestNormativeAndCrossRecordValidation:
     ) -> None:
         data = deepcopy(EMPTY_COURSE)
         data.update(change)
-        with pytest.raises(ManifestValidationError, match=expected_fragment):
+        with pytest.raises(ManifestValidationError) as raised:
             parse_manifest_data(data, tmp_path)
+        assert any(expected_fragment in issue["path"] for issue in raised.value.issues)
 
     @pytest.mark.parametrize(
         "surface",
         [
-            {
-                "id": "bad-video",
-                "type": "video",
-                "role": "primary",
-                "path": "media/a.mp4",
-                "url": "https://example.test/a.mp4",
-            },
-            {"id": "bad-video", "type": "video", "role": "primary"},
-            {
-                "id": "bad-video",
-                "type": "video",
-                "role": "primary",
-                "path": "media/a.mp4",
-                "start_seconds": 8,
-                "end_seconds": 8,
-            },
-            {
-                "id": "bad-video",
-                "type": "video",
-                "role": "primary",
-                "path": "media/a.mp4",
-                "start_seconds": 9,
-                "end_seconds": 8,
-            },
-            {
-                "id": "bad-video",
-                "type": "video",
-                "role": "primary",
-                "url": "http://example.test/a.mp4",
-            },
+            {'id': 'bad-video', 'type': 'video', 'url': 'https://example.test/a.mp4', 'purpose': 'primary', 'label': 'bad-video', 'src': 'media/a.mp4'},
+            {'id': 'bad-video', 'type': 'video', 'purpose': 'primary', 'label': 'bad-video'},
+            {'id': 'bad-video', 'type': 'video', 'start_seconds': 8, 'end_seconds': 8, 'purpose': 'primary', 'label': 'bad-video', 'src': 'media/a.mp4'},
+            {'id': 'bad-video', 'type': 'video', 'start_seconds': 9, 'end_seconds': 8, 'purpose': 'primary', 'label': 'bad-video', 'src': 'media/a.mp4'},
+            {'id': 'bad-video', 'type': 'video', 'purpose': 'primary', 'label': 'bad-video', 'src': 'http://example.test/a.mp4'},
         ],
     )
     def test_video_source_ranges_and_https_are_enforced(
@@ -363,22 +349,23 @@ class TestPathAndRunnableValidation:
         (tmp_path / "escape").symlink_to(outside, target_is_directory=True)
         data = deepcopy(VALID_ALL_VARIANTS)
         data["modules"][0]["phases"][0]["surfaces"][1]["path"] = "escape/file.md"
-        with pytest.raises(ManifestValidationError, match="course root"):
+        with pytest.raises(ManifestValidationError) as raised:
             parse_manifest_data(data, tmp_path)
+        assert raised.value.issues[0]["code"] == "path_symlink_rejected"
 
     def test_structural_validation_allows_missing_local_files_and_future_artifact(
         self, tmp_path: Path
     ) -> None:
         manifest = parse_manifest_data(VALID_ALL_VARIANTS, tmp_path)
-        assert manifest.modules[0].phases[-1].completion.path == "work/result.json"
+        assert manifest.modules[0].phases[-1].completion.requirements[0].path == "work/result.json"
 
     def test_runnable_validation_accumulates_sorted_path_issues(self, tmp_path: Path) -> None:
         data = deepcopy(VALID_ALL_VARIANTS)
         phase = data["modules"][0]["phases"][0]
         phase["surfaces"] = [
-            {"id": "missing", "type": "markdown", "role": "primary", "path": "missing.md"},
-            {"id": "cwd", "type": "terminal", "role": "exercise", "label": "Run", "argv": ["echo"], "cwd": "missing-cwd"},
-            {"id": "lfs", "type": "video", "role": "reference", "path": "video.mp4"},
+            {'id': 'missing', 'type': 'markdown', 'path': 'missing.md', 'purpose': 'primary', 'label': 'missing'},
+            {'id': 'cwd', 'type': 'terminal', 'label': 'Run', 'cwd': 'missing-cwd', 'purpose': 'supporting', 'command': ['echo']},
+            {'id': 'lfs', 'type': 'video', 'purpose': 'reference', 'label': 'lfs', 'src': 'video.mp4'},
         ]
         data["modules"][0]["phases"] = [phase]
         (tmp_path / "video.mp4").write_bytes(b"version https://git-lfs.github.com/spec/v1\n")
@@ -388,17 +375,18 @@ class TestPathAndRunnableValidation:
             validate_runnable(parsed, tmp_path)
 
         assert raised.value.issues == [
-            {"path": "/modules/0/phases/0/surfaces/0/path", "code": "missing_artifact", "message": "A required local surface is missing."},
-            {"path": "/modules/0/phases/0/surfaces/1/cwd", "code": "invalid_terminal_cwd", "message": "A terminal working directory is required."},
-            {"path": "/modules/0/phases/0/surfaces/2/path", "code": "lfs_pointer", "message": "A local video cannot be a Git LFS pointer."},
+            {"path": "/modules/0/phases/0/surfaces/0/path", "code": "source_missing", "message": "The manifest field or local source is invalid."},
+            {"path": "/modules/0/phases/0/surfaces/1/cwd", "code": "source_missing", "message": "The manifest field or local source is invalid."},
+            {"path": "/modules/0/phases/0/surfaces/2/src", "code": "lfs_pointer", "message": "The manifest field or local source is invalid."},
         ]
 
     def test_runnable_validation_requires_ordinary_local_surface_files(
         self, tmp_path: Path
     ) -> None:
         manifest = parse_manifest_data(VALID_ALL_VARIANTS, tmp_path)
-        with pytest.raises(ManifestValidationError, match="lesson.html"):
+        with pytest.raises(ManifestValidationError) as raised:
             validate_runnable(manifest, tmp_path)
+        assert any(i["path"].endswith("/surfaces/0/path") and i["code"] == "source_missing" for i in raised.value.issues)
 
     def test_runnable_validation_allows_missing_future_artifact(
         self, tmp_path: Path
@@ -419,8 +407,9 @@ class TestPathAndRunnableValidation:
             encoding="utf-8",
         )
         manifest = parse_manifest_data(VALID_ALL_VARIANTS, tmp_path)
-        with pytest.raises(ManifestValidationError, match="Git LFS pointer"):
+        with pytest.raises(ManifestValidationError) as raised:
             validate_runnable(manifest, tmp_path)
+        assert any(i["code"] == "lfs_pointer" for i in raised.value.issues)
 
 
 class TestLoadExportAndETag:
@@ -437,9 +426,9 @@ class TestLoadExportAndETag:
 
     def test_missing_manifest_returns_no_implicit_file(self, tmp_path: Path) -> None:
         draft = empty_manifest_draft(tmp_path)
-        assert draft.schema_version == 1
+        assert draft.schema_version == 2
         assert draft.entry_module_id is None
-        assert draft.modules == []
+        assert draft.modules == ()
         assert not (tmp_path / "courseweave.json").exists()
 
     def test_empty_draft_clamps_a_maximum_length_directory_title(
@@ -448,32 +437,15 @@ class TestLoadExportAndETag:
         root = tmp_path / ("a" * 255)
         draft = empty_manifest_draft(root)
         assert len(draft.id) == 80
-        assert len(draft.title) == 240
-        assert draft.modules == []
+        assert len(draft.title) == 200
+        assert draft.modules == ()
         assert not (root / "courseweave.json").exists()
 
     def test_export_is_deterministic_and_etag_hashes_exact_bytes(
         self, tmp_path: Path
     ) -> None:
         manifest = parse_manifest_data(EMPTY_COURSE, tmp_path)
-        expected = (
-            b'{\n'
-            b'  "schema_version": 1,\n'
-            b'  "id": "empty-course",\n'
-            b'  "title": "Empty Course",\n'
-            b'  "description": "",\n'
-            b'  "entry_module_id": null,\n'
-            b'  "policies": {\n'
-            b'    "content_sharing": "explicit_only",\n'
-            b'    "durable_mutation": "proposal_or_direct_student_action",\n'
-            b'    "terminal_execution": "student_only",\n'
-            b'    "conversation_memory": "session_only",\n'
-            b'    "max_shared_chars": 4096,\n'
-            b'    "workspace_write_globs": []\n'
-            b'  },\n'
-            b'  "modules": []\n'
-            b'}\n'
-        )
+        expected = b'{\n  "schema_version": 2,\n  "id": "empty-course",\n  "title": "Empty Course",\n  "description": "",\n  "entry_module_id": null,\n  "runtime": null,\n  "policies": {\n    "content_sharing": "explicit_only",\n    "allowed_share_kinds": [],\n    "max_shared_chars": 4096,\n    "allowed_proposal_types": [],\n    "durable_mutation": "proposal_or_direct_student_action",\n    "terminal_execution": "student_only",\n    "conversation_memory": "session_only",\n    "workspace_write_globs": []\n  },\n  "modules": []\n}\n'
         assert manifest_bytes(manifest) == expected
         assert manifest_etag(expected) == f'"{hashlib.sha256(expected).hexdigest()}"'
 
@@ -495,12 +467,12 @@ class TestLoadExportAndETag:
 
 class TestLiteralExampleCourses:
     @pytest.mark.parametrize("example_name", ["minimal-course", "cli-course"])
-    def test_examples_are_saved_runnable_schema_v1_courses(
+    def test_examples_are_saved_runnable_schema_v2_courses(
         self, example_name: str
     ) -> None:
         root = Path(__file__).parents[1] / "examples" / example_name
         manifest = load_manifest(root, runnable=True)
-        assert manifest.schema_version == 1
+        assert manifest.schema_version == 2
         assert manifest.entry_module_id is not None
         assert manifest.modules[0].phases[0].surfaces[0].path == "lesson.md"
 

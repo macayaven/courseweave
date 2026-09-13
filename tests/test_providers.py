@@ -78,6 +78,13 @@ class _StubHandler(BaseHTTPRequestHandler):
         mode = self.server.mode  # type: ignore[attr-defined]
         if mode == "auth_failure":
             self._send(401, {"error": {"message": "bad key secret-test-key"}})
+        elif mode == "rate_limited":
+            self._send(429, {"error": {"message": "private upstream body"}})
+        elif mode in {"length", "content_filter"}:
+            if self.server.requests[-1]["body"]["stream"]:
+                self._sse('data: ' + json.dumps({"choices": [{"delta": {"content": "partial"}, "finish_reason": mode}]}) + '\n\ndata: [DONE]\n\n')
+            else:
+                self._send(200, {"id": "fixture", "created": 1, "model": "stub-model", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "partial"}, "finish_reason": mode}]})
         elif mode == "unsupported":
             self._send(400, {"error": {"message": "tool calling unsupported"}})
         elif mode == "malformed":
@@ -196,7 +203,7 @@ def test_custom_base_url_routes_each_provider_to_its_local_protocol(provider: st
 def test_each_provider_streams_from_its_local_stub(provider: str) -> None:
     # Defect caught: streaming bypasses the configured model adapter or loses text deltas.
     with provider_stub() as server:
-        result = create_model(config(provider, stub_base_url(provider, server)))
+        result = create_model(config(provider, stub_base_url(provider, server), COURSEWEAVE_PROVIDER_PROFILE="stream-tools-v1"))
         response = result.adapter.complete_sync("Say hello", stream=True)
     assert response.status == "ok"
     assert response.content == "hello world"
@@ -400,3 +407,24 @@ def test_doctor_redacts_provider_credentials(tmp_path) -> None:
     assert "base_url: SET" in result.output
     assert "credential: SET" in result.output
     assert "secret-test-key" not in result.output
+
+
+@pytest.mark.parametrize("mode,kind", [("length", "truncated"), ("content_filter", "refusal"), ("rate_limited", "rate_limited")])
+@pytest.mark.parametrize("stream", [False, True])
+def test_actual_wire_failure_classification_never_reports_success(mode, kind, stream):
+    with provider_stub(mode) as server:
+        model = create_model(config('openai', stub_base_url('openai', server), COURSEWEAVE_PROVIDER_PROFILE='stream-tools-v1'))
+        result = model.adapter.complete_sync('Explain', stream=stream)
+    assert result.status == 'provider_error'
+    assert result.failure.kind == kind
+    assert 'private upstream body' not in result.failure.message
+
+
+def test_text_only_wire_omits_tool_and_schema_fields_even_when_stream_requested():
+    with provider_stub() as server:
+        model = create_model(config('openai', stub_base_url('openai', server), COURSEWEAVE_PROVIDER_PROFILE='text-only-v1'))
+        result = model.adapter.complete_sync('Explain', stream=True)
+        request = server.requests[-1]['body']
+    assert result.status == 'ok'
+    assert request['stream'] is False
+    assert not {'tools', 'tool_choice', 'response_format'} & set(request)

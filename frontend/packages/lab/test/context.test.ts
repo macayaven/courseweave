@@ -7,6 +7,8 @@ import {
   type WorkspaceMetadata
 } from '../src/context';
 
+function confirmations(child:Window){return (child.postMessage as ReturnType<typeof vi.fn>).mock.calls.filter(([message])=>message.type==='courseweave.context.changed.v1');}
+
 class TestSignal {
   private slots: Array<() => void> = [];
   connect(slot: () => void) { this.slots.push(slot); }
@@ -120,7 +122,7 @@ describe('ContextPublisher', () => {
       { source_id: 'source-a', sequence: 0, ...empty },
       { source_id: 'source-a', sequence: 1, ...latest }
     ]);
-    expect(child.postMessage).toHaveBeenCalledTimes(2);
+    expect(confirmations(child)).toHaveLength(1);
     expect(child.postMessage).toHaveBeenLastCalledWith({ type: 'courseweave.context.changed.v1', sourceId: 'source-a' }, 'https://courseweave.test');
     expect(JSON.stringify(child.postMessage.mock.calls)).not.toContain('src/latest.py');
   });
@@ -135,8 +137,8 @@ describe('ContextPublisher', () => {
     publisher.setChildWindow(nextChild);
     await publisher.publish({ ...empty, surface_kind: 'source', active_path: 'src/new.py' });
     expect(postContext.mock.calls.map(([value]) => [value.source_id, value.sequence])).toEqual([['source-a', 0], ['source-a', 1]]);
-    expect(firstChild.postMessage).toHaveBeenCalledOnce();
-    expect(nextChild.postMessage).toHaveBeenCalledOnce();
+    expect(confirmations(firstChild)).toHaveLength(1);
+    expect(confirmations(nextChild)).toHaveLength(1);
   });
 
   it('retries an ambiguous backend failure with the same sequence and does not notify early', async () => {
@@ -146,10 +148,10 @@ describe('ContextPublisher', () => {
     const publisher = new ContextPublisher({ sourceId: 'source-a', relay: { postContext }, childWindow: child, serviceOrigin: 'https://courseweave.test', onRecovery });
     await publisher.publish(empty);
     expect(onRecovery).toHaveBeenCalledWith('backend');
-    expect(child.postMessage).not.toHaveBeenCalled();
+    expect(confirmations(child)).toHaveLength(0);
     await publisher.retry();
     expect(postContext.mock.calls.map(([value]) => value.sequence)).toEqual([0, 0]);
-    expect(child.postMessage).toHaveBeenCalledOnce();
+    expect(confirmations(child)).toHaveLength(1);
   });
 
   it('advances after one stale response and exposes repeated conflict for explicit recovery', async () => {
@@ -163,10 +165,10 @@ describe('ContextPublisher', () => {
     expect(postContext.mock.calls.slice(0, 2).map(([value]) => value.sequence)).toEqual([0, 1]);
     await publisher.publish({ ...empty, active_path: 'next.py', surface_kind: 'source' });
     expect(onRecovery).toHaveBeenCalledWith('conflict');
-    expect(child.postMessage).toHaveBeenCalledOnce();
+    expect(confirmations(child)).toHaveLength(1);
     await publisher.retry();
     expect(postContext.mock.calls.slice(2).map(([value]) => value.sequence)).toEqual([2, 3]);
-    expect(child.postMessage).toHaveBeenCalledTimes(2);
+    expect(confirmations(child)).toHaveLength(2);
   });
 
   it('starts a full activation at sequence zero under its new source', async () => {
@@ -207,7 +209,7 @@ describe('ContextPublisher', () => {
     const publisher = new ContextPublisher({ sourceId: 'source-a', relay: { postContext: vi.fn().mockResolvedValue(malformed) }, childWindow: child, serviceOrigin: 'https://courseweave.test', onRecovery });
     await publisher.publish({ ...empty, active_path: 'lesson.ipynb', surface_kind: 'notebook' });
     expect((publisher as ContextPublisher & { acceptedCoordinate?(): unknown }).acceptedCoordinate?.()).toBeNull();
-    expect(child.postMessage).not.toHaveBeenCalled();
+    expect(confirmations(child)).toHaveLength(0);
     expect(onRecovery).toHaveBeenCalledWith('backend');
   });
 
@@ -223,7 +225,7 @@ describe('ContextPublisher', () => {
     await publisher.publish({ ...empty, active_path: 'notebooks/shared.ipynb', active_cell_id: 'real-cell-one', surface_kind: 'notebook' });
     await publisher.publish({ ...empty, active_path: 'notebooks/shared.ipynb', active_cell_id: 'unknown-cell', surface_kind: 'notebook' });
     expect((publisher as ContextPublisher & { acceptedCoordinate?(): unknown }).acceptedCoordinate?.()).toBeNull();
-    expect(child.postMessage).toHaveBeenCalledOnce();
+    expect(confirmations(child)).toHaveLength(1);
   });
 });
 
@@ -261,4 +263,17 @@ describe('ContextObserver', () => {
     metadataSignal.emit();
     expect(publish).not.toHaveBeenCalled();
   });
+});
+
+it('keeps discussion pending across rapid changes and confirms only the latest desired context',async()=>{
+ const first=deferred<Response>();const second=deferred<Response>();const child={postMessage:vi.fn()} as unknown as Window;
+ const relay={postContext:vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)};
+ const publisher=new ContextPublisher({sourceId:'source-a',relay,childWindow:child,serviceOrigin:'https://courseweave.test'});
+ const flight=publisher.publish({...empty,active_cell_id:'cell-a'});
+ void publisher.publish({...empty,active_cell_id:'cell-b'});
+ expect(child.postMessage).toHaveBeenCalledWith({type:'courseweave.context.pending.v1',sourceId:'source-a'},'https://courseweave.test');
+ first.resolve(ok());await vi.waitFor(()=>expect(relay.postContext).toHaveBeenCalledTimes(2));
+ expect((child.postMessage as ReturnType<typeof vi.fn>).mock.calls.filter(([message])=>message.type==='courseweave.context.changed.v1')).toHaveLength(0);
+ second.resolve(ok());await flight;
+ expect((child.postMessage as ReturnType<typeof vi.fn>).mock.calls.filter(([message])=>message.type==='courseweave.context.changed.v1')).toHaveLength(1);
 });

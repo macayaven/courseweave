@@ -1,14 +1,14 @@
 # CourseWeave architecture review packet
 
-Repository: `/Volumes/mac-studio-ssd/education/courseweave`
+Repository: CourseWeave repository root
 
 Authoritative inputs:
 
 - `docs/superpowers/specs/2026-09-01-courseweave-platform-design.md`
 - `docs/superpowers/plans/2026-09-01-courseweave-platform.md`
-- `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor/AGENTS.md`
-- `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor/README.md`
-- `/Volumes/mac-studio-ssd/education/agent-harness-path-adaptive-tutor/COURSE-MAP.md`
+- Agent Harness Path integration checkout: `AGENTS.md`
+- Agent Harness Path integration checkout: `README.md`
+- Agent Harness Path integration checkout: `COURSE-MAP.md`
 
 Goal:
 
@@ -46,4 +46,3 @@ Return Markdown only with:
 
 Do not edit any file. Do not run destructive commands. Treat your response as
 advisory; the coordinating agent owns final decisions.
-

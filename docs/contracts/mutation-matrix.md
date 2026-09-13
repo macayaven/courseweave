@@ -1,21 +1,24 @@
-# CourseWeave mutation matrix
+# CourseWeave v2 mutation matrix
 
-| Target | Trigger | Origin | Preview | Concurrency | Durable audit |
-|---|---|---|---|---|---|
-| Ephemeral active context | Jupyter focus change | system observation | none; metadata only | `source_id` + sequence | no |
-| Prediction | Learner submits prediction card | `student_requested` | exact text in card | state revision + idempotency key | yes |
-| Reflection | Learner submits reflection card | `student_requested` | exact text in card | state revision + idempotency key | yes |
-| Evidence receipt | Learner records path/result | `student_requested` | exact receipt | state revision + idempotency key | yes |
-| Phase completion | Learner clicks complete/check | `student_requested` | completion evidence | state revision + idempotency key | yes |
-| Time budget | Learner edits session budget | `student_requested` | selected duration | state revision + idempotency key | yes |
-| Learner profile | Learner asks, or teacher suggests | direct request or `teacher_suggested` proposal | field-by-field patch | proposal revision + state revision | yes |
-| Course manifest | Author saves draft, or accepts teacher proposal | direct request or `teacher_suggested` proposal | full validation and JSON diff | ETag + idempotency key | yes |
-| Workspace text file | Learner asks, or accepts teacher proposal | direct request or `teacher_suggested` proposal | full unified diff | target hash + proposal revision + journal | yes |
-| Notebook/source excerpt sharing | Learner clicks Share | `student_requested` transient action | exact excerpt and provider disclosure | one chat run ID | no content retained |
-| Terminal command | Learner opens terminal and runs/copies command | learner-controlled external action | exact argv displayed | Jupyter terminal owns process | optional explicit receipt only |
-| Provider/model selection | Learner changes session setting | `student_requested` session action | provider/model/base URL without key | current process session | no credential; optional non-secret setting |
+| Target | Trigger | Preview | Concurrency and authority |
+|---|---|---|---|
+| Ephemeral navigation | Learner focus/navigation | Metadata only | Source ID and sequence; never durable |
+| Learner record | Direct put/clear action | Closed text, evidence, or attestation value | State revision, curriculum digest, idempotency; server binds origin/kind/requirement digest |
+| Progress | Pure evaluation | Requirement results and stale/orphan status | Derived from valid records and current ordinary-file presence; no completion setter |
+| Formative attempt | Learner selects an authored option | Question and choices; deterministic feedback after attempt | State revision and curriculum digest; bound check/objective revisions; never completion or mastery |
+| Adaptation preferences | Explicit learner opt-in/edit/revoke | Enabled flag, explanation detail, practice amount | Closed direct action; no inferred personality/profile fields |
+| Time budget | Direct learner edit | Selected minutes or no budget | State revision and idempotency |
+| Preference proposal | Learner reviews teacher/user draft | Declared explanation/practice preference changes | Proposal revision; explicit adaptation opt-in required to accept |
+| Course manifest | Author saves or accepts a reviewed draft | Validated full JSON and diff | Exact-byte ETag, target hash, root lock, idempotency; v2 only |
+| State reset/delete | Explicit learner action | Clears records/imports/attempts/preferences and old proposal/retry snapshots | State revision and a retained reset receipt; no course source changes |
+| Legacy state import | Explicit copy-only CLI command | Exact coordinate mappings and unbound/orphan report | Source DB is never opened or changed; imported answers never count until resubmitted |
+| Excerpt sharing | Explicit Share | Exact selected excerpt | Server session/role/source/run binding, current effective policy; session only |
+| Terminal command | Learner runs/copies authored command | Exact command token array and cwd | Learner-controlled execution; no model execution authority |
+| Workspace files | Learner edits in their own tools | Learner-controlled | No active API/professor workspace proposal mutation route |
 
-Navigation, chat interpretation, model inference, detected ability, elapsed time,
-and file existence never create profile claims or completion records by
-themselves.
-
+Display experience, navigation, model interpretation, time spent, and formative
+correctness never grant authority or write completion facts. Author curriculum
+drafting remains independent of learner gates. The existing low-level workspace
+journal is retained for recovery invariants and regression tests, not exposed
+as an active learner mutation tool. No raw chat, provider settings, credentials,
+or shared excerpts are written to durable state.

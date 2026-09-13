@@ -1,0 +1,81 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - name: Install pinned dependencies
+        run: |
+          uv sync --frozen
+          pnpm --dir frontend install --frozen-lockfile
+      - name: Test contracts and runtime behavior
+        run: uv run --frozen pytest
+
+  frontend:
+    name: Frontend tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - name: Install pinned build dependencies
+        run: |
+          uv sync --frozen
+          pnpm --dir frontend install --frozen-lockfile
+      - name: Check frontend types
+        run: pnpm --dir frontend typecheck
+      - name: Test portable release acceptance arguments
+        run: node --test frontend/scripts/verify-student-release-cli.test.mjs
+      - name: Test native surfaces and applications
+        run: pnpm --dir frontend test
+      - name: Build bundled frontend assets
+        env:
+          UV_LINK_MODE: copy
+        run: pnpm --dir frontend build
+
+# This workflow tests source contracts and builds. Installed-wheel, full-course
+# browser, recovery and deliberately authorized live-provider checks are separate
+# release gates in docs/RELEASING.md; no provider secret is needed by this workflow.
