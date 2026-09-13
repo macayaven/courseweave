@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -420,13 +421,24 @@ describe("Author Save and stale recovery", () => {
       },
       retry: app.retry,
     });
+    let conflictReadStarted!: () => void;
+    const conflictRead = new Promise<void>((resolve) => {
+      conflictReadStarted = resolve;
+    });
+    let finishConflictRead!: (course: {
+      manifest: unknown;
+      raw: string;
+      etag: string;
+    }) => void;
     app.getCourse
       .mockResolvedValueOnce({ manifest: local, raw: localRaw, etag: '"old"' })
-      .mockResolvedValueOnce({
-        manifest: remote,
-        raw: remoteRaw,
-        etag: '"remote"',
-      });
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishConflictRead = resolve;
+            conflictReadStarted();
+          }),
+      );
     app.validateCourse.mockResolvedValue({
       manifest: local,
       formatted_json: localRaw,
@@ -443,7 +455,15 @@ describe("Author Save and stale recovery", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<AuthorApp />);
     fireEvent.click(await screen.findByRole("button", { name: "Save course" }));
-    expect(await screen.findByText("Local canonical JSON")).toBeInTheDocument();
+    await conflictRead;
+    await act(async () => {
+      finishConflictRead({
+        manifest: remote,
+        raw: remoteRaw,
+        etag: '"remote"',
+      });
+    });
+    expect(screen.getByText("Local canonical JSON")).toBeInTheDocument();
     expect(screen.getByText("Remote canonical JSON")).toBeInTheDocument();
     expect(app.putCourse).toHaveBeenCalledOnce();
     expect(app.getCourse).toHaveBeenCalledTimes(2);

@@ -8,7 +8,6 @@ import hashlib
 import html
 import json
 import os
-import re
 import secrets
 import shutil
 import signal
@@ -46,17 +45,6 @@ _SAFE_ENVIRONMENT_KEYS = (
     "TMPDIR",
     "USER",
 )
-_TOKEN_QUERY = re.compile(r"([?&](?:token|auth|key)=)[^&\s\"'<>]+", re.IGNORECASE)
-_AUTHORIZATION = re.compile(r"(authorization\s*:\s*)[^\r\n]+", re.IGNORECASE)
-
-
-def _redact_diagnostic(message: str, secrets: tuple[str, ...]) -> str:
-    redacted = _AUTHORIZATION.sub(r"\1[REDACTED]", message)
-    redacted = _TOKEN_QUERY.sub(r"\1[REDACTED]", redacted)
-    for secret in secrets:
-        if secret:
-            redacted = redacted.replace(secret, "[REDACTED]")
-    return redacted
 
 
 class CourseLockError(RuntimeError):
@@ -468,7 +456,6 @@ class LaunchSupervisor:
         self._api_failed = False
         self._jupyter_process: Any | None = None
         self._jupyter_shutdown_attempted = False
-        self._output_threads: list[threading.Thread] = []
         self._temporary_directory: _PrivateRuntimeDirectory | None = None
         self._child_environment: dict[str, str] | None = None
         self._requested_signal: int | None = None
@@ -527,13 +514,15 @@ class LaunchSupervisor:
                 cwd=self.course_root,
                 env=self._child_environment,
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                # Jupyter output can contain credentials. It is never surfaced;
+                # discard it directly so inherited writers cannot hold a reader
+                # thread open after the owned server exits.
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 shell=False,
                 start_new_session=False,
                 pass_fds=(self._lock.fileno(),),
             )
-            self._start_output_drains()
             self._wait_for_jupyter(jupyter_url, service_url)
             if self._requested_signal is not None:
                 exit_code = 128 + self._requested_signal
@@ -730,39 +719,6 @@ class LaunchSupervisor:
                 return _normalized_exit_code(child_exit)
             self._sleep(0.1)
 
-    def _start_output_drains(self) -> None:
-        for name in ("stdout", "stderr"):
-            stream = getattr(self._jupyter_process, name, None)
-            if stream is None:
-                continue
-            thread = threading.Thread(
-                target=self._drain_output,
-                args=(stream,),
-                name=f"courseweave-jupyter-{name}",
-                daemon=False,
-            )
-            thread.start()
-            self._output_threads.append(thread)
-
-    def _drain_output(self, stream: Any) -> None:
-        while True:
-            try:
-                chunk = stream.read(64 * 1024)
-                if not chunk:
-                    return
-                if isinstance(chunk, bytes):
-                    chunk = chunk.decode("utf-8", errors="replace")
-                _redact_diagnostic(
-                    chunk,
-                    tuple(
-                        value
-                        for value in (self.capability_token, self.jupyter_token)
-                        if value is not None
-                    ),
-                )
-            except BaseException:
-                return
-
     def _report_failure(self) -> None:
         if self._reported_error:
             return
@@ -877,21 +833,6 @@ class LaunchSupervisor:
             else:
                 cleanup_ok = False
 
-        remaining_threads: list[threading.Thread] = []
-        for thread in self._output_threads:
-            try:
-                thread.join(timeout=self._shutdown_timeout)
-            except BaseException:
-                cleanup_ok = False
-            try:
-                thread_alive = thread.is_alive()
-            except BaseException:
-                cleanup_ok = False
-                thread_alive = True
-            if thread_alive:
-                cleanup_ok = False
-                remaining_threads.append(thread)
-        self._output_threads = remaining_threads
         return process_stopped, cleanup_ok
 
     def _stop_api(self) -> tuple[bool, bool]:

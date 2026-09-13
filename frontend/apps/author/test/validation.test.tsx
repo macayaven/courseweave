@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -834,33 +835,56 @@ describe("Author validation presentation", () => {
     });
     const firstPath = "/modules/0/phases/0/surfaces/0/path";
     const secondPath = "/modules/1/phases/0/surfaces/0/path";
-    appMocks.validateCourse
-      .mockResolvedValueOnce({ manifest: imported, formatted_json: "{}\n" })
-      .mockRejectedValueOnce(
-        Object.assign(new Error("invalid"), {
-          details: {
-            issues: [
-              {
-                path: firstPath,
-                code: "missing_artifact",
-                message: "Original path.",
-              },
-              {
-                path: secondPath,
-                code: "missing_artifact",
-                message: "Imported path.",
-              },
-            ],
-          },
+    let importStarted!: () => void;
+    const importValidationStarted = new Promise<void>((resolve) => {
+      importStarted = resolve;
+    });
+    let finishImport!: (result: {
+      manifest: unknown;
+      formatted_json: string;
+    }) => void;
+    appMocks.validateCourse.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishImport = resolve;
+          importStarted();
         }),
-      );
+    );
     render(<AuthorApp />);
     fireEvent.change(await screen.findByLabelText("Import course file"), {
       target: { files: [new File([JSON.stringify(imported)], "import.json")] },
     });
-    await screen.findByText(/Imported local draft is ready/i);
-    fireEvent.click(screen.getByRole("button", { name: "Validate structure" }));
-    await screen.findByText("Imported path.");
+    await importValidationStarted;
+    await act(async () => {
+      finishImport({ manifest: imported, formatted_json: "{}\n" });
+    });
+    expect(
+      screen.getByText(/Imported local draft is ready/i),
+    ).toBeInTheDocument();
+    appMocks.validateCourse.mockRejectedValueOnce(
+      Object.assign(new Error("invalid"), {
+        details: {
+          issues: [
+            {
+              path: firstPath,
+              code: "missing_artifact",
+              message: "Original path.",
+            },
+            {
+              path: secondPath,
+              code: "missing_artifact",
+              message: "Imported path.",
+            },
+          ],
+        },
+      }),
+    );
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Validate structure" }),
+      );
+    });
+    expect(screen.getByText("Imported path.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Focus first issue" }));
     const control = await screen.findByLabelText("Path");
     expect(control).toHaveValue("one.md");
