@@ -52,7 +52,7 @@ include = [
     "/THIRD_PARTY_LICENSES.md",
     "/.github", "/docs", "/scripts",
 ]
-exclude = ["/frontend/**/node_modules", "/frontend/test-results", "/frontend/playwright-report", "/frontend/**/.vite", "**/*.tsbuildinfo"]
+exclude = ["/frontend/**/node_modules", "/frontend/test-results", "/frontend/playwright-report", "/frontend/**/.vite", "/frontend/packages/lab/lib", "**/*.tsbuildinfo"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

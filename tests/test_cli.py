@@ -1346,7 +1346,7 @@ def test_output_capture_swallows_secret_bearing_stream_exceptions(
 
 @pytest.mark.parametrize("mode", ["learn", "author"])
 def test_real_jupyter_launch_keeps_live_runtime_files_secret_free_and_relays_work(
-    tmp_path: Path, mode: str,
+    tmp_path: Path, mode: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Bounded proof of the exact Server 2.21 argv/env and extension hook."""
 
@@ -1419,9 +1419,36 @@ def test_real_jupyter_launch_keeps_live_runtime_files_secret_free_and_relays_wor
         shutdown_timeout=10.0,
     )
 
+    # Keep failure diagnostics structural: child output, URLs and environments
+    # can contain generated credentials and must not enter a CI assertion.
+    cleanup_stages: dict[str, object] = {}
+    for method_name in (
+        "_stop_jupyter", "_stop_api", "_close_listener", "_restore_signal_handlers"
+    ):
+        original = getattr(supervisor, method_name)
+
+        def record_stage(original=original, method_name=method_name):
+            try:
+                result = original()
+            except BaseException as exc:
+                cleanup_stages[method_name] = type(exc).__name__
+                raise
+            cleanup_stages[method_name] = result
+            return result
+
+        monkeypatch.setattr(supervisor, method_name, record_stage)
+
     assert supervisor.run() == 128 + signal.SIGTERM
 
-    assert errors == []
+    assert errors == [], {
+        "cleanup_stages": cleanup_stages,
+        "child_remaining": supervisor._jupyter_process is not None,
+        "api_thread_remaining": supervisor._api_thread is not None,
+        "output_threads_remaining": len(supervisor._output_threads),
+        "runtime_remaining": supervisor._temporary_directory is not None,
+        "lock_remaining": supervisor._lock is not None,
+        "signal_handlers_remaining": len(supervisor._previous_handlers),
+    }
     assert observations["course_status"] == 200
     assert observations["course_etag"] == '""'
     assert observations["course"]["schema_version"] == 2  # type: ignore[index]

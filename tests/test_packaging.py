@@ -495,6 +495,9 @@ def test_sdist_contains_source_rebuild_and_validation_inputs(tmp_path):
         names = {name.partition('/')[2] for name in archive.getnames()}
         assert set(required) <= names
         assert not any('/node_modules/' in name or '/test-results/' in name for name in names)
+        assert not any(
+            name.startswith('frontend/packages/lab/lib/') for name in names
+        )
         workstation_roots = (
             re.compile(
                 rb"/Users/[A-Za-z0-9._-]+/"
