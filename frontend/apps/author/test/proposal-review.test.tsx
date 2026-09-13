@@ -110,6 +110,58 @@ async function askTeacherForCandidate() {
   return screen.getByRole("button", { name: "Save suggested change" });
 }
 
+async function settleAuthoritativeTransition(trigger: () => void) {
+  const courseCallsBefore = app.getCourse.mock.calls.length;
+  const proposalCallsBefore = app.getProposals.mock.calls.length;
+  trigger();
+  if (app.getCourse.mock.calls.length !== courseCallsBefore + 1)
+    throw new Error("Authoritative course read did not start.");
+  const courseOperation = app.getCourse.mock.results[courseCallsBefore]?.value as
+    | Promise<unknown>
+    | undefined;
+  if (courseOperation === undefined)
+    throw new Error("Authoritative course result is missing.");
+  await act(async () => {
+    await courseOperation.catch(() => undefined);
+  });
+  if (app.getProposals.mock.calls.length !== proposalCallsBefore + 1)
+    throw new Error("Authoritative proposal read did not start.");
+  const proposalOperation = app.getProposals.mock.results[proposalCallsBefore]
+    ?.value as Promise<unknown> | undefined;
+  if (proposalOperation === undefined)
+    throw new Error("Authoritative proposal result is missing.");
+  await act(async () => {
+    await proposalOperation.catch(() => undefined);
+  });
+}
+
+async function renderLoadedAuthorApp() {
+  let view!: ReturnType<typeof render>;
+  await settleAuthoritativeTransition(() => {
+    view = render(<AuthorApp />);
+  });
+  return view;
+}
+
+async function retryAuthoritativeRefresh(retry: HTMLElement) {
+  const courseCallsBefore = app.getCourse.mock.calls.length;
+  const proposalCallsBefore = app.getProposals.mock.calls.length;
+  await act(async () => {
+    fireEvent.click(retry);
+    if (app.getCourse.mock.calls.length !== courseCallsBefore + 1)
+      throw new Error("Retry course read did not start.");
+    if (app.getProposals.mock.calls.length !== proposalCallsBefore + 1)
+      throw new Error("Retry proposal read did not start.");
+    const courseOperation = app.getCourse.mock.results[courseCallsBefore]
+      ?.value as Promise<unknown> | undefined;
+    const proposalOperation = app.getProposals.mock.results[proposalCallsBefore]
+      ?.value as Promise<unknown> | undefined;
+    if (courseOperation === undefined || proposalOperation === undefined)
+      throw new Error("Retry authority result is missing.");
+    await Promise.allSettled([courseOperation, proposalOperation]);
+  });
+}
+
 beforeEach(() => {
   app.getCourse.mockReset();
   app.getProposals.mockReset();
@@ -478,7 +530,7 @@ describe("ProposalReview", () => {
     ]);
     app.validateCourse.mockResolvedValue({ formatted_json: "{}\n" });
     app.acceptProposal.mockResolvedValue({ ...proposal, status: "accepted" });
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
     await screen.findByText("Improve the sequence");
     await waitFor(() =>
       expect(screen.getAllByRole("button", { name: "Accept" })).toHaveLength(1),
@@ -550,7 +602,7 @@ describe("ProposalReview", () => {
         }),
     );
 
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
     fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
     const actionSignal = app.acceptProposal.mock.calls[0]?.[2] as AbortSignal;
     fireEvent.change(screen.getByLabelText("Course title"), {
@@ -573,10 +625,10 @@ describe("ProposalReview", () => {
     expect(app.getProposals.mock.calls[1]?.[0]).toBe(refreshSignal);
     expect(app.acceptProposal).toHaveBeenCalledOnce();
 
-    fireEvent.click(
+    await retryAuthoritativeRefresh(
       screen.getByRole("button", { name: "Retry authoritative refresh" }),
     );
-    expect(await screen.findByLabelText("Remote conflict")).toBeInTheDocument();
+    expect(screen.getByLabelText("Remote conflict")).toBeInTheDocument();
     expect(screen.getByText("Authoritative follow-up")).toBeInTheDocument();
     expect(screen.getByLabelText("Course title")).toHaveValue(
       "Dirty while accept",
@@ -629,7 +681,7 @@ describe("ProposalReview", () => {
       .mockResolvedValueOnce([{ ...proposal, status: "accepted" }, second]);
     app.validateCourse.mockResolvedValue({ formatted_json: "{}\n" });
     app.acceptProposal.mockResolvedValue({ ...proposal, status: "accepted" });
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
     await screen.findByText("Second proposal");
     fireEvent.click(
       (await screen.findAllByRole("button", { name: "Accept" }))[0]!,
@@ -645,12 +697,10 @@ describe("ProposalReview", () => {
     fireEvent.click(secondAccept);
     expect(app.acceptProposal).toHaveBeenCalledOnce();
     expect(screen.queryByText(/accepted proposal refreshed/i)).toBeNull();
-    fireEvent.click(
+    await retryAuthoritativeRefresh(
       screen.getByRole("button", { name: "Retry authoritative refresh" }),
     );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Ask teacher" })).toBeEnabled(),
-    );
+    expect(screen.getByRole("button", { name: "Ask teacher" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Accept" })).toBeEnabled();
   });
 
@@ -673,8 +723,7 @@ describe("ProposalReview", () => {
       }
       app.getProposals.mockResolvedValueOnce([]);
 
-      const view = render(<AuthorApp />);
-      await waitFor(() => expect(app.getProposals).toHaveBeenCalledOnce());
+      const view = await renderLoadedAuthorApp();
       fireEvent.change(screen.getByLabelText("Course title"), {
         target: { value: "Retained reconnect draft" },
       });
@@ -692,7 +741,7 @@ describe("ProposalReview", () => {
           sourceId: `author-${outcome}`,
         },
       });
-      view.rerender(<AuthorApp />);
+      await settleAuthoritativeTransition(() => view.rerender(<AuthorApp />));
 
       const retry = await screen.findByRole("button", {
         name: "Retry authoritative refresh",
@@ -709,12 +758,10 @@ describe("ProposalReview", () => {
       expect(app.getCourse.mock.calls[1]?.[0]).toBeInstanceOf(AbortSignal);
       expect(app.getProposals.mock.calls[1]?.[0]).toBeInstanceOf(AbortSignal);
 
-      fireEvent.click(retry);
-      await waitFor(() =>
-        expect(
-          screen.getByRole("button", { name: "Save course" }),
-        ).toBeEnabled(),
-      );
+      await retryAuthoritativeRefresh(retry);
+      expect(
+        screen.getByRole("button", { name: "Save course" }),
+      ).toBeEnabled();
       expect(screen.queryByLabelText("Authority recovery")).toBeNull();
       expect(screen.getByLabelText("Course title")).toHaveValue(
         "Retained reconnect draft",
@@ -745,8 +792,7 @@ describe("ProposalReview", () => {
       new Error("ambiguous candidate result"),
     );
 
-    render(<AuthorApp />);
-    await waitFor(() => expect(app.getProposals).toHaveBeenCalledOnce());
+    await renderLoadedAuthorApp();
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), {
       target: { value: "Suggest a change" },
     });
@@ -766,10 +812,8 @@ describe("ProposalReview", () => {
     expect(candidateSignal).toBeInstanceOf(AbortSignal);
     expect(candidateSignal.aborted).toBe(false);
 
-    fireEvent.click(retry);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled(),
-    );
+    await retryAuthoritativeRefresh(retry);
+    expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled();
     expect(app.getCourse).toHaveBeenCalledTimes(2);
     expect(app.getProposals).toHaveBeenCalledTimes(2);
     const retrySignal = app.getCourse.mock.calls[1]?.[0] as AbortSignal;
@@ -792,7 +836,7 @@ describe("ProposalReview", () => {
       new Error("ambiguous proposal result"),
     );
 
-    render(<AuthorApp />);
+    await renderLoadedAuthorApp();
     fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
 
     const retry = await screen.findByRole("button", {
@@ -807,10 +851,8 @@ describe("ProposalReview", () => {
     expect(mutationSignal).toBeInstanceOf(AbortSignal);
     expect(mutationSignal.aborted).toBe(false);
 
-    fireEvent.click(retry);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled(),
-    );
+    await retryAuthoritativeRefresh(retry);
+    expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled();
     expect(app.getCourse).toHaveBeenCalledTimes(2);
     expect(app.getProposals).toHaveBeenCalledTimes(2);
     expect(app.getProposals.mock.calls[1]?.[0]).toBe(
@@ -839,7 +881,7 @@ describe("ProposalReview", () => {
         }),
     );
 
-    const view = render(<AuthorApp />);
+    const view = await renderLoadedAuthorApp();
     fireEvent.change(
       await screen.findByLabelText("Ask the curriculum teacher"),
       {
@@ -867,9 +909,7 @@ describe("ProposalReview", () => {
         sourceId: "author-candidate",
       },
     });
-    view.rerender(<AuthorApp />);
-    await waitFor(() => expect(app.getCourse).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(app.getProposals).toHaveBeenCalledTimes(2));
+    await settleAuthoritativeTransition(() => view.rerender(<AuthorApp />));
 
     resolveCandidate?.({ id: "proposal-late" });
     const retry = await screen.findByRole("button", {
@@ -886,10 +926,8 @@ describe("ProposalReview", () => {
       screen.queryByRole("button", { name: "Save suggested change" }),
     ).toBeNull();
 
-    fireEvent.click(retry);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled(),
-    );
+    await retryAuthoritativeRefresh(retry);
+    expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled();
     expect(app.getCourse).toHaveBeenCalledTimes(3);
     expect(app.getProposals).toHaveBeenCalledTimes(3);
     expect(app.createProposal).toHaveBeenCalledOnce();
@@ -913,7 +951,7 @@ describe("ProposalReview", () => {
         }),
     );
 
-    const view = render(<AuthorApp />);
+    const view = await renderLoadedAuthorApp();
     fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
     const mutationSignal = app.acceptProposal.mock.calls[0]?.[2] as AbortSignal;
     fireEvent.change(screen.getByLabelText("Course title"), {
@@ -934,9 +972,7 @@ describe("ProposalReview", () => {
         sourceId: "author-proposal",
       },
     });
-    view.rerender(<AuthorApp />);
-    await waitFor(() => expect(app.getCourse).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(app.getProposals).toHaveBeenCalledTimes(2));
+    await settleAuthoritativeTransition(() => view.rerender(<AuthorApp />));
 
     resolveAccept?.({ ...proposal, status: "accepted" });
     const retry = await screen.findByRole("button", {
@@ -950,10 +986,8 @@ describe("ProposalReview", () => {
     expect(app.getProposals).toHaveBeenCalledTimes(2);
     expect(app.acceptProposal).toHaveBeenCalledOnce();
 
-    fireEvent.click(retry);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled(),
-    );
+    await retryAuthoritativeRefresh(retry);
+    expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled();
     expect(app.getCourse).toHaveBeenCalledTimes(3);
     expect(app.getProposals).toHaveBeenCalledTimes(3);
     expect(app.acceptProposal).toHaveBeenCalledOnce();
@@ -1007,7 +1041,7 @@ describe("ProposalReview", () => {
     app.validateCourse.mockResolvedValue({ formatted_json: "{}\n" });
     app.acceptProposal.mockResolvedValue({ ...proposal, status: "accepted" });
 
-    const view = render(<AuthorApp />);
+    const view = await renderLoadedAuthorApp();
     fireEvent.click(await screen.findByRole("button", { name: "Accept" }));
     await waitFor(() => expect(app.getCourse).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(app.getProposals).toHaveBeenCalledTimes(2));
@@ -1028,7 +1062,7 @@ describe("ProposalReview", () => {
         sourceId: "author-epoch",
       },
     });
-    view.rerender(<AuthorApp />);
+    await settleAuthoritativeTransition(() => view.rerender(<AuthorApp />));
 
     await waitFor(() =>
       expect(screen.getByLabelText("Course title")).toHaveValue("Newest epoch"),
@@ -1093,7 +1127,7 @@ it("keeps delayed authoritative reads alive after candidate persistence and resu
   app.postGuide.mockImplementation((body) =>
     Promise.resolve(response(candidateResponse(body.threadId, body.runId))),
   );
-  render(<AuthorApp />);
+  await renderLoadedAuthorApp();
   fireEvent.change(await screen.findByLabelText("Ask the curriculum teacher"), {
     target: { value: "Suggest a change" },
   });
@@ -1145,7 +1179,7 @@ it("offers recovery after a current refresh is aborted by a local edit, preservi
   app.postGuide.mockImplementation((body) =>
     Promise.resolve(response(candidateResponse(body.threadId, body.runId))),
   );
-  render(<AuthorApp />);
+  await renderLoadedAuthorApp();
   fireEvent.change(await screen.findByLabelText("Ask the curriculum teacher"), {
     target: { value: "Suggest" },
   });
@@ -1159,10 +1193,8 @@ it("offers recovery after a current refresh is aborted by a local edit, preservi
     name: "Retry authoritative refresh",
   });
   await waitFor(() => expect(retry).toBeEnabled());
-  fireEvent.click(retry);
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled(),
-  );
+  await retryAuthoritativeRefresh(retry);
+  expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled();
   expect(screen.getByLabelText("Course title")).toHaveValue("Local title");
   expect(screen.getByText(proposal.summary)).toBeInTheDocument();
   expect(app.createProposal).toHaveBeenCalledOnce();
