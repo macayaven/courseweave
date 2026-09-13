@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -99,6 +100,15 @@ const candidateResponse = (threadId: string, runId: string) =>
   `data: {"type":"TEXT_MESSAGE_END","messageId":"assistant"}\n\n` +
   `data: {"type":"CUSTOM","name":"courseweave.proposal_candidate","value":{"candidate":{"id":"candidate-a","type":"manifest_replace","origin":"teacher_suggested","summary":"Improve course","target":"courseweave.json","payload":{"manifest":{"schema_version":2}},"target_hash":null}}}\n\n` +
   `data: ${JSON.stringify({ type: "RUN_FINISHED", threadId, runId })}\n\n`;
+
+async function askTeacherForCandidate() {
+  const ask = screen.getByRole("button", { name: "Ask teacher" });
+  await waitFor(() => expect(ask).toBeEnabled());
+  await act(async () => {
+    fireEvent.click(ask);
+  });
+  return screen.getByRole("button", { name: "Save suggested change" });
+}
 
 beforeEach(() => {
   app.getCourse.mockReset();
@@ -740,10 +750,7 @@ describe("ProposalReview", () => {
     fireEvent.change(screen.getByLabelText("Ask the curriculum teacher"), {
       target: { value: "Suggest a change" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Save suggested change" }),
-    );
+    fireEvent.click(await askTeacherForCandidate());
 
     const retry = await screen.findByRole("button", {
       name: "Retry authoritative refresh",
@@ -839,10 +846,7 @@ describe("ProposalReview", () => {
         target: { value: "Persist then disconnect" },
       },
     );
-    fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Save suggested change" }),
-    );
+    fireEvent.click(await askTeacherForCandidate());
     await waitFor(() => expect(app.createProposal).toHaveBeenCalledOnce());
     const mutationSignal = app.createProposal.mock.calls[0]?.[1] as AbortSignal;
     fireEvent.change(screen.getByLabelText("Course title"), {
@@ -1093,13 +1097,7 @@ it("keeps delayed authoritative reads alive after candidate persistence and resu
   fireEvent.change(await screen.findByLabelText("Ask the curriculum teacher"), {
     target: { value: "Suggest a change" },
   });
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Ask teacher" })).toBeEnabled(),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Save suggested change" }),
-  );
+  fireEvent.click(await askTeacherForCandidate());
   await screen.findByText("Refreshing authoritative course and proposals…");
   await waitFor(() => expect(signals).toHaveLength(2));
   expect(signals[0]).toBe(signals[1]);
@@ -1151,13 +1149,7 @@ it("offers recovery after a current refresh is aborted by a local edit, preservi
   fireEvent.change(await screen.findByLabelText("Ask the curriculum teacher"), {
     target: { value: "Suggest" },
   });
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Ask teacher" })).toBeEnabled(),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Ask teacher" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Save suggested change" }),
-  );
+  fireEvent.click(await askTeacherForCandidate());
   await screen.findByText("Refreshing authoritative course and proposals…");
   fireEvent.change(screen.getByLabelText("Course title"), {
     target: { value: "Local title" },
