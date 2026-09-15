@@ -143,6 +143,7 @@ source. Read the
 - [Release process](docs/RELEASING.md)
 - [Schema and API contract](docs/contracts/api.md)
 - [Engineering standard](docs/engineering.md)
+- [Three product specifications and approved Author Edition plan](docs/specs/README.md)
 - [Historical v0.1.0 verification](docs/verification/v0.md)
 
 The root [`LICENSE`](LICENSE) covers CourseWeave. The independently maintained

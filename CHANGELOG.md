@@ -6,6 +6,15 @@ releases.
 
 ## Unreleased
 
+### Author Edition v0.3.0 work in progress
+
+- Added the approved three-spec bundle and executable consistency audit with
+  traceability and regression coverage.
+- Added closed author-only contract types that separate untrusted drafts from
+  server-selected targets, deterministic compatibility, and human decisions.
+- The complete Author Edition and its installed/live-provider acceptance are
+  still in development; see [implementation notes](docs/author/implementation.md).
+
 ## [0.2.0](https://github.com/macayaven/courseweave/releases/tag/v0.2.0)
 
 The changes below are relative to public v0.1.0. A release marked Pre-release

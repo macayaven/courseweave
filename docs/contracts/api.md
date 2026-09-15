@@ -263,3 +263,13 @@ query, percent encoding, whitespace, or controls. The surface `path` remains
 the sole filesystem source; the fragment is presentation metadata and never
 changes progress or teacher authority. Frontends append it as the section
 target when opening the authored HTML.
+
+## Author Edition v0.3.0 contract foundation
+
+The approved [three-spec bundle](../specs/README.md) adds author-only Python
+contracts in `courseweave.author.contracts`. They are separate from schema-v2
+student manifests and from this API's existing runtime authority. Draft reply
+types cannot carry target paths/revisions, human dispositions or deterministic
+compatibility flags. The new project, research, review and delivery routes are
+subsequent implementation tasks; this foundation does not claim they exist.
+See [implementation status](../author/implementation.md) for verified scope.

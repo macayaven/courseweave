@@ -11,6 +11,11 @@ The currently demonstrated scope is a single-user local student pilot. The
 and their limits. No broader production or external compliance certification is
 claimed.
 
+The [three product specifications](specs/README.md) describe the approved Author
+Edition scope and its student compatibility target. Implementation is in
+progress; new requirements are not claims about the delivered release. Keep
+shared, teacher/author, and student requirements consistent throughout that work.
+
 ## Keep the architecture small
 
 - Keep the deterministic course engine and canonical contracts authoritative.

@@ -1,0 +1,34 @@
+{
+  "bundle_id": "author-edition-0.3.0-review-1",
+  "status": "pass",
+  "scope": "mechanical specification audit; not implementation acceptance",
+  "semantic_review": "required separately",
+  "requirements": 68,
+  "owners": {
+    "COURSEWEAVE.md": 22,
+    "COURSEWEAVE-TEACHER-EDITION.md": 28,
+    "COURSEWEAVE-STUDENT-EDITION.md": 18
+  },
+  "verification_gates": 11,
+  "implementation_tasks": 11,
+  "local_links_checked": 32,
+  "errors": [],
+  "files": {
+    "docs/specs/COURSEWEAVE.md": "797c9627e45db6894b3f9f33425485f6818bb61827fdc8d66dd168f1e1929dfa",
+    "docs/specs/COURSEWEAVE-TEACHER-EDITION.md": "d25e40a5c5a59ad354b5b71ec40ce0cccce450ee7236f14670d0b53f3c35d092",
+    "docs/specs/COURSEWEAVE-STUDENT-EDITION.md": "efe352d579b1844fad3ee2a1b9a8cb2787374f76fa020e85b40cadfb083d2592",
+    "docs/specs/README.md": "1923f65756ff62fa0c469205e97cbda749a6f45198d9c3a29ad9c15d5e686f8b",
+    "docs/specs/CONSISTENCY-REVIEW.md": "c5be80491ffa1b8d5635d82cab03578bf014a650fb159da6ab240fefd5522e31",
+    "docs/superpowers/plans/2026-09-14-courseweave-author-edition.md": "4e2f2d678ecd63534faa8a063eb2ceb5bb47ac646a6a8a25ca346c9f37f5f9b8",
+    "docs/superpowers/specs/2026-09-14-chatgpt-courseweave-feasibility.md": "7f9b4810b9ec1b28714c5fb512e54788fa82052695ffafcae6467b9eecf361ed",
+    "scripts/check_specs.py": "322885fa078d05700a2bb5cfabc8cc19a8ceebdbee4e130b6fd02642d8fef257",
+    "src/courseweave/author/contracts.py": "c77bc1507f8ff3d1d65c6159634b3de5ce52bb0d461ef0965dc944ce74ac8b9f",
+    "tests/test_spec_consistency.py": "1ab6fc945a27278265045f3412af6372339b7c5ca5668e5c736571fd50299bad",
+    "tests/test_author_contracts.py": "3783a75b78037111e2a846c48af551e127cd422986d7c609fb84fa328147e0d5",
+    "docs/specs/traceability.csv": "bdc794d4ccd90310bc9d0e2c3617bba882466a34077792935415a50a936c9b7f"
+  },
+  "checked_date": "2026-09-15",
+  "source_revision_at_check": "409f5c01e93d98f118967138116b0dbafff80ed7",
+  "working_tree_changed": true,
+  "review_kind": "mechanical audit and implementation self-review; independent release review pending"
+}
