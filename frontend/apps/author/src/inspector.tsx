@@ -5,6 +5,7 @@ import { ArrayFields, Choices, SelectField } from "./field-inputs";
 import { PhaseFields } from "./phase-fields";
 import { SurfaceFields } from "./surface-fields";
 import { pointerToControlId } from "./validation";
+import { shareKinds, proposalTypes } from "./schema-options";
 
 type InspectorProps = {
   state: AuthorDocumentState;
@@ -95,7 +96,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
           label="Allowed sharing"
           pointer="/policies/allowed_share_kinds"
           values={course.policies.allowed_share_kinds}
-          options={["selection", "cell", "output"]}
+          options={shareKinds}
           onChange={(allowed_share_kinds) =>
             dispatch({ type: "policy.update", patch: { allowed_share_kinds } })
           }
@@ -104,7 +105,7 @@ function CourseInspector({ state, dispatch }: InspectorProps) {
           label="Allowed proposals"
           pointer="/policies/allowed_proposal_types"
           values={course.policies.allowed_proposal_types}
-          options={["profile", "course", "workspace"]}
+          options={proposalTypes}
           onChange={(allowed_proposal_types) =>
             dispatch({
               type: "policy.update",

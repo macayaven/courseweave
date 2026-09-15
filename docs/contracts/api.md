@@ -273,3 +273,12 @@ types cannot carry target paths/revisions, human dispositions or deterministic
 compatibility flags. The new project, research, review and delivery routes are
 subsequent implementation tasks; this foundation does not claim they exist.
 See [implementation status](../author/implementation.md) for verified scope.
+
+`POST /api/author/compatibility` accepts `{ "manifest": ...,
+"student_version": "0.2.0" }` (the version defaults to `0.2.0`; candidate
+`0.3.0` is also supported). The read-only report contains the named profile,
+manifest digest, structural/asset/link/profile issues, unperformed checks and
+a server-derived `passed` flag. Draft reports have no stable inventory hash.
+A passing preliminary report does not certify a course export or installed
+execution. Unknown request fields, oversized bodies and unsupported profiles
+are rejected. No code execution, source fetch or state write occurs.

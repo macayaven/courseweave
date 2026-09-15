@@ -122,8 +122,8 @@ def test_spec_checker_rejects_an_unknown_gate(tmp_path):
 
 **Consumes:** StudentProfile and CW facts. **Produces:** V01 and the baseline consumed by packaging/preview.
 
-- [ ] Record baseline release/commit/schema hash. The inspected schema SHA256 is `28ffd9b10fdcf4089e003db686924349c5fd488757de6f424bf11a26482d8839`; verify it from the pinned public baseline before relying on it.
-- [ ] Extend existing author validation tests with a manifest that inserts an author-only field; both released and candidate validators must reject it. Add mismatch cases for unknown surface/check types, unmet phase gate IDs, and overlapping notebook selectors by extending current fixtures.
+- [x] Record baseline release/commit/schema hash. The inspected schema SHA256 is `28ffd9b10fdcf4089e003db686924349c5fd488757de6f424bf11a26482d8839`; verify it from the pinned public baseline before relying on it.
+- [x] Extend existing author validation tests with a manifest that inserts an author-only field; both released and candidate validators must reject it. Add mismatch cases for unknown surface/check types, unmet phase gate IDs, and overlapping notebook selectors by extending current fixtures.
 
 ```python
 def test_author_metadata_is_not_a_student_manifest_field():
@@ -137,9 +137,9 @@ def test_author_metadata_is_not_a_student_manifest_field():
         parse_manifest_data(data)
 ```
 
-- [ ] Implement profile checks by invoking existing contracts/engine functions. Derive form options from the canonical schema/profile. Label schema metadata with no operational student route, such as workspace proposal authority; never imply an assistant can execute/write because a declaration exists.
-- [ ] Expose separate `structural`, `assets`, `links`, `profile`, and `not_performed` report sections. No model can write these statuses. Keep advisory prerequisite notes and source research policy outside runtime fields.
-- [ ] Run `uv run pytest tests/test_manifest.py tests/test_author_api.py tests/test_author_compatibility.py -q` plus Author typecheck. Expected: existing valid examples remain valid; incompatible expectations are field-addressable. Commit the slice.
+- [x] Implement profile checks by invoking existing contracts/engine functions. Derive form options from the canonical schema/profile. Label schema metadata with no operational student route, such as workspace proposal authority; never imply an assistant can execute/write because a declaration exists.
+- [x] Expose separate `structural`, `assets`, `links`, `profile`, and `not_performed` report sections. No model can write these statuses. Keep advisory prerequisite notes and source research policy outside runtime fields.
+- [x] Run `uv run pytest tests/test_manifest.py tests/test_author_api.py tests/test_author_compatibility.py -q` plus Author typecheck. Expected: existing valid examples remain valid; incompatible expectations are field-addressable. Commit the slice.
 
 ## Task 3: Create safe, recoverable author projects and inventories
 

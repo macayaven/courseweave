@@ -19,16 +19,16 @@
     "docs/specs/COURSEWEAVE-STUDENT-EDITION.md": "efe352d579b1844fad3ee2a1b9a8cb2787374f76fa020e85b40cadfb083d2592",
     "docs/specs/README.md": "1923f65756ff62fa0c469205e97cbda749a6f45198d9c3a29ad9c15d5e686f8b",
     "docs/specs/CONSISTENCY-REVIEW.md": "c5be80491ffa1b8d5635d82cab03578bf014a650fb159da6ab240fefd5522e31",
-    "docs/superpowers/plans/2026-09-14-courseweave-author-edition.md": "4e2f2d678ecd63534faa8a063eb2ceb5bb47ac646a6a8a25ca346c9f37f5f9b8",
+    "docs/superpowers/plans/2026-09-14-courseweave-author-edition.md": "373ef0fb7d733152cbfb7c16daf7c7b35f119854eee5e5a8c38b39b12fdfe97b",
     "docs/superpowers/specs/2026-09-14-chatgpt-courseweave-feasibility.md": "7f9b4810b9ec1b28714c5fb512e54788fa82052695ffafcae6467b9eecf361ed",
     "scripts/check_specs.py": "322885fa078d05700a2bb5cfabc8cc19a8ceebdbee4e130b6fd02642d8fef257",
-    "src/courseweave/author/contracts.py": "c77bc1507f8ff3d1d65c6159634b3de5ce52bb0d461ef0965dc944ce74ac8b9f",
-    "tests/test_spec_consistency.py": "1ab6fc945a27278265045f3412af6372339b7c5ca5668e5c736571fd50299bad",
-    "tests/test_author_contracts.py": "3783a75b78037111e2a846c48af551e127cd422986d7c609fb84fa328147e0d5",
+    "src/courseweave/author/contracts.py": "e2ca5b44944d7b6811bbc041da66d3d21e71c0f87210d1c92db0d1b9cf9fca46",
+    "src/courseweave/author/quality.py": "d76214499e4996ec6e12be96f0662bf441a298074bac046bffb4843e92f360b7",
+    "tests/test_author_compatibility.py": "80f70970700326c0ae90faee77307bce371b79fd0c16f593d685ed468e4ec5f0",
     "docs/specs/traceability.csv": "bdc794d4ccd90310bc9d0e2c3617bba882466a34077792935415a50a936c9b7f"
   },
   "checked_date": "2026-09-15",
-  "source_revision_at_check": "409f5c01e93d98f118967138116b0dbafff80ed7",
+  "source_revision_at_check": "7e0863657984b98a473a5512c0b4238cbf7d86f2",
   "working_tree_changed": true,
   "review_kind": "mechanical audit and implementation self-review; independent release review pending"
 }

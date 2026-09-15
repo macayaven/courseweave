@@ -324,6 +324,26 @@ def create_app(
         formatted = manifest_bytes(manifest).decode("utf-8")
         return JSONResponse({"manifest": manifest.model_dump(mode="json"), "formatted_json": formatted})
 
+    @app.post("/api/author/compatibility")
+    async def author_compatibility(request: Request) -> Response:
+        from .author.quality import check_manifest, student_profile
+
+        root = _configured_root(app)
+        if root is None:
+            return _error(409, "not_configured", "No course root is configured.")
+        raw = await request.body()
+        if len(raw) > 1024 * 1024:
+            return _error(413, "validation_error", "Request body exceeds the 1 MiB limit.")
+        try:
+            body = json.loads(raw)
+            if not isinstance(body, dict) or "manifest" not in body or set(body) - {"manifest", "student_version"}:
+                raise ValueError()
+            profile = student_profile(body.get("student_version", "0.2.0"))
+            report = check_manifest(body["manifest"], root, profile)
+        except (ValueError, TypeError):
+            return _error(422, "validation_error", "The compatibility request or Student profile is invalid.")
+        return JSONResponse({**report.model_dump(mode="json"), "passed": report.passed})
+
     @app.get("/api/context")
     async def get_context(
         source_id: str = Query(..., min_length=1, max_length=240),

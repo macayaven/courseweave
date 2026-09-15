@@ -298,7 +298,7 @@ class StudentProfile(ClosedModel):
 class CompatibilityReport(ClosedModel):
     profile: StudentProfile
     manifest_sha256: Sha256
-    inventory_sha256: Sha256
+    inventory_sha256: Sha256 | None = None
     structural: tuple[ValidationIssue, ...] = Field(default=(), max_length=10000)
     assets: tuple[ValidationIssue, ...] = Field(default=(), max_length=10000)
     links: tuple[ValidationIssue, ...] = Field(default=(), max_length=10000)

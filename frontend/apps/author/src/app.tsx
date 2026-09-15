@@ -33,6 +33,7 @@ import {
 import { useAuthorRuntime } from "./runtime";
 import { CurriculumThread } from "./curriculum-thread";
 import { ProposalReview } from "./proposal-review";
+import { CompatibilityPanel } from "./compatibility";
 
 type Client = ReturnType<typeof createAuthorClient>;
 type CheckState = {
@@ -624,6 +625,8 @@ function AuthorEditor({
           linkVersion={state.selection}
         />
       </section>
+      <CompatibilityPanel manifest={projectDraft(state.draft)} check={client.checkCompatibility}
+        disabled={!connected} epoch={epoch} onFocusIssues={focusIssues} />
       <AuthorPreview
         phase={phase}
         structural={structural}

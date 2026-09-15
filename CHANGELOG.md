@@ -12,6 +12,8 @@ releases.
   traceability and regression coverage.
 - Added closed author-only contract types that separate untrusted drafts from
   server-selected targets, deterministic compatibility, and human decisions.
+- Added a preliminary Student compatibility report using the existing validators,
+  explicit unchecked scope, and canonical-schema inspector choices.
 - The complete Author Edition and its installed/live-provider acceptance are
   still in development; see [implementation notes](docs/author/implementation.md).
 

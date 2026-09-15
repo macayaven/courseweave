@@ -8,6 +8,8 @@ import { TextField, SelectField, ArrayFields, Choices } from "./field-inputs";
 import { LearningFields } from "./learning-fields";
 import { pointerToControlId } from "./validation";
 import { uniqueSlug } from "./draft";
+import { progressModes, accessModes, hintLevels, shareKinds, proposalTypes,
+  experienceTypes, experiences, styleTypes, styles, requirementTypes, recordKinds } from "./schema-options";
 export function PhaseFields({
   phase,
   pointer,
@@ -60,7 +62,7 @@ export function PhaseFields({
         label="Progress"
         pointer={p("progress")}
         value={phase.progress}
-        options={["required", "optional", "excluded"]}
+        options={progressModes}
         onChange={(progress) =>
           update({
             progress,
@@ -83,7 +85,7 @@ export function PhaseFields({
         label="Experience type"
         pointer={p("experience/type")}
         value={phase.experience.type}
-        options={["builtin", "custom"]}
+        options={experienceTypes}
         onChange={(type) =>
           update({
             experience:
@@ -98,17 +100,7 @@ export function PhaseFields({
           label="Experience"
           pointer={p("experience/id")}
           value={phase.experience.id}
-          options={[
-            "generic",
-            "orientation",
-            "reading",
-            "media",
-            "prediction",
-            "experiment",
-            "practice",
-            "review",
-            "project",
-          ]}
+          options={experiences}
           onChange={(id) =>
             update({ experience: { type: "builtin", id } as AuthorExperience })
           }
@@ -147,7 +139,7 @@ export function PhaseFields({
                   label={`${label} type`}
                   pointer={`${q}/type`}
                   value={r.type}
-                  options={["learner_record", "artifact_exists"]}
+                  options={requirementTypes}
                   onChange={(type) =>
                     requirementChange(
                       index,
@@ -181,7 +173,7 @@ export function PhaseFields({
                     label={`${label} record kind`}
                     pointer={`${q}/record_kind`}
                     value={r.record_kind}
-                    options={["text", "evidence", "attestation"]}
+                    options={recordKinds}
                     onChange={(record_kind) =>
                       requirementChange(index, { ...r, record_kind })
                     }
@@ -253,7 +245,7 @@ export function PhaseFields({
           label="Teacher access"
           pointer={p("teacher/access/mode")}
           value={teacher.access.mode}
-          options={["available", "disabled", "observer_only"]}
+          options={accessModes}
           onChange={(mode) =>
             update({
               teacher: {
@@ -298,7 +290,7 @@ export function PhaseFields({
             label="Share"
             pointer={p("teacher/sharing/allow")}
             values={teacher.sharing.allow}
-            options={["selection", "cell", "output"]}
+            options={shareKinds}
             onChange={(allow) =>
               update({ teacher: { ...teacher, sharing: { allow } } })
             }
@@ -307,7 +299,7 @@ export function PhaseFields({
             label="Propose"
             pointer={p("teacher/proposals/allow")}
             values={teacher.proposals.allow}
-            options={["profile", "course", "workspace"]}
+            options={proposalTypes}
             onChange={(allow) =>
               update({ teacher: { ...teacher, proposals: { allow } } })
             }
@@ -317,7 +309,7 @@ export function PhaseFields({
           label="Guidance style type"
           pointer={p("teacher/guidance/style/type")}
           value={teacher.guidance.style.type}
-          options={["builtin", "custom"]}
+          options={styleTypes}
           onChange={(type) =>
             update({
               teacher: {
@@ -338,13 +330,7 @@ export function PhaseFields({
             label="Guidance style"
             pointer={p("teacher/guidance/style/id")}
             value={teacher.guidance.style.id}
-            options={[
-              "orienting",
-              "explanatory",
-              "socratic",
-              "debugging",
-              "reviewing",
-            ]}
+            options={styles}
             onChange={(id) =>
               update({
                 teacher: {
@@ -379,7 +365,7 @@ export function PhaseFields({
           label="Hint level"
           pointer={p("teacher/guidance/hint_level")}
           value={teacher.guidance.hint_level}
-          options={["none", "gentle", "graduated", "full"]}
+          options={hintLevels}
           onChange={(hint_level) =>
             update({
               teacher: {

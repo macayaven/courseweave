@@ -42,6 +42,33 @@ self-review; the bounded independent review remains required in Task 11.
 
 ## Remaining work
 
-Tasks 2–11, installed Author/Student journeys, actual public research, all six
+Tasks 3–11, installed Author/Student journeys, actual public research, all six
 real-provider roles, failure/recovery, rendered UI and independent final review
 remain required. Source declarations and fixtures do not satisfy those gates.
+
+## Task 2: released Student compatibility profile
+
+The preliminary compatibility report now invokes the canonical structural and
+runnable validators, with field-addressable structure/asset/profile sections
+and explicit checks not performed. Its inventory hash is null until a stable
+package inventory is checked; this draft report is not an export receipt.
+Student v0.2.0 and candidate v0.3.0 share the unchanged released schema hash
+`28ffd9b10fdcf4089e003db686924349c5fd488757de6f424bf11a26482d8839`.
+Profile construction rejects schema drift, including disagreement with generated
+canonical models. Workspace proposal declarations remain labeled inactive.
+
+The Author inspector now derives enumerated choices from that canonical schema.
+The new compatibility panel retains errors, omissions, target version and
+actionable field links; a changed draft invalidates an in-flight result.
+`POST /api/author/compatibility` is authenticated, bounded and read-only. It
+accepts a manifest and an optional named Student version; callers cannot supply
+pass flags. Manual compatibility requires no provider and makes no network calls.
+
+Validation: 67 focused manifest/API/compatibility tests passed, including the
+metadata rejection using a separate installation of the exact released v0.2.0
+wheel. Its hash was checked against the existing public receipt. That check
+exercises the released validator, not a complete learner installation journey.
+Author typecheck and 31 affected frontend cases passed; the Author bundle built.
+Required rendered/installed acceptance remains open. No shared manifest, engine,
+policy or progress rule changed, and the approved normative specs/traceability
+remain unchanged. Linked-asset closure and full packaging are Task 8 work.

@@ -1,5 +1,6 @@
 import { authenticatedHeaders } from "@courseweave/ui";
 import type { AuthorRuntime } from "./runtime";
+import type { CompatibilityReport } from "./compatibility";
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -177,6 +178,11 @@ export function createAuthorClient(runtime: AuthorRuntime) {
         },
         signal,
       ),
+    checkCompatibility: (manifest: unknown, student_version: "0.2.0" | "0.3.0", signal?: AbortSignal) =>
+      json<CompatibilityReport>("/api/author/compatibility", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manifest, student_version }),
+      }, signal),
     async confirmActivity(
       selection: AuthorActivityConfirmation,
       signal?: AbortSignal,
