@@ -8,6 +8,9 @@ releases.
 
 ### Author Edition v0.3.0 work in progress
 
+- Fixed two defects found by independent candidate review: revoked sources now
+  leave the assistant's permitted selection, and recovery disables editing until
+  completion so switching to a restored project cannot discard a new draft.
 - Added a separate portable Author bundle with Start Author.command, complete
   setup/recovery README, both Student wheels and reproducible source/runtime
   inputs. First setup creates isolated application/kernel environments; damaged

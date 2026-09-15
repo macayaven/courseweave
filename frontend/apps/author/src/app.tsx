@@ -901,6 +901,8 @@ export function AuthorApp() {
       provider="not_configured"
     >
       {projectPanel}
+      <fieldset disabled={recoveryBusy} inert={recoveryBusy} aria-busy={recoveryBusy}
+        style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
       <AuthorEditor
         key={`editor-${projectId ?? "single-course"}`}
         course={course}
@@ -948,6 +950,7 @@ export function AuthorApp() {
         epoch={sourcesEpoch + connectionEpoch.current} />}
       {projectId && <StudentPreview key={"student-preview-" + projectId} client={client.current}
         disabled={!connected} onDirtyChange={setPreviewDirty} />}
+      </fieldset>
       {!connected ? (
         <button type="button" onClick={runtime.retry}>
           Reconnect

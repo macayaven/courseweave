@@ -47,7 +47,7 @@ export async function verifyAuthorRoles({ page, author, research, report, eviden
   if (fetchedTitle) await assistant.getByRole('checkbox', { name: 'Permit ' + fetchedTitle, exact: true }).check();
   const common = 'Return only the specified JSON reply object, without Markdown fences. Keep the message concise and useful for this selected activity. Do not invent citations or completion claims. Leave change:null unless requested. ';
   const cases = [
-    ['curator', 'Assess the permitted instructor reference for this lesson: state its best use, one omission, and the separate source-approval and redistribution decisions.'],
+    ['curator', 'For each permitted source, name its title and report its own status and redistribution metadata separately. Do not transfer a decision from one source to another. Then assess instructor.md for this lesson: state its best use and one omission. Source approval and redistribution remain separate author decisions.'],
     ['curriculum_designer', 'Explain an actionable prediction → notebook → self-check sequence for this objective. Map the field-rules objective to the schema-versus-truth check; keep independent work optional and unaided.'],
     ['source_researcher', 'Use the permitted references to distinguish JSON parsing from application field validation. Explain what the fetched Python documentation supports and what requires the instructor reference or further evidence.'],
     ['fact_checker', 'Assess this claim: "Passing the schema proves that the recorded age is factually correct." Use one finding with judgment contradicted and an exact quotation from instructor.md, copying its supplied provenance fields and correct character offsets.'],
@@ -63,7 +63,7 @@ export async function verifyAuthorRoles({ page, author, research, report, eviden
       continue;
     }
     await assistant.getByRole('combobox', { name: 'Author role', exact: true }).selectOption(role);
-    await assistant.getByRole('textbox', { name: 'Message to Author assistant', exact: true }).fill(common + prompt);
+    await assistant.getByRole('textbox', { name: 'Message to Author assistant', exact: true }).fill(common + `Set the JSON role field to "${role}" exactly. ` + prompt);
     await expect(assistant.getByRole('button', { name: 'Request review', exact: true })).toBeEnabled();
     const [response] = await Promise.all([
       page.waitForResponse(r => r.url().endsWith('/api/author/guide') && r.request().method() === 'POST', { timeout: 180_000 }),

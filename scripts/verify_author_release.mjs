@@ -222,7 +222,36 @@ try {
   stage = 'actual paired Student previews';
   const { verifyAuthorStudentPreviews } = await import('./author_preview_checks.mjs');
   await verifyAuthorStudentPreviews({ session: current, report, evidence, project });
+  stage = 'source revocation and context recovery';
+  const assistant = author.getByRole('region', { name: 'Author assistant', exact: true });
+  await assistant.getByRole('checkbox', { name: 'Permit instructor.md', exact: true }).check();
+  await assistant.getByRole('checkbox', { name: 'Permit README.md', exact: true }).check();
+  const contextPreview = assistant.locator('[aria-label="Context preview"]');
+  const permittedCount = async () => Number((await contextPreview.innerText()).match(/(\d+) permitted source\(s\)/)[1]);
+  await expect(assistant.getByRole('textbox', { name: 'Message to Author assistant', exact: true })).toBeEnabled();
+  await assistant.getByRole('textbox', { name: 'Message to Author assistant', exact: true }).fill('Unsent source-revocation recovery check.');
+  await expect(assistant.getByRole('button', { name: 'Request review', exact: true })).toBeEnabled();
+  const beforePermissionCount = await permittedCount();
+  let recoveryRequests = 0;
+  const countRecoveryRequest = request => { if (request.method() === 'POST' && request.url().endsWith('/api/author/guide')) recoveryRequests++; };
+  page.on('request', countRecoveryRequest);
+  await card.getByRole('combobox', { name: 'Review status for instructor.md', exact: true }).selectOption('rejected');
+  await card.getByRole('button', { name: 'Save decision for instructor.md', exact: true }).click();
+  await expect(assistant.getByRole('checkbox', { name: 'Permit instructor.md', exact: true })).toHaveCount(0);
+  await expect.poll(permittedCount).toBe(beforePermissionCount - 1);
+  await expect(assistant.getByRole('button', { name: 'Request review', exact: true })).toBeEnabled();
+  await expect(assistant.getByRole('checkbox', { name: 'Permit README.md', exact: true })).toBeChecked();
+  await card.getByRole('combobox', { name: 'Review status for instructor.md', exact: true }).selectOption('approved');
+  await card.getByRole('button', { name: 'Save decision for instructor.md', exact: true }).click();
+  await expect(assistant.getByRole('checkbox', { name: 'Permit instructor.md', exact: true })).not.toBeChecked();
+  await expect(assistant.getByRole('textbox', { name: 'Message to Author assistant', exact: true })).toHaveValue('Unsent source-revocation recovery check.');
+  expect(recoveryRequests).toBe(0); page.off('request', countRecoveryRequest);
+  report.source_revocation = { removed_hidden_permission: true, other_permission_retained: true, reapproval_does_not_restore_permission: true, guide_requests: recoveryRequests };
+  await assistant.getByRole('button', { name: 'Request review', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(evidence, 'source-revocation-recovered.png') });
   stage = 'backup restore';
+  await author.getByRole('button', { name: 'Select course Python data validation', exact: true }).click();
+  await expect(author.getByRole('textbox', { name: 'Course title', exact: true })).toBeEnabled();
   const backup = author.getByRole('region', { name: 'Project backup and recovery', exact: true });
   await backup.getByText('Backup and recovery', { exact: true }).click();
   await backup.getByRole('checkbox', { name: 'Saved review reports', exact: true }).check();
@@ -233,8 +262,34 @@ try {
   await expect(backup.getByText('Backup saved: ' + join(owned, 'author-backup.tar'), { exact: true })).toBeVisible();
   await backup.getByRole('button', { name: 'Inspect restore archive', exact: true }).click();
   await backup.getByRole('textbox', { name: 'Restored project ID', exact: true }).fill('restored-validation');
-  await backup.getByRole('button', { name: 'Restore as new project', exact: true }).click();
+  // Hold the actual restore request briefly to expose the user-edit race window.
+  // The installed server still performs and validates the real archive restore.
+  let releaseRestore, restoreRequested = false;
+  const restoreHold = new Promise(ok => { releaseRestore = ok; });
+  const restoreRoute = '**/api/author/projects/restore';
+  await page.route(restoreRoute, async route => {
+    restoreRequested = true;
+    await restoreHold;
+    await route.continue();
+  });
+  try {
+    await backup.getByRole('button', { name: 'Restore as new project', exact: true }).click();
+    await expect.poll(() => restoreRequested).toBe(true);
+    await expect(author.getByLabel('Course title', { exact: true })).toBeDisabled();
+    await expect(author.getByLabel('Local reference file', { exact: true })).toBeDisabled();
+    await expect(author.getByRole('button', { name: 'Add module', exact: true, includeHidden: true })).toBeDisabled();
+    await expect(author.getByLabel('Open project', { exact: true })).toBeDisabled();
+    report.restore_interaction = { actual_request_delayed: true, editor_disabled: true, research_disabled: true, project_switch_disabled: true };
+    await backup.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidence, 'restore-editing-locked.png') });
+  } finally {
+    releaseRestore();
+    await page.unroute(restoreRoute);
+  }
   await expect(author.getByRole('combobox', { name: 'Open project', exact: true })).toHaveValue('restored-validation');
+  await expect(author.getByRole('textbox', { name: 'Course title', exact: true })).toBeEnabled();
+  await expect(author.getByRole('textbox', { name: 'Course title', exact: true })).toHaveValue('Python data validation');
+  report.restore_interaction.editor_enabled_after_restore = true;
   expect(await readFile(join(home, 'workspace/projects/restored-validation/course/lessons/validate.md'), 'utf8')).toBe(correctLesson);
   report.checks.push('Exact one-spelling-change review/apply; original instructor material preserved; standard course export; both generic Student bundles; explicit inspected backup/new-project restore.');
   stage = 'actual restart';

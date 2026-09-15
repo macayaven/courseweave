@@ -42,9 +42,10 @@ self-review; the bounded independent review remains required in Task 11.
 
 ## Remaining work
 
-Task 6 live discovery and Tasks 10–11, exact-archive Author/Student journeys, all six
-real-provider roles, failure/recovery, rendered UI and independent final review
-remain required. Source declarations and fixtures do not satisfy those gates.
+Task 6 actual Brave discovery remains open. Task 11 is closing the independent
+review findings and checking the resulting exact Author archive. Both full-course
+Student runs, the paired new-course journey, all six real-provider roles and
+failure/recovery have observations with the limitations recorded below.
 
 ## Task 2: released Student compatibility profile
 
@@ -536,8 +537,15 @@ confirmed a real quotation with incorrect character offsets. The prompt now
 instructs the provider to copy an entire supplied excerpt and its supplied offsets,
 or leave evidence empty when it cannot establish a shorter span. Validation stays
 strict; the server neither repairs a quotation nor treats a model claim as truth.
-Eighty-one affected assistant/review/quality tests passed. A fresh built live run
-is still required to establish the observed effect of this instruction change.
+Eighty-one affected assistant/review/quality tests passed. Candidate 2 subsequently
+produced accepted responses for all six roles across a full run and one explicit
+curator/proofreader retry. The first curator response incorrectly transferred a
+redistribution decision between sources; the retry was useful but omitted some
+requested metadata. A proofreader response with the wrong role was rejected; the
+retry supplied and explicitly applied only the intended spelling correction.
+Quotation provenance does not establish factual accuracy. The fact-checker prompt
+supplied the intended judgment, so that observation demonstrates structured
+grounding and provenance, not blind factual accuracy.
 
 The versioned acceptance scripts exercise the actual Author launcher and reuse
 the existing process and credential checks. They also prepare the pinned full
@@ -550,3 +558,19 @@ Three-spec impact: normative requirements, traceability, schema-v2 bytes and
 Student rules remain unchanged. The native Jupyter Markdown link opens its local
 target in the text editor; rendered heading scrolling is not established there.
 Actual Brave discovery and bounded independent review remain required.
+
+Both installed Agent Harness Path runs now cover all fourteen lessons, twelve
+executed notebooks, 108 local HTML link clicks each, optional S13/S14 boundaries,
+sharing consent, restart and export/reset with notebook preservation. The new
+two-module course also passes both actual Student previews and Author backup,
+restore and restart. Test records are synthetic; no learning gains are inferred.
+
+Independent review reproduced two UI defects. A revoked approved source remained
+hidden in the conversation's selected IDs, preventing context recovery. Catalogue
+refresh now removes only IDs that are no longer approved; remaining permissions
+and the unsent message survive, and reapproval does not restore permission. A
+second defect allowed editing while restore was pending, then lost that new draft
+when the restored project opened. Recovery now disables and inerts the editor and
+related panels until completion. Focused failing-then-passing regressions cover
+revocation/reapproval and restore success/failure; all 176 Author tests, typecheck
+and build pass. Fresh installed verification of these fixes remains required.

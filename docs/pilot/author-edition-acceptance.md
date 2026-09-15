@@ -43,13 +43,46 @@ video instead. Existing released wheel bytes have not been changed.
 
 ## Remaining final gates
 
-- Fresh Author archive installation and full new two-module course journey.
-- All six useful hats on the real text-only provider; actual Brave discovery/fetch.
-- All 14 Agent Harness Path rendered lessons, 12 executed notebooks, native checks,
-  both optional S13/S14 protocols, scope/sharing gates and both Student versions.
-- Exact installed save/restart/export/reset/restore and cleanup evidence.
-- Representative UI inspection, per-module/per-role coverage and bounded independent
-  review of the immutable candidate, all three specs and exact acceptance receipt.
+- Perform actual Brave discovery using an authorized credential.
+- Finish the bounded independent review of the immutable candidate, all three
+  specs, compatibility matrix, exact artifacts and representative UI evidence.
+- Verify the two review fixes in a fresh installed candidate and finish the
+  final local acceptance receipt.
+
+Candidate 2 has fresh actual Author archive setup and corrupted-readiness recovery
+evidence. The new two-module course's manual journey passes in both installed
+Student versions: Markdown/HTML, prediction, both native-check outcomes, authored
+hint, notebook execution/save, optional unaided activity, actual restart and
+records export/reset with notebook preservation. Author backup/new-project restore
+and restart preserve saved course content and preview observations. Real-provider
+role outcomes remain separate from these manual checks.
+
+Both full Agent Harness Path Student runs pass all fourteen lessons, twelve
+notebooks with preserved cell IDs and no error outputs, native checks, 108 local
+HTML link clicks each, scope/one-answer sharing, optional S13/S14 restrictions,
+review attestation gates, restart/export/reset and process/credential cleanup.
+Recorded progress is synthetic test input. No learner or real protocol completion
+is claimed. The fourteen retained lesson/diagram screenshots were inspected;
+wide diagrams retain keyboard scrolling and large diagrams use the reader scroll.
+
+Candidate 2's wheel differs from the tested Candidate 1 only in Author assistant
+instructions and wheel RECORD. All Student runtime members are byte-identical,
+so the full-course Student evidence remains applicable with its exact course hash.
+Candidate 2 has separate fresh Author installation and live-role observations.
+Private receipts retain complete hashes, commands, failures and this comparison.
+
+All six roles have useful real-provider observations across Candidate 2's full
+run and explicit curator/proofreader retry. Strict validation rejected incorrect
+citation spans and a wrong role. The first curator response misstated one source's
+redistribution decision; the retry omitted some requested metadata. The
+fact-checker prompt supplied the intended judgment, so its result demonstrates
+structured grounding/provenance, not blind factual accuracy. Model claims remain
+unreviewed suggestions and acquire no source-decision or mutation authority.
+
+The independent review reproduced two defects: a hidden revoked permission blocked
+context recovery, and editing during restore could lose a new unsaved draft.
+Focused regressions now pass for revocation/reapproval and restore success/failure.
+The resulting archive still requires its installed checks and review follow-up.
 
 The final receipt will identify actual wheel/source/archive hashes, input commits,
 tested runtimes and commands, reused evidence with provenance, and checks not performed.

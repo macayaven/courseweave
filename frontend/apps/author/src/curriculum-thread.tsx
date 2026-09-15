@@ -86,6 +86,11 @@ export function AuthorAssistant({ client, projectId, courseId, selected, clean, 
     void Promise.all([client.getSources(controller.signal), client.getContentFiles(controller.signal)]).then(([catalogue, inventory]) => {
       if (controller.signal.aborted) return;
       setSources(catalogue.sources); setFiles(inventory.files.map(item => item.path).filter(path => path !== "courseweave.json"));
+      const approvedIds = new Set(catalogue.sources.filter(source => source.status === "approved").map(source => source.source_id));
+      setSourceIds(ids => {
+        const retained = ids.filter(id => approvedIds.has(id));
+        return retained.length === ids.length ? ids : retained;
+      });
     }).catch(() => { if (!controller.signal.aborted) setNotice("Saved materials are unavailable. Reload when the project is ready."); });
     return () => controller.abort();
   }, [client, epoch]);

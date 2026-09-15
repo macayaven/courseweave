@@ -50,6 +50,40 @@ it("keeps the composer and blocks provider requests while saved scope is unavail
   expect(client.postGuide).not.toHaveBeenCalled();
 });
 
+it("recovers after a permitted source is revoked without restoring permission on reapproval", async () => {
+  const client = clientFor();
+  const reference = { source_id: "approved", title: "Reference", status: "approved", revision: 1 };
+  const other = { source_id: "other", title: "Other reference", status: "approved", revision: 1 };
+  client.getSources.mockResolvedValue({ sources: [reference, other] });
+  const props = { client, projectId: "project", courseId: "course", onSaved: vi.fn(), clean: true };
+  const view = render(<AuthorAssistant {...props} />);
+  await screen.findByLabelText("Permit Reference");
+  fireEvent.click(screen.getByLabelText("Permit Reference"));
+  fireEvent.click(screen.getByLabelText("Permit Other reference"));
+  fireEvent.change(screen.getByLabelText("Message to Author assistant"), { target: { value: "Keep this request" } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Request review" })).toBeEnabled());
+
+  const preview = client.previewAuthorContext.getMockImplementation()!;
+  client.previewAuthorContext.mockImplementation(async body => {
+    if (body.source_ids.includes("approved")) throw new Error("Only current approved sources may be explicitly permitted.");
+    return preview(body);
+  });
+  client.getSources.mockResolvedValue({ sources: [{ ...reference, status: "rejected", revision: 2 }, other] });
+  view.rerender(<AuthorAssistant {...props} epoch={1} />);
+  await waitFor(() => expect(screen.queryByLabelText("Permit Reference")).not.toBeInTheDocument());
+  await waitFor(() => expect(client.previewAuthorContext).toHaveBeenLastCalledWith(
+    expect.objectContaining({ source_ids: ["other"] }), expect.any(AbortSignal)));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Request review" })).toBeEnabled());
+  expect(screen.getByLabelText("Permit Other reference")).toBeChecked();
+  expect(screen.getByLabelText("Message to Author assistant")).toHaveValue("Keep this request");
+  expect(client.postGuide).not.toHaveBeenCalled();
+
+  client.getSources.mockResolvedValue({ sources: [{ ...reference, revision: 3 }, other] });
+  view.rerender(<AuthorAssistant {...props} epoch={2} />);
+  await waitFor(() => expect(screen.getByLabelText("Permit Reference")).not.toBeChecked());
+  expect(screen.getByLabelText("Permit Other reference")).toBeChecked();
+});
+
 function completed(body: { threadId: string; runId: string }, terminal = true, wrongScope = false) {
   const context = { version: "turn-context-v1", module_id: null, phase_id: null, surface_id: null,
     source_id: "author-selection", manifest_etag: '"saved"', state_revision: 0, consent: false,
