@@ -102,3 +102,21 @@ Normative rows, shared facts and traceability remain unchanged across all three
 specifications. Task 6 research, Task 7 saved reviews, Task 8 export, Task 9 actual
 preview, Task 10 recovery and Task 11 exact acceptance/independent review remain
 required. All-six-role live acceptance and actual Brave research are open gates.
+
+## Source research implementation update, 2026-09-15
+
+Task 6 implements the optional separate Brave adapter, bounded public HTTPS
+transport, explicit policy/network/cancellation controls, private source snapshots,
+static extraction, source revision invalidation and durable actual research
+outcomes. The existing Author text model remains separate from network actions;
+only a human source decision and explicit per-request permission grant context.
+No model output approves sources, publishes learner material or sets factual truth.
+
+The shared lock gained an optional research deadline/cancellation wait check after
+an observed held-lock failure. Immutable terminal reports publish atomically
+without a mutable index. Source registry publication remains under the canonical
+course lock. No Student schema, rule, state or consent behavior changed. Normative
+rows, shared facts and traceability stay identical across the three specifications.
+The development checks and live allowed fetch are not exact installed V05/V09
+acceptance. Live Brave discovery, Task 7 findings, Task 8 packaging, Task 9 preview,
+Task 10 recovery and Task 11 release/independent review remain required.

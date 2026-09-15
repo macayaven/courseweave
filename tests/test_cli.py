@@ -809,6 +809,7 @@ def test_public_cli_retains_unconfirmed_child_runtime_and_lock_after_supervisor_
 def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "synthetic-author-search-key")
     supervisor, state = _supervisor_fixture(tmp_path, monkeypatch)
     before = sorted(path.relative_to(state["course"]) for path in state["course"].rglob("*"))
 
@@ -849,6 +850,8 @@ def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_ch
     assert child_env["COURSEWEAVE_RUNTIME_ID"] == "owned-runtime-id"
     assert child_env["COURSEWEAVE_LAUNCH_MODE"] == "author"
     assert "COURSEWEAVE_UNTRUSTED_PARENT_VALUE" not in child_env
+    assert "BRAVE_SEARCH_API_KEY" not in child_env
+    assert "synthetic-author-search-key" not in str(argv) + str(child_env)
     assert not Path(child_env["JUPYTER_RUNTIME_DIR"]).parent.exists()
     assert state["jupyter_calls"] == [
         (

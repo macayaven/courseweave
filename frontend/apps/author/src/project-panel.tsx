@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBeforeUnload } from "./reconnect";
+import { SourceExcerpt, type ResearchClient } from "./source-panel";
 
 export type Project = { project_id: string; course_root?: string; state_root?: string; revision?: number };
 export type ProjectList = { enabled: boolean; projects?: Project[]; unavailable?: string[] };
@@ -10,11 +11,12 @@ export type ProjectRequest = { project_id: string; selected_paths: string[];
   source_root?: string; expected_inventory?: string };
 export type SourceRecord = { source_id: string; revision: number; title: string; origin: string;
   imported_at: string; publication_date: string | null; raw_sha256: string; extraction: string;
-  status: string; intended_use: string; redistribution: string; review_note: string; policy_decision: string };
+  status: string; intended_use: string; redistribution: string; review_note: string; policy_decision: string;
+  retrieved_at?: string | null; final_url?: string | null; media_type?: string | null; text_sha256?: string | null; extractor_version?: string | null; extraction_note?: string };
 export type SourceDecision = Pick<SourceRecord, "revision" | "title" | "publication_date" | "status" | "intended_use" | "redistribution" | "review_note">;
 type ProjectClient = { inspectSource(path: string, signal?: AbortSignal): Promise<Inventory>;
   createProject(request: ProjectRequest, signal?: AbortSignal): Promise<Project> };
-type SourceClient = { getSources(signal?: AbortSignal): Promise<{ sources: SourceRecord[] }>;
+type SourceClient = Pick<ResearchClient, "getSourceText"> & { getSources(signal?: AbortSignal): Promise<{ sources: SourceRecord[] }>;
   updateSource(id: string, value: SourceDecision, signal?: AbortSignal): Promise<SourceRecord> };
 const message = (error: unknown) => error instanceof Error ? error.message : "The request could not be completed.";
 
@@ -99,7 +101,7 @@ export function ProjectPanel({ client, projects, unavailable, selected, disabled
   </section>;
 }
 
-function SourceCard({ source, duplicate, disabled, save, onDirtyChange }: { source: SourceRecord; duplicate: boolean;
+function SourceCard({ source, duplicate, disabled, save, onDirtyChange, client }: { source: SourceRecord; duplicate: boolean; client: SourceClient;
   disabled: boolean; save(id: string, value: SourceDecision): Promise<void>; onDirtyChange(id: string, dirty: boolean): void }) {
   const [decision, setDecision] = useState<SourceDecision>({ revision: source.revision, title: source.title,
     publication_date: source.publication_date, status: source.status, intended_use: source.intended_use,
@@ -109,10 +111,12 @@ function SourceCard({ source, duplicate, disabled, save, onDirtyChange }: { sour
   useEffect(() => () => onDirtyChange(source.source_id, false), [source.source_id, onDirtyChange]);
   return <article className="source-card">
     <h3>{source.title}</h3>
-    <p>Origin: {source.origin}</p><p>Imported/retrieved: {source.imported_at}. Publication date: {source.publication_date ?? "unknown"}.</p>
+    <p>Origin: {source.origin}</p><p>Imported: {source.imported_at}. Publication date: {source.publication_date ?? "unknown"}.</p>
+    {source.retrieved_at && <p>Retrieved: {source.retrieved_at}. Final URL: {source.final_url ?? "unknown"}.</p>}
     <p>Source: {source.source_id} · Revision {source.revision}</p><p className="source-hash">SHA-256: {source.raw_sha256}</p>
     <p>Extraction: {source.extraction}{source.extraction !== "text" ? ". Original bytes preserved. Model-readable extraction is unavailable." : ". UTF-8 text is available for explicit selection."}</p>
     <p>Origin policy: {source.policy_decision}</p>{duplicate && <p>Duplicate content; this source retains its own identity and decision.</p>}
+    <SourceExcerpt client={client} source={source} disabled={disabled} />
     <fieldset disabled={disabled}><legend>Human source decision</legend>
       <label>Title for {source.title}<input value={decision.title} maxLength={500} onChange={e => setDecision({ ...decision, title: e.target.value })} /></label>
       <label>Publication date for {source.title}<input type="date" value={decision.publication_date ?? ""} onChange={e => setDecision({ ...decision, publication_date: e.target.value || null })} /></label>
@@ -159,7 +163,7 @@ export function SourceLibrary({ client, projectId, disabled, onDirtyChange, onCh
     <p>Approval and redistribution are human decisions. Imported sources begin as candidate references with redistribution undecided.</p>
     <button type="button" disabled={disabled || busy} onClick={() => setReload(n => n + 1)}>{dirtySources.length ? "Discard source edits and reload" : "Reload source decisions"}</button>
     <p role="status">{notice}</p>
-    {sources.map(source => <SourceCard key={`${source.source_id}:${source.revision}:${reload}`} source={source}
+    {sources.map(source => <SourceCard key={`${source.source_id}:${source.revision}:${reload}`} source={source} client={client}
       duplicate={sources.some(other => other.source_id !== source.source_id && other.raw_sha256 === source.raw_sha256)} disabled={disabled || busy} save={save} onDirtyChange={recordDirty} />)}
   </section>;
 }

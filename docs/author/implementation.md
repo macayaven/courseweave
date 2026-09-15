@@ -42,7 +42,7 @@ self-review; the bounded independent review remains required in Task 11.
 
 ## Remaining work
 
-Tasks 5–11, installed Author/Student journeys, actual public research, all six
+Tasks 6–11, installed Author/Student journeys, actual public discovery, all six
 real-provider roles, failure/recovery, rendered UI and independent final review
 remain required. Source declarations and fixtures do not satisfy those gates.
 
@@ -255,3 +255,54 @@ engineering hours for Tasks 6–11 and export integration, excluding waits for
 external prerequisites. It is a forecast, not a timebox. Brave credential custody
 still requires the owner's location information; independent offline work can
 continue. Final acceptance still requires every gate and bounded review.
+
+## Task 6: explicit research and revisioned evidence
+
+The Research and references panel now offers offline reference import, optional
+Brave discovery, separate explicit public URL fetches, allow/deny policy review,
+network-off defaults, cancellation, saved reports and source excerpts. The existing
+text-only Author assistant performs synthesis only after reviewed sources are
+explicitly permitted. Setup and operating bounds are in [research.md](research.md).
+
+The narrow standard-library transport validates every resolved address, pins the
+actual numeric connection and retains TLS hostname verification. DNS, response
+headers, wire/decompressed bytes and elapsed time are bounded; no browser cookies,
+proxy credentials, provider keys, retry, crawl or script execution are used.
+The optional Brave adapter uses its single documented Web Search endpoint and
+separate environment key. Unknown publication dates stay unknown. Discovery
+snippets never become substantive source evidence without an allowed explicit
+fetch and source review.
+
+Static text/HTML/Markdown extraction produces retained UTF-8 bytes, an extractor
+version and separate raw/text hashes. Login, access challenges, JavaScript-only
+content, unsupported attachments and invalid encodings have explicit outcomes.
+Excerpts show their exclusive-end character offsets and omissions. A same-origin
+refetch with unchanged snapshots preserves decisions; changed bytes/extraction or
+final URL creates a new candidate revision with redistribution undecided. Prior
+snapshots remain immutable, and existing source-revision checks invalidate stale
+assistant context and pending edits. Different origins keep separate identities.
+
+Source publication uses the canonical course lock and one atomic registry update.
+A verified regression showed research waiting beyond its deadline behind a held
+course lock. The shared lock seam now accepts an optional bounded wait check;
+ordinary Student/store transactions retain their existing behavior. Terminal
+research reports are immutable, uniquely named files with no mutable index, so
+atomic publication does not wait on the course lock. The API admits one active
+run per Author home; reports are paged and capped rather than silently pruned.
+
+Development validation: 230 focused Python checks cover policy normalization,
+DNS/TLS pinning, redirects, compression/size/deadline limits, cancellation,
+network-off routing, missing discovery, source versions, local extraction,
+private snapshots, revision/hash-checked excerpts, report reopening and the
+existing content/project/assistant/store boundaries. All 155 Author UI checks,
+typecheck and the Author build pass. A local HTML-fragment regression exposed a
+title included in body offsets; the extractor now omits title text from the body.
+These checks are separate from installed release acceptance. Live public fetch,
+source review and synthesis development observations are tracked in the local
+receipt; actual Brave discovery remains pending authorized credential access.
+
+Three-spec impact: TE-006/TE-007 research and TE-005/TE-008 source evidence now
+have implementation coverage. Student schema-v2 rules, progress, consent and
+provider scope remain unchanged. Author research grants no Student retrieval.
+Generic export exclusion, saved model findings/human dispositions, full recovery,
+exact installed gates and final independent review remain subsequent work.

@@ -36,6 +36,7 @@ import { CurriculumThread, AuthorAssistant } from "./curriculum-thread";
 import { ProposalReview } from "./proposal-review";
 import { CompatibilityPanel } from "./compatibility";
 import { ProjectPanel, SourceLibrary, type ProjectList } from "./project-panel";
+import { SourcePanel } from "./source-panel";
 import { ContentPanel, type ContentChange } from "./content-panel";
 
 type Client = ReturnType<typeof createAuthorClient>;
@@ -780,6 +781,7 @@ export function AuthorApp() {
   const [dirty, setDirty] = useState(false);
   const [sourcesDirty, setSourcesDirty] = useState(false);
   const [contentDirty, setContentDirty] = useState(false);
+  const [researchBusy, setResearchBusy] = useState(false);
   const [sourcesEpoch, setSourcesEpoch] = useState(0);
   const [openChangeId, setOpenChangeId] = useState<string | null>(null);
   const [courseAuthorityEpoch, setCourseAuthorityEpoch] = useState(-1);
@@ -830,13 +832,13 @@ export function AuthorApp() {
     return () => controller.abort();
   }, [runtime.status, runtime.runtime, projectId]);
   const selectProject = (id: string) => {
-    if (dirty || sourcesDirty || contentDirty || id === projectId) return;
+    if (dirty || sourcesDirty || contentDirty || researchBusy || id === projectId) return;
     setCourse(null); setLoad("loading"); setProjectId(id);
     setOpenChangeId(null);
   };
   const projectPanel = projects?.enabled && client.current ? <ProjectPanel client={client.current}
     projects={projects.projects ?? []} unavailable={projects.unavailable ?? []} selected={projectId}
-    disabled={dirty || sourcesDirty || contentDirty || runtime.status !== "ready" || load !== "ready"} onSelect={selectProject} /> : null;
+    disabled={dirty || sourcesDirty || contentDirty || researchBusy || runtime.status !== "ready" || load !== "ready"} onSelect={selectProject} /> : null;
   if (projects?.enabled && !projectId && load === "ready")
     return <AuthorShell state="Choose or create a private author project.">{projectPanel}</AuthorShell>;
   if (runtime.status === "connecting" && !course)
@@ -895,19 +897,21 @@ export function AuthorApp() {
           setSourcesEpoch(value => value + 1);
         }}
         onDirtyChange={setDirty}
-        externalDirty={contentDirty || sourcesDirty}
+        externalDirty={contentDirty || sourcesDirty || researchBusy}
         privateProjectId={projectId ?? undefined} authorEpoch={sourcesEpoch}
         onAuthorSaved={change => setOpenChangeId(change.change_id)}
       />
       {projectId && <ContentPanel key={"content-" + projectId} client={client.current}
         openChangeId={openChangeId}
-        disabled={!connected || dirty || sourcesDirty} onDirtyChange={setContentDirty} onChanged={async () => {
+        disabled={!connected || dirty || sourcesDirty || researchBusy} onDirtyChange={setContentDirty} onChanged={async () => {
           const originClient = client.current!;
           const next = await originClient.getCourse();
           if (client.current !== originClient) return;
           setCourse(next); setCourseAuthorityEpoch(connectionEpoch.current); setSourcesEpoch((current) => current + 1);
         }} />}
-      {projectId && <SourceLibrary key={"sources-" + projectId + ":" + sourcesEpoch} client={client.current} projectId={projectId} disabled={!connected || contentDirty} onDirtyChange={setSourcesDirty} onChanged={() => setSourcesEpoch(value => value + 1)} />}
+      {projectId && <SourcePanel key={"research-" + projectId} client={client.current}
+        disabled={!connected || dirty || sourcesDirty || contentDirty} onBusyChange={setResearchBusy} onChanged={() => setSourcesEpoch(value => value + 1)} />}
+      {projectId && <SourceLibrary key={"sources-" + projectId + ":" + sourcesEpoch} client={client.current} projectId={projectId} disabled={!connected || contentDirty || researchBusy} onDirtyChange={setSourcesDirty} onChanged={() => setSourcesEpoch(value => value + 1)} />}
       {!connected ? (
         <button type="button" onClick={runtime.retry}>
           Reconnect

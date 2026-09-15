@@ -232,7 +232,7 @@ def test_cell_source_replacement_preserves_identity_and_other_cells():
 
 **Consumes:** project catalogue, research policy, SearchClient/FetchClient. **Produces:** V05 and source evidence for the assistant/reviews.
 
-- [ ] Test network-off behavior, allow/deny precedence, normalized path-prefix boundaries, redirects, duplicate sources, unknown dates, oversized/decompressed responses, timeouts, DNS changes, cancellation, and unavailable discovery. No live network belongs in the default test suite.
+- [x] Test network-off behavior, allow/deny precedence, normalized path-prefix boundaries, redirects, duplicate sources, unknown dates, oversized/decompressed responses, timeouts, DNS changes, cancellation, and unavailable discovery. No live network belongs in the default test suite.
 
 ```python
 # Policy assertions in the source-policy unit test, with public fixture addresses:
@@ -243,10 +243,10 @@ assert not policy.permits("http://docs.example.org/course/intro")
 assert not policy.permits("https://127.0.0.1/course/intro")
 ```
 
-- [ ] Implement a single Brave Search adapter using its documented web-search API and separate secret input. Never scrape search-result pages. Keep discovery optional and show its configured state and cost responsibility without inventing prices.
-- [ ] Implement bounded public HTTPS text retrieval with DNS-validated connection pinning and TLS hostname verification. Deny private/reserved addresses at every connection and redirect; do not trust a precheck followed by unrestricted DNS resolution. A narrow standard-library HTTPS transport is adequate; no browser automation or cookie store is involved.
-- [ ] Enforce the exact TE research limits. Make search query content and source fetch policy visible, honor cancellation, and never automatically approve a discovered source. Preserve fetch failures as evidence rather than replacing them with model summaries.
-- [ ] Implement local text/HTML/Markdown extraction with source offsets and hashes, source review decisions, explicit inclusion in learner-facing material, and revoked/stale resource handling. Complex PDFs/images/video are attachment metadata or author-supplied text extracts, not claimed understanding.
+- [x] Implement a single Brave Search adapter using its documented web-search API and separate secret input. Never scrape search-result pages. Keep discovery optional and show its configured state and cost responsibility without inventing prices.
+- [x] Implement bounded public HTTPS text retrieval with DNS-validated connection pinning and TLS hostname verification. Deny private/reserved addresses at every connection and redirect; do not trust a precheck followed by unrestricted DNS resolution. A narrow standard-library HTTPS transport is adequate; no browser automation or cookie store is involved.
+- [x] Enforce the exact TE research limits. Make search query content and source fetch policy visible, honor cancellation, and never automatically approve a discovered source. Preserve fetch failures as evidence rather than replacing them with model summaries.
+- [x] Implement local text/HTML/Markdown extraction with source offsets and hashes, source review decisions, explicit inclusion in learner-facing material, and revoked/stale resource handling. Complex PDFs/images/video are attachment metadata or author-supplied text extracts, not claimed understanding.
 - [ ] Run `uv run pytest tests/test_author_sources.py tests/test_author_assistant.py -q`. Perform one small real discovery run and one real allowed-source fetch using authorized credentials; record actual returned URLs and statuses. Confirm a denied origin causes zero transport calls. Commit the slice.
 
 ## Task 7: Add evidence-linked fact review, proofreading, and alignment

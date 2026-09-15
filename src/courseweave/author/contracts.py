@@ -173,6 +173,10 @@ class ResearchPolicy(ClosedModel):
     allow: tuple[OriginRule, ...] = Field(default=(), max_length=32)
     deny: tuple[OriginRule, ...] = Field(default=(), max_length=32)
 
+    def permits(self, url: str) -> bool:
+        from .sources import policy_permits
+        return policy_permits(self, url)
+
     @model_validator(mode="after")
     def explicit_scope(self):
         if self.mode == "allow_only" and not self.allow:
@@ -199,6 +203,9 @@ class SourceRecord(ClosedModel):
     title: Annotated[str, Field(min_length=1, max_length=500)]
     origin: Annotated[str, Field(min_length=1, max_length=4096)]
     imported_at: datetime
+    retrieved_at: datetime | None = None
+    final_url: Annotated[str, Field(max_length=4096)] | None = None
+    media_type: Annotated[str, Field(max_length=200)] | None = None
     publication_date: date | None = None
     raw_sha256: Sha256
     text_sha256: Sha256 | None = None
@@ -210,6 +217,7 @@ class SourceRecord(ClosedModel):
     redistribution: Literal["undecided", "include", "exclude"] = "undecided"
     policy_decision: Literal["allowed", "denied", "local", "not_checked"]
     extraction: Literal["text", "unsupported", "unavailable"]
+    extraction_note: Annotated[str, Field(max_length=2000)] = ""
     review_note: Annotated[str, Field(max_length=4000)] = ""
 
 
@@ -220,6 +228,7 @@ class SearchResult(ClosedModel):
     query: Annotated[str, Field(max_length=1000)]
     retrieved_at: datetime
     publication_date: date | None = None
+    policy_decision: Literal["allowed", "denied", "not_checked"] = "not_checked"
 
 
 class FetchResult(ClosedModel):
@@ -231,9 +240,13 @@ class FetchResult(ClosedModel):
     media_type: Annotated[str, Field(max_length=200)] | None = None
     content: Annotated[bytes, Field(max_length=2 * 1024 * 1024)] = b""
     redirects: tuple[Annotated[str, Field(max_length=4096)], ...] = Field(default=(), max_length=3)
+    source: SourceRevision | None = None
 
 
 class ResearchReport(ClosedModel):
+    report_id: Slug
+    started_at: datetime
+    finished_at: datetime
     request: ResearchRequest
     status: Literal["complete", "partial", "unavailable", "cancelled", "limit_exceeded"]
     results: tuple[SearchResult, ...] = Field(default=(), max_length=10)

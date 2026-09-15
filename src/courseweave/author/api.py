@@ -5,13 +5,15 @@ one immutable course root; switching a tab never retargets another tab's writes.
 """
 from pathlib import Path
 from datetime import date
+import asyncio
 import json
 import os
+import threading
 from typing import Literal
 from dataclasses import dataclass
 from uuid import uuid4
 
-from fastapi import Request
+from fastapi import Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import Field, ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -30,7 +32,8 @@ from .project import (
     local_directory, open_project, read_sources, update_source,
 )
 from .assistant import AuthorAssistantError, ContextRequest, build_author_context, parse_author_reply, replay_fingerprint
-from .contracts import AuthorContext, AuthorReply
+from .contracts import AuthorContext, AuthorReply, ResearchRequest
+from .sources import ResearchControl, import_reference, source_excerpt, run_research, list_research_reports, read_research_report
 
 
 class CreateProject(ClosedModel):
@@ -52,6 +55,10 @@ class SourceDecision(ClosedModel):
     intended_use: Literal["author_reference", "student_material"]
     redistribution: Literal["undecided", "include", "exclude"]
     review_note: str = Field(default="", max_length=4000)
+
+
+class ImportReference(ClosedModel):
+    path: str = Field(min_length=1, max_length=4096)
 
 
 class ReviewedRevision(ClosedModel):
@@ -230,6 +237,7 @@ class ProjectDispatcher:
             # One cookie identifies the local Author session across project tabs.
             # Histories, previews and candidates remain separate in each child.
             child.state.guide_sessions = self.owner.state.guide_sessions
+            child.state.author_research = self.owner.state.author_research
             self.children[project.project_id] = child
         return await child(scope, receive, send)
 
@@ -239,6 +247,7 @@ def install_routes(app, *, author_home: Path | None, author_project=None, factor
     app.state.author_project = author_project
     app.state.author_contexts = {}
     app.state.author_drafts = {}
+    app.state.author_research = {"slot": threading.Lock(), "active": None}
     app.state.author_projects_root = app.state.author_home / "projects" if app.state.author_home is not None else None
     if app.state.author_home is not None:
         with local_directory(app.state.author_projects_root, create=True):
@@ -377,6 +386,93 @@ def install_routes(app, *, author_home: Path | None, author_project=None, factor
         record = await run_in_threadpool(update_source, app.state.author_project, store, source_id,
                                         body.revision, body.model_dump(exclude={"revision"}))
         return record.model_dump(mode="json")
+
+    @app.post("/api/author/sources/import", status_code=201)
+    async def import_source(request: Request):
+        if app.state.author_project is None:
+            return failure(403, "Source import requires a private author project.")
+        try:
+            body = await read_body(request, ImportReference)
+        except ValidationError:
+            return failure(422, "Select one nonsynced local reference file.")
+        record = await run_in_threadpool(import_reference, app.state.author_project, Path(body.path))
+        return record.model_dump(mode="json")
+
+    @app.get("/api/author/sources/{source_id}/text")
+    def source_text(source_id: str, revision: int = Query(ge=0), start: int = Query(default=0, ge=0), limit: int = Query(default=8000, ge=1, le=8000)):
+        if app.state.author_project is None:
+            return failure(403, "Source review requires a private author project.")
+        return source_excerpt(app.state.author_project, source_id, revision=revision, start=start, limit=limit)
+
+    @app.get("/api/author/research")
+    def research_configuration():
+        if app.state.author_project is None:
+            return failure(403, "Research requires a private author project.")
+        active = app.state.author_research["active"]
+        return {"network_enabled": False, "brave_configured": bool(os.environ.get("BRAVE_SEARCH_API_KEY")),
+            "active": bool(active and active[0] == app.state.author_project.project_id),
+            "busy": active is not None,
+            "limits": {"queries": 2, "results": 10, "fetches": 5, "redirects": 3, "seconds": 60, "fetch_seconds": 10, "fetch_bytes": 2 * 1024 * 1024},
+            "notice": "Brave Search is optional and uses the author's separate account. The author is responsible for that account's usage and charges. Public URL fetches do not need a search credential."}
+
+    @app.post("/api/author/research")
+    async def research_run(request: Request):
+        if app.state.author_project is None:
+            return failure(403, "Research requires a private author project.")
+        try:
+            body = await read_body(request, ResearchRequest)
+        except ValidationError:
+            return failure(422, "Explicitly enable network research and review at most two queries, five URLs, and the source policy.")
+        shared = app.state.author_research
+        if not shared["slot"].acquire(blocking=False):
+            return failure(409, "One research run is already active in this Author home; finish or cancel it first.")
+        control = ResearchControl.seconds(60)
+        shared["active"] = (app.state.author_project.project_id, control)
+        task = asyncio.create_task(run_in_threadpool(run_research, app.state.author_project, body, control=control))
+        def finished(done):
+            shared["active"] = None
+            shared["slot"].release()
+            if not done.cancelled():
+                done.exception()  # Observe failure even if the browser disconnected.
+        task.add_done_callback(finished)
+        try:
+            while not task.done():
+                await asyncio.wait({task}, timeout=0.05)
+                if not task.done() and await request.is_disconnected():
+                    control.cancel.set()
+            report = await task
+            return report.model_dump(mode="json", exclude={"fetches": {"__all__": {"content"}}})
+        finally:
+            control.cancel.set()
+
+    @app.post("/api/author/research/cancel", status_code=202)
+    async def cancel_research(request: Request):
+        if app.state.author_project is None:
+            return failure(403, "Research requires a private author project.")
+        try:
+            await read_body(request, SaveDraft)
+        except ValidationError:
+            return failure(422, "Cancellation takes no additional data.")
+        active = app.state.author_research["active"]
+        if active is None or active[0] != app.state.author_project.project_id:
+            return failure(409, "This project has no active research run. Reload its saved reports to check a finished request.")
+        active[1].cancel.set()
+        return {"status": "cancellation_requested", "message": "Subsequent research work will stop; completed evidence remains in the saved report."}
+
+    @app.get("/api/author/research/reports")
+    def research_reports(offset: int = Query(default=0, ge=0, le=500)):
+        if app.state.author_project is None:
+            return failure(403, "Research reports require a private author project.")
+        reports = list_research_reports(app.state.author_project, offset=offset)
+        return {"reports": [report.model_dump(mode="json", include={"report_id", "started_at", "finished_at", "status"}) for report in reports],
+            "offset": offset, "next_offset": offset + 20 if len(reports) == 20 else None}
+
+    @app.get("/api/author/research/reports/{report_id}")
+    def research_report(report_id: str):
+        if app.state.author_project is None:
+            return failure(403, "Research reports require a private author project.")
+        report = read_research_report(app.state.author_project, report_id)
+        return report.model_dump(mode="json", exclude={"fetches": {"__all__": {"content"}}})
 
     @app.get("/api/author/content/files")
     def content_files():

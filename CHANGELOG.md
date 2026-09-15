@@ -35,6 +35,17 @@ releases.
   and AG-UI transport. Complete replies remain session-only until an explicit
   Save draft; exact diff review still owns application. Invalid, interrupted and
   stale replies have no durable effect and make no automatic repair request.
+- Added explicit, bounded Author source research with an optional separate Brave
+  Search credential, public HTTPS connection pinning, verified TLS, allow/deny
+  rules, cancellation and durable discovery/fetch outcomes. Network stays off
+  until each reviewed run; discovered URLs require a separate fetch action.
+- Added private local-reference import, static HTML/text/Markdown extraction,
+  original/extracted hashes and character offsets. Login, blocked, JavaScript-only
+  and unsupported content have explicit outcomes. Changed source bytes require
+  a new review; source approval never grants redistribution automatically.
+- Added paged research reports, source excerpts, offline/manual workflows and
+  bounded waiting for the shared course lock during research. Imported material
+  is never executed, and the Student assistant gains no network retrieval.
 - The complete Author Edition and its installed/live-provider acceptance are
   still in development; see [implementation notes](docs/author/implementation.md).
 

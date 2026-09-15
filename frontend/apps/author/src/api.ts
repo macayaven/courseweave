@@ -4,6 +4,7 @@ import type { CompatibilityReport } from "./compatibility";
 import type { Inventory, Project, ProjectList, ProjectRequest, SourceRecord, SourceDecision } from "./project-panel";
 import type { ContentApply, ContentChange, ContentClient, ContentEdit, ContentReview, ContentSnapshot } from "./content-panel";
 import type { AuthorAssistantClient, ContextPreview } from "./curriculum-thread";
+import type { ResearchClient, ResearchRequest, ResearchReport, ResearchStatus, SourceText } from "./source-panel";
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -134,6 +135,19 @@ export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | 
       signal,
     );
   return {
+    getResearchStatus: (signal?: AbortSignal) => json<ResearchStatus>("/api/author/research", {}, signal),
+    getResearchReports: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<ResearchClient["getResearchReports"]>>>("/api/author/research/reports?offset=" + offset, {}, signal),
+    getResearchReport: (id: string, signal?: AbortSignal) => json<ResearchReport>("/api/author/research/reports/" + encodeURIComponent(id), {}, signal),
+    runResearch: (body: ResearchRequest, signal?: AbortSignal) => json<ResearchReport>("/api/author/research", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    cancelResearch: (signal?: AbortSignal) => json("/api/author/research/cancel", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }, signal),
+    importReference: (path: string, signal?: AbortSignal) => json<SourceRecord>("/api/author/sources/import", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }),
+    }, signal),
+    getSourceText: (id: string, revision: number, start = 0, signal?: AbortSignal) => json<SourceText>("/api/author/sources/" + encodeURIComponent(id) + "/text?revision=" + revision + "&start=" + start, {}, signal),
     previewAuthorContext: (body: Parameters<AuthorAssistantClient["previewAuthorContext"]>[0], signal?: AbortSignal) => json<ContextPreview>("/api/author/assistant/context", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }, signal),

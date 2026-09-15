@@ -61,7 +61,7 @@ it("shows provenance, duplicates and unsupported extraction without automatic ap
   const base = { source_id: "one", revision: 0, title: "Source one", origin: "/local/one.pdf",
     imported_at: "2026-09-15T09:00:00Z", publication_date: null, raw_sha256: "same-hash", extraction: "unsupported",
     status: "candidate", intended_use: "author_reference", redistribution: "undecided", review_note: "", policy_decision: "local" };
-  const api = { getSources: vi.fn().mockResolvedValue({ sources: [base, { ...base, source_id: "two", title: "Source two" }] }),
+  const api = { getSourceText: vi.fn(), getSources: vi.fn().mockResolvedValue({ sources: [base, { ...base, source_id: "two", title: "Source two" }] }),
     updateSource: vi.fn().mockImplementation((_id, value) => Promise.resolve({ ...base, ...value, revision: 1 })) };
   const onDirtyChange = vi.fn();
   render(<SourceLibrary client={api} projectId="course" disabled={false} onDirtyChange={onDirtyChange} />);

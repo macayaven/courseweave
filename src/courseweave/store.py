@@ -9,6 +9,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
@@ -149,14 +150,25 @@ def _file_hash(data: bytes) -> str:
 
 
 @contextmanager
-def _exclusive_lock(lock_path: Path):
+def _exclusive_lock(lock_path: Path, *, check_wait: Callable[[], float] | None = None):
     descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    acquired = False
     try:
         if fcntl is not None:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            if check_wait is None:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            else:
+                while True:
+                    remaining = check_wait()
+                    try:
+                        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        time.sleep(min(0.02, remaining))
+            acquired = True
         yield
     finally:
-        if fcntl is not None:
+        if fcntl is not None and acquired:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
 
@@ -1165,16 +1177,17 @@ class CourseStore:
 
     @staticmethod
     @contextmanager
-    def author_project_lock(course_root: Path, state_dir: Path) -> Iterator[str | None]:
+    def author_project_lock(course_root: Path, state_dir: Path, *, check_wait: Callable[[], float] | None = None) -> Iterator[str | None]:
         """The same lock, without requiring a parseable manifest for recovery.
 
         Yield the registered identity for the Author service to compare before
         staging/applying a new change. No learner state is initialized or reset.
+        A bounded research caller can check cancellation/deadline while waiting.
         """
         root = Path(course_root).resolve()
         directory, lock_path, _ = _storage_paths(root, empty_manifest_draft(root).id, state_dir)
         lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with _exclusive_lock(lock_path):
+        with _exclusive_lock(lock_path, check_wait=check_wait):
             yield _database_identity(root, directory)
 
     @contextmanager

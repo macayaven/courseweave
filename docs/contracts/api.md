@@ -378,3 +378,50 @@ nor their citations can set human dispositions or compatibility status.
 Conversation, previews and unsaved drafts follow existing session lifetime and
 bounded history cleanup. Up to 128 unsaved reply drafts are retained per project
 process. Saved changes retain their independent durable lifecycle.
+
+## Private Author sources and research (v0.3.0 candidate)
+
+All routes below require an authenticated private project. Ordinary Student
+launches cannot use them. Model tools cannot call these mutation routes.
+
+- `POST /api/author/sources/import`: closed `{ "path": "/local/reference.md" }`.
+  Snapshots one nonsynced ordinary file, up to 8 MiB, as a private reference.
+  It does not copy into the working course, approve the source or execute code.
+- `GET /api/author/sources/{source_id}/text?revision=0&start=0&limit=8000`:
+  verifies the source revision and both snapshot hashes, then returns a bounded
+  text excerpt with start/end offsets, total characters, metadata and omissions.
+- `GET /api/author/research`: local configuration and active-run state, explicit
+  network-off default, fixed limits and author account responsibility. No key
+  values, search or fetch calls are returned or performed.
+- `POST /api/author/research`: a closed `ResearchRequest` requires
+  `network_enabled: true`, `policy`, up to two `queries` and up to five `urls`.
+  At least one query or URL is required. Policy is `allow_only` with at least one
+  allowed rule, or `public_web`, plus optional deny rules. Each rule has an exact
+  HTTPS `origin` and optional absolute `path_prefix`. Deny takes precedence.
+  The browser presents separate discovery/fetch actions to avoid reissuing a
+  query when the author chooses a result. No discovered result is auto-fetched.
+- The research POST returns the actual saved `ResearchReport` with its ID, UTC
+  start/finish times, original request, at most ten discovery results, at most
+  five fetch outcomes, source revision references and notices. Result policy
+  decisions and retrieval/publication dates are separate. Raw bodies are absent;
+  supported or unsupported retrieved source bytes stay in private snapshots.
+  A rejected, unavailable or cancelled result is never replaced with a summary.
+- `POST /api/author/research/cancel`: empty closed object. Cancels the active run
+  for this project; another project's run cannot be cancelled through its header.
+  HTTP 202 means cancellation requested, not completed. Read the terminal report
+  for the observed outcome. Browser disconnection also signals cancellation.
+- `GET /api/author/research/reports?offset=0`: up to twenty saved summaries and
+  `next_offset`; `GET /api/author/research/reports/{report_id}` reads one report.
+  Unknown-response recovery uses this read path, never an automatic retry.
+
+One active run is allowed per Author home. Network work is bounded to sixty
+seconds per run, ten seconds/three redirects/two MiB decompressed content per
+fetch. Research checks cancellation/deadline while waiting for the shared course
+lock. Immutable terminal reports require only atomic publication and cannot be
+held behind an unrelated course edit. Up to 500 reports and 10,000 current source
+identities are supported per project; reaching a limit never prunes old evidence.
+
+Brave uses only `BRAVE_SEARCH_API_KEY`, supplied to the Author backend. The
+fetcher never uses browser cookies, student credentials or model keys. Invalid
+URLs and denied origins cause no source transport calls; redirects repeat policy
+and destination checks. See [Author research setup and limits](../author/research.md).

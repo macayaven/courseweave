@@ -288,6 +288,11 @@ pre {
 .author-assistant { min-width: 0; overflow-wrap: anywhere; }
 .author-assistant pre { overflow: auto; max-height: 24rem; white-space: pre; }
 .author-assistant .assistant-text { white-space: pre-wrap; }
+.source-panel label:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: .5rem; }
+.source-panel input[type="checkbox"] { width: auto; flex: 0 0 auto; margin: 0; }
+.source-panel p, .source-excerpt p, .source-card p { overflow-wrap: anywhere; }
+.source-panel pre, .source-excerpt pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; }
+.source-result { border-top: 1px solid #c9d4e2; padding: .75rem 0; }
 .author-assistant .assistant-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .author-assistant li { margin-block: 0.5rem; }
 .author-assistant blockquote { margin-inline: 0.5rem; padding-inline: 0.75rem; border-left: 3px solid #8a9cad; }
