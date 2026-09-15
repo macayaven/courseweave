@@ -414,6 +414,33 @@ stale without rewriting judgments or decisions. Located quotation provenance is
 independent of model entailment and human acceptance. See [review workflow and
 limits](../author/reviews.md).
 
+## Private Author delivery (v0.3.0 candidate)
+
+These authenticated routes require a selected private Author project; ordinary
+Student launches have no private export authority.
+
+- `GET /api/author/delivery`: saved course inventory, default linked closure,
+  source distribution exclusions, project revision, inventory/source-decision
+  hashes, preliminary compatibility and configured Student runtime versions.
+- `POST /api/author/exports`: explicit `project_revision`, `inventory_sha256`,
+  `source_decisions_sha256`, `course_version`, `kind` (`draft` or
+  `student_handoff`), `selected_paths` and new `.tar` `destination`. The service
+  copies reviewed bytes, clears only exported notebook outputs, checks the stable
+  snapshot and exclusively publishes a new archive. Response201 is an exact
+  ExportReceipt; stale selections/existing destinations fail409.
+- `GET /api/author/exports?offset=0`: twenty saved immutable export receipts per
+  page. These identify historical snapshots, not the current working course.
+- `POST /api/author/student-bundles`: saved `export_id`, configured
+  `student_version` (`0.2.0` or `0.3.0`) and a new folder `destination`. Drafts and
+  changed/missing artifact hashes fail before completion. Runtime paths/hashes
+  come from the explicit backend `--student-inputs` descriptor, never the browser.
+
+Metadata for package review and setup is described in [Course delivery](../author/delivery.md).
+No export action runs course code, fetches sources, approves evidence or changes
+Student rules. Source-file associations survive source-title edits, refresh and
+rejected replacement imports; only an actually applied replacement changes the
+file's import association.
+
 ## Private Author sources and research (v0.3.0 candidate)
 
 All routes below require an authenticated private project. Ordinary Student

@@ -19,7 +19,7 @@ from pydantic import Field, ValidationError
 from ..contracts.models import ClosedModel
 from ..contracts.primitives import local_path
 from ..manifest import ManifestValidationError, parse_manifest_data
-from .contracts import AuthorProject, SourceRecord
+from .contracts import AuthorProject, SourceDecision, SourceRecord
 
 MAX_FILES = 10_000
 MAX_BYTES = 1024 * 1024 * 1024
@@ -317,6 +317,7 @@ def create_project(source_root: Path | None, destination: Path, selected_paths: 
             except UnicodeError:
                 pass
         record = SourceRecord(source_id=source_id, revision=0, title=relative, origin=str(source_root / relative),
+            course_path=relative,
             imported_at=datetime.now(timezone.utc), raw_sha256=file.sha256,
             text_sha256=file.sha256 if text else None, snapshot_path=snapshot, text_path=text,
             extractor_version="utf8-v1" if text else None, policy_decision="local",
@@ -390,7 +391,13 @@ def update_source(project: AuthorProject, store, source_id: str, revision: int, 
         current = records[index]
         if current.revision != revision:
             raise ProjectError("Source decision changed; reload before reviewing this revision.")
-        updated = SourceRecord.model_validate({**current.model_dump(), **decision, "revision": revision + 1})
+        try:
+            reviewed = SourceDecision.model_validate({**{field: getattr(current, field)
+                for field in SourceDecision.model_fields if field != "revision"}, "revision": revision, **decision})
+        except ValidationError:
+            raise ProjectError("Change only source review decisions; import identity is immutable.") from None
+        updated = SourceRecord.model_validate({**current.model_dump(),
+            **reviewed.model_dump(exclude={"revision"}), "revision": revision + 1})
         # A unique immutable artifact may be orphaned by interruption before
         # publishing sources.json. Only the registry publishes current decisions.
         artifact = f"sources/{source_id}/decision-{uuid4().hex}.json"

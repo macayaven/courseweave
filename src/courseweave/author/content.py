@@ -30,7 +30,7 @@ from ..store import CourseStore
 from .contracts import (
     ApplyReceipt, AuthorContext, AuthorProject, AuthorSelection, ChangeDraft,
     ManifestFragmentDraft, MarkdownDraft, NotebookCellsDraft, PendingChange,
-    Revision, Sha256, SourceRevision, ValidationIssue,
+    Revision, Sha256, SourceRevision, SourceRecord, ValidationIssue,
     Text,
 )
 from .project import (
@@ -301,6 +301,46 @@ def list_changes(project: AuthorProject, *, offset=0, limit=20) -> dict:
                             for name in names[offset:offset + limit]], "total": len(names)}
 
 
+def _imported_file_sources(project: AuthorProject) -> dict[str, str]:
+    """Under the existing lock, derive file provenance from actual applied imports."""
+    result = {}
+    for source in read_sources(project):
+        path = source.course_path
+        initial_path = f"sources/{source.source_id}/revision-0.json"
+        if path is None and (project.state_root / initial_path).exists():
+            # Pre-export development projects retain the initial import receipt.
+            # Its original relative name is immutable, unlike a human-edited title.
+            try:
+                initial = SourceRecord.model_validate_json(read_private(project.state_root, initial_path, max_bytes=16 * 1024))
+                if initial.source_id != source.source_id or initial.origin != source.origin or initial.snapshot_path != f"sources/{source.source_id}/raw":
+                    raise ValueError()
+                path = local_path(initial.title)
+            except ValueError:
+                raise ContentError("Initial course import receipt is damaged; restore a verified project.") from None
+        elif path is None and source.snapshot_path == f"sources/{source.source_id}/raw":
+            raise ContentError("Initial course import receipt is missing; restore a verified project.")
+        if path is not None:
+            if path in result:
+                raise ContentError("Course import identities collide; inspect project recovery.")
+            result[path] = source.source_id
+    applied = []
+    for name in _entries(project, "changes", MAX_CHANGES):
+        if not (project.state_root / "changes" / name / "candidate.json").exists():
+            continue  # Unpublished staging has no file association authority.
+        saved = _saved(project, name, with_bytes=False)
+        if saved.change.status == "applied" and saved.change.imported_source_id:
+            applied.append((saved.basis.project_revision, saved.change.target_path, saved.change.imported_source_id))
+    for _, target, source_id in sorted(applied):
+        result[target] = source_id
+    return result
+
+
+def imported_file_sources(project: AuthorProject) -> dict[str, str]:
+    with _lock(project):
+        _recover(project)
+        return _imported_file_sources(project)
+
+
 def _check_basis(project: AuthorProject, basis: ChangeBasis, registered_id: str | None) -> None:
     current = open_project(project.course_root.parent)
     selection = basis.selection
@@ -418,7 +458,8 @@ def _readiness(project: AuthorProject, target: str, after: bytes) -> tuple[Valid
             severity="not_performed"),)
 
 
-def _stage(project: AuthorProject, basis: ChangeBasis, target: str, before: bytes, exists: bool, after: bytes) -> PendingChange:
+def _stage(project: AuthorProject, basis: ChangeBasis, target: str, before: bytes, exists: bool, after: bytes,
+           *, imported_source_id: str | None = None) -> PendingChange:
     if len(after) > MAX_CONTENT_BYTES:
         raise ContentError("Candidate exceeds the 8 MiB file limit.")
     if exists and after == before:
@@ -428,7 +469,8 @@ def _stage(project: AuthorProject, basis: ChangeBasis, target: str, before: byte
     change = PendingChange(change_id=f"change-{uuid4().hex}", project_id=project.project_id,
         revision=0, target_path=target, before_sha256=_hash(before), before_exists=exists,
         after_sha256=_hash(after), after_bytes=after, context_digest=basis.context_digest,
-        status="pending", sources=basis.sources, issues=_readiness(project, target, after))
+        status="pending", sources=basis.sources, imported_source_id=imported_source_id,
+        issues=_readiness(project, target, after))
     saved = _SavedChange(change=change, before_bytes=before, basis=basis)
     directory = project.state_root / "changes" / change.change_id
     atomic_bytes(directory / "before", before)
@@ -517,6 +559,7 @@ def stage_manual_change(project: AuthorProject, request: ContentEdit) -> Pending
             raise ContentError("Save a valid course manifest before editing lesson files.") from None
         exists, before = _read_target(project, target)
         action = request.action
+        imported_source_id = None
         cells = tuple(action.replace_sources) if isinstance(action, NotebookCellsDraft) else ()
         selection = AuthorSelection(project_id=project.project_id, course_id=manifest.id, file_path=target, cell_ids=cells)
         # This fingerprint has no model/provider data. It identifies the saved
@@ -536,6 +579,7 @@ def stage_manual_change(project: AuthorProject, request: ContentEdit) -> Pending
                 after = action.text.encode("utf-8")
             elif isinstance(action, ImportReplacement):
                 resource = import_resource(project, action.source_path)
+                imported_source_id = resource.source_id
                 after = read_private(project.state_root, resource.snapshot_path, max_bytes=MAX_CONTENT_BYTES)
                 if Path(target).suffix.lower() == ".ipynb":
                     after = _json_bytes(output_free_notebook(json.loads(after)))
@@ -560,7 +604,7 @@ def stage_manual_change(project: AuthorProject, request: ContentEdit) -> Pending
                         action.replace_sources if isinstance(action, NotebookCellsDraft) else {},
                         new_cells=[{"cell_type": action.cell_type, "source": action.source}] if isinstance(action, AddNotebookCell) else [])
                 after = _json_bytes(output_free_notebook(notebook))
-            return _stage(project, basis, target, before, exists, after)
+            return _stage(project, basis, target, before, exists, after, imported_source_id=imported_source_id)
         except (ValueError, ManifestError) as exc:
             if isinstance(exc, ContentError):
                 raise

@@ -8,6 +8,16 @@ releases.
 
 ### Author Edition v0.3.0 work in progress
 
+- Added reviewed course archives with linked-asset/fragment validation, explicit
+  source redistribution, reproducible file inventories and notebook output
+  clearing confined to the exported copy. Existing destinations and stale export
+  reviews fail without replacement; incomplete drafts remain labeled.
+- Added generic macOS Student bundles from verified runtime inputs, with distinct
+  study homes for each course/version/package and frozen course dependency setup
+  in an isolated kernel. Markdown-only courses require no Python project.
+- Set candidate application/frontend metadata to v0.3.0. Released Student v0.2.0
+  remains the compatibility baseline; existing delivered folders are unchanged.
+
 - Added the approved three-spec bundle and executable consistency audit with
   traceability and regression coverage.
 - Added closed author-only contract types that separate untrusted drafts from

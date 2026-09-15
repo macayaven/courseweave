@@ -137,3 +137,26 @@ rows, shared facts and traceability stay identical across the three specificatio
 The development checks and live allowed fetch are not exact installed V05/V09
 acceptance. Live Brave discovery, Task 7 findings, Task 8 packaging, Task 9 preview,
 Task 10 recovery and Task 11 release/independent review remain required.
+
+## Delivery implementation update, 2026-09-15
+
+Task 8 adds stable selected-course snapshots, output-free notebook copies and
+generic Student bundles using verified inputs. Export readiness stays separate
+from actual installed, editorial and external-dependency evidence. Source
+distribution gates cannot be bypassed by link closure or mutable source titles.
+The launcher and exporter share bounded archive rules, while the canonical
+schema-v2 engine remains authoritative. Application metadata is now 0.3.0;
+released Student 0.2.0 remains the compatibility baseline.
+
+The full-course control exposed one pre-existing Jupyter fragment mismatch. A
+faithful draft preserves all included baseline bytes and reports that error. A
+separate private reviewed correction enables standard export; the acceptance
+record must disclose its exact one-link delta. This does not weaken link validation
+or redefine the original-preservation requirement. Optional unreferenced LFS
+video pointers are not in the selected learner closure; explicit inclusion fails.
+
+All normative rows, shared facts, traceability and frozen schema bytes remain
+unchanged. Task 4's output-clearing and missing-asset export assertions are now
+implemented. Actual preview, backup/restore, live Brave discovery, full exact
+acceptance and independent review remain required. This is implementation
+self-review, not final release acceptance.

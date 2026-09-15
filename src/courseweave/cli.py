@@ -132,11 +132,13 @@ def serve(
 def _run_jupyter_mode(
     course_root: Path, port: int, mode: Literal["learn", "author"], state_dir: Path | None = None, kernel_python: Path | None = None,
     author_home: Path | None = None,
+    author_student_inputs: Path | None = None,
 ) -> None:
     try:
         exit_code = LaunchSupervisor(course_root, port=port, mode=mode,
             **({"state_dir": state_dir} if state_dir else {}),
             **({"author_home": author_home} if author_home else {}),
+            **({"author_student_inputs": author_student_inputs} if author_student_inputs else {}),
             **({"kernel_python": kernel_python} if kernel_python else {})).run()
     except ValueError as exc:
         typer.echo(str(exc), err=True)
@@ -177,6 +179,7 @@ def author(
     state_dir: Path | None = typer.Option(None, "--state-dir", resolve_path=True),
     kernel_python: Path | None = typer.Option(None, "--kernel-python", help="Absolute course Python with ipykernel (preserves venv path)."),
     home: Path | None = typer.Option(None, "--home", help="Private nonsynced Author home for creating and importing projects."),
+    student_inputs: Path | None = typer.Option(None, "--student-inputs", help="Verified local descriptor for Student bundle runtime inputs."),
 ) -> None:
     """Open CourseWeave Author in authenticated JupyterLab."""
     if (home is None) == (course_root is None):
@@ -193,7 +196,7 @@ def author(
             state_dir = home / ".launcher-state"
         except ProjectError as exc:
             raise typer.BadParameter(str(exc)) from None
-    _run_jupyter_mode(course_root, port, "author", state_dir, kernel_python, home)
+    _run_jupyter_mode(course_root, port, "author", state_dir, kernel_python, home, student_inputs)
 
 
 @app.command()

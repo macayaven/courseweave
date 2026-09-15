@@ -13,6 +13,7 @@ dependencies = [
     "pydantic==2.13.5",
     "pydantic-ai-slim[ag-ui,openai,anthropic]==2.37.0",
     "jsonschema==4.26.0",
+    "mistune==3.3.4",
 ]
 
 [project.urls]

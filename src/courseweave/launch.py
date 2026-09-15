@@ -390,6 +390,7 @@ class LaunchSupervisor:
         kernel_python: Path | None = None,
         mode: Literal["learn", "author"] = "learn",
         author_home: Path | None = None,
+        author_student_inputs: Path | None = None,
         lock_factory: Callable[[Path], Any] = CourseLock,
         listener_factory: Callable[[int], Any] = reserve_listener,
         api_server_factory: Callable[[Any, int], Any] = _make_api_server,
@@ -414,6 +415,7 @@ class LaunchSupervisor:
         if author_home is not None and mode != "author":
             raise ValueError("author_home requires Author mode")
         self.author_home = author_home
+        self.author_student_inputs = author_student_inputs
         self.kernel_python = None
         self._kernel_root: Path | None = None
         if kernel_python is not None:
@@ -493,6 +495,7 @@ class LaunchSupervisor:
             application = create_app(
                 self.course_root, capability_token=self.capability_token, state_dir=self.state_dir,
                 **({"author_home": self.author_home} if self.author_home is not None else {}),
+                **({"author_student_inputs": self.author_student_inputs} if self.author_student_inputs is not None else {}),
             )
             self._api_server = self._api_server_factory(application, api_port)
             self._start_api()

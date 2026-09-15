@@ -150,6 +150,7 @@ class PendingChange(ClosedModel):
     status: Literal["pending", "rejected", "stale", "prepared", "applied", "conflict", "failed"]
     issues: tuple[ValidationIssue, ...] = Field(default=(), max_length=256)
     sources: tuple[SourceRevision, ...] = Field(default=(), max_length=32)
+    imported_source_id: Slug | None = None
 
 
 class ApplyReceipt(ClosedModel):
@@ -197,11 +198,22 @@ class ResearchRequest(ClosedModel):
         return self
 
 
+class SourceDecision(ClosedModel):
+    revision: Revision
+    title: str = Field(min_length=1, max_length=500)
+    publication_date: date | None = None
+    status: SourceStatus
+    intended_use: Literal["author_reference", "student_material"]
+    redistribution: Literal["undecided", "include", "exclude"]
+    review_note: str = Field(default="", max_length=4000)
+
+
 class SourceRecord(ClosedModel):
     source_id: Slug
     revision: Revision
     title: Annotated[str, Field(min_length=1, max_length=500)]
     origin: Annotated[str, Field(min_length=1, max_length=4096)]
+    course_path: LocalPath | None = None
     imported_at: datetime
     retrieved_at: datetime | None = None
     final_url: Annotated[str, Field(max_length=4096)] | None = None

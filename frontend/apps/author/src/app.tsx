@@ -40,6 +40,7 @@ import { SourcePanel } from "./source-panel";
 import { ContentPanel, type ContentChange } from "./content-panel";
 import { ReviewPanel } from "./review-panel";
 import { CoveragePanel } from "./coverage-panel";
+import { DeliveryPanel } from "./delivery-panel";
 
 type Client = ReturnType<typeof createAuthorClient>;
 type CheckState = {
@@ -934,6 +935,9 @@ export function AuthorApp() {
           setOpenReportId(id); setReviewEpoch(value => value + 1);
           document.querySelector('[aria-label="Saved review reports"]')?.scrollIntoView({ block: "start" });
         }} />}
+      {projectId && <DeliveryPanel key={"delivery-" + projectId} client={client.current}
+        disabled={!connected || dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty}
+        epoch={sourcesEpoch + connectionEpoch.current} />}
       {!connected ? (
         <button type="button" onClick={runtime.retry}>
           Reconnect

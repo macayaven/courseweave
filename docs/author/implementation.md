@@ -376,3 +376,49 @@ facts, schema-v2 bytes, progress, Student
 consent and the requirement-to-gate mapping are unchanged. Implemented service
 names/signatures in the plan now match the research and review services; there
 are no duplicate compatibility wrappers. Final independent review remains open.
+
+## Task 8: stable course exports and generic Student bundles
+
+Author delivery now inspects an explicit file selection and its source decisions,
+copies the reviewed bytes under the canonical course lock, clears notebook outputs
+only in that copy, checks local assets/fragments and the frozen Student profile,
+and publishes a new archive without replacing an existing destination. Required
+linked assets cannot bypass private-file or source-distribution decisions. Raw
+source snapshots retain an immutable course-file association when their title or
+review decision changes. Draft archives retain errors and cannot launch Student.
+See [delivery.md](delivery.md) for the workflow and supported static checks.
+
+The generic Student assembler uses verified wheel and dependency inputs. Course
+ID, author-selected version and archive hash select separate study homes. Both
+released Student 0.2.0 and the candidate 0.3.0 can use the same schema-v2 course.
+Markdown-only courses need no project runtime; notebooks use the course's frozen
+UV project in a separate kernel. One standalone launcher implementation is copied
+into new bundles; previously delivered launchers remain untouched. Shared archive
+checks reject private paths, collisions, special files and unsupported sizes
+before extraction. Export and extraction support the same directory-depth limit.
+
+The pinned Agent Harness Path has one existing Markdown fragment mismatch in
+`labs/s01_loop.md`. A faithful selected-course export preserves every included
+byte as a labeled draft with that diagnostic. A separate reviewed correction in
+the private copy uses the actual Jupyter heading ID; its standard export preserves
+all other included bytes, manifest identities/policies and twelve notebooks.
+Unused optional video LFS pointers are excluded from the default learner closure;
+explicitly including a pointer is rejected. This is not a claim that the corrected
+package is byte-identical to the baseline. Exact installed acceptance must retain
+both the faithful control and the disclosed one-link repair.
+
+Development evidence includes external-editor and destination races, source
+revocation/import lineage, output-free export, missing assets, generic bundle
+inputs, and installed Markdown/notebook setup with each Student version. Actual
+installed Author UI exercised keyboard selection, explicit export, bundle creation,
+reopening saved exports after restart and a stale-inventory conflict with retained
+inputs. Desktop and 390-pixel captures were visually inspected by Codex. Test
+selectors needed two corrections; their failed records remain available. The final
+preview, notebook execution, full recovery and complete release gates remain open.
+
+Three-spec impact: TE-020/TE-021 delivery consumes existing source/content authority;
+Student schema, engine, consent and progress are unchanged. Application metadata
+now names the 0.3.0 candidate. Task 4's two export assertions are covered here.
+Task 10 still owns interrupted export/bundle reconciliation and backup/restore;
+Task 11 owns the exact archive and bounded independent review. No publication or
+production-readiness claim is made.

@@ -7,6 +7,7 @@ import type { AuthorAssistantClient, ContextPreview } from "./curriculum-thread"
 import type { ResearchClient, ResearchRequest, ResearchReport, ResearchStatus, SourceText } from "./source-panel";
 import type { ReviewClient, ReviewDecision, ReviewReport } from "./review-panel";
 import type { CoverageReport } from "./coverage-panel";
+import type { DeliveryClient, DeliveryInventory, CourseExportRequest, CourseExportReceipt, StudentBundleReceipt } from "./delivery-panel";
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -137,6 +138,14 @@ export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | 
       signal,
     );
   return {
+    inspectDelivery: (signal?: AbortSignal) => json<DeliveryInventory>("/api/author/delivery", {}, signal),
+    buildStudentBundle: (body: Parameters<DeliveryClient["buildStudentBundle"]>[0], signal?: AbortSignal) => json<StudentBundleReceipt>("/api/author/student-bundles", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    getExports: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<DeliveryClient["getExports"]>>>("/api/author/exports?offset=" + offset, {}, signal),
+    exportCourse: (body: CourseExportRequest, signal?: AbortSignal) => json<CourseExportReceipt>("/api/author/exports", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
     getReviews: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<ReviewClient["getReviews"]>>>("/api/author/reviews?offset=" + offset, {}, signal),
     getReview: (id: string, signal?: AbortSignal) => json<ReviewReport>("/api/author/reviews/" + encodeURIComponent(id), {}, signal),
     updateReviewFinding: (id: string, claimId: string, body: ReviewDecision, signal?: AbortSignal) => json<ReviewReport>(

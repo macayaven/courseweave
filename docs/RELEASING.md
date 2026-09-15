@@ -1,5 +1,21 @@
 # Releasing CourseWeave
 
+## Author v0.3.0 candidate in progress
+
+The Author candidate now carries v0.3.0 application/frontend metadata. It is not
+published or accepted as a complete release. Follow the approved
+[Author implementation/acceptance plan](superpowers/plans/2026-09-14-courseweave-author-edition.md)
+for the full paired release; [Course delivery](author/delivery.md) documents the
+generic handoff and explicit runtime input descriptor. Preserve the released
+v0.2.0 inputs and all student homes. Build/review new artifacts in separate local
+directories. Publication remains a later explicit owner decision.
+
+The following runbook records the v0.2.0 public-release procedure and exact
+historical inputs. Its Agent Harness Path bundle is not the generic Author
+implementation.
+
+## v0.2.0 public-release procedure
+
 This runbook prepares a public application release. CourseWeave and Agent Harness
 Path remain separate repositories with independent versions: the course stays in
 `macayaven/agent-harness-path`, and the application stays in

@@ -1,6 +1,6 @@
 {
   "name": "@courseweave/lab",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "CourseWeave JupyterLab prebuilt bridge: one sandboxed guide iframe, no React.",
   "keywords": [
@@ -41,7 +41,7 @@
     "webpackConfig": "webpack.config.cjs",
     "outputDir": "../../../src/courseweave/labextension",
     "_build": {
-      "load": "static/remoteEntry.cdae3cd428095ebc.js",
+      "load": "static/remoteEntry.aeb939246e199367.js",
       "extension": "./extension"
     }
   }

@@ -84,11 +84,12 @@ apply_change(project: AuthorProject, change_id: str, expected_revision: int, req
 build_author_context(project: AuthorProject, selection: AuthorSelection, role: AuthorRole, source_ids: tuple[str, ...]) -> AuthorContext
 parse_author_reply(text: str, context: AuthorContext) -> AuthorReply
 run_research(project: AuthorProject, request: ResearchRequest, *, search: SearchClient | None, fetcher: FetchClient | None, control: ResearchControl | None) -> ResearchReport
-check_package(project: AuthorProject, profile: StudentProfile) -> CompatibilityReport
+inspect_delivery(project: AuthorProject, profile: StudentProfile) -> dict
 save_review(project: AuthorProject, context: AuthorContext, reply: AuthorReply) -> ReviewReport
 update_review(project: AuthorProject, report_id: str, claim_id: str, decision: FindingDecision) -> ReviewReport
 course_coverage(project: AuthorProject, *, offset: int, limit: int) -> dict
-export_course(project: AuthorProject, destination: Path, profile: StudentProfile) -> ExportReceipt
+export_course(project: AuthorProject, destination: Path, profile: StudentProfile, request: ExportRequest) -> ExportReceipt
+build_student_handoff(project: AuthorProject, export_id: str, destination: Path, catalog_path: Path, version: str) -> dict
 start_preview(project: AuthorProject, receipt: ExportReceipt, runtime: StudentRuntime) -> PreviewHandle
 ```
 
@@ -197,8 +198,8 @@ def test_cell_source_replacement_preserves_identity_and_other_cells():
     assert candidate["cells"][1]["source"] == ["prediction = 'my prediction'\n"]
 ```
 
-- [ ] Implement one-file atomic apply with a hash-bound journal: `prepared` records before/after hash and backup; replace/fsync the file; persist `applied`. On restart, an exact after-hash reconciles to applied, an exact before-hash remains unapplied, and any third hash is a visible conflict. Repeated operation IDs return the original receipt. A failed write cannot silently mutate the receipt to success. Extend the notebook tests through the actual file boundary to cover output-free export, original/student-copy preservation, unmatched cell IDs, and new-cell ID assignment.
-- [ ] Expose exact diffs and separate structural/readiness status. A draft may temporarily reference missing assets; standard export fails until repaired. Do not promise atomic multi-file changes or automatically apply a sequence.
+- [x] Implement one-file atomic apply with a hash-bound journal: `prepared` records before/after hash and backup; replace/fsync the file; persist `applied`. On restart, an exact after-hash reconciles to applied, an exact before-hash remains unapplied, and any third hash is a visible conflict. Repeated operation IDs return the original receipt. A failed write cannot silently mutate the receipt to success. Extend the notebook tests through the actual file boundary to cover output-free export, original/student-copy preservation, unmatched cell IDs, and new-cell ID assignment.
+- [x] Expose exact diffs and separate structural/readiness status. A draft may temporarily reference missing assets; standard export fails until repaired. Do not promise atomic multi-file changes or automatically apply a sequence.
 - [x] Run `uv run pytest tests/test_author_content.py tests/test_store.py -q` and focused proposal/content frontend tests. Verify keyboard rejection, conflict recovery, and preserved cell selection in the UI. Commit the slice.
 
 ## Task 5: Deliver the six-role assistant on the real text-only route
@@ -280,10 +281,10 @@ assert not policy.permits("https://127.0.0.1/course/intro")
 
 **Consumes:** exact working course/inventory and StudentProfile. **Produces:** V07, stable export snapshots, generic student launch path.
 
-- [ ] Add a full-course no-op import/export test and a new small-course fixture. Compare IDs, unchanged source bytes, notebook metadata/cell IDs, static assets, native checks, optional status, and all included files. Reject missing linked assets, invalid fragments, LFS pointers, escaping paths, case collisions, and private-file inclusion.
-- [ ] Compute a stable inventory under the course lock and copy approved files into a new staging directory using jailed reads. Recheck hashes before finalization to detect external-editor changes. Validate the snapshot, write hashes/receipt, then atomically finalize a new destination. Partial exports are never given a successful receipt.
-- [ ] Keep packaging and readiness separate. A draft export is conspicuously labeled. Standard handoff blocks deterministic errors and records unperformed preview/editorial/environment checks; it cannot declare unsupported external dependencies verified.
-- [ ] Generalize the existing launcher in the new release to choose study homes by sanitized course ID, course version, and package hash. Do not modify the already delivered Agent Harness Path launcher. Keep explicit provider opt-in, isolated platform/kernel environments, first-launch setup, restart, export/reset, and safe cleanup.
+- [x] Add a full-course no-op import/export test and a new small-course fixture. Compare IDs, unchanged source bytes, notebook metadata/cell IDs, static assets, native checks, optional status, and all included files. Reject missing linked assets, invalid fragments, LFS pointers, escaping paths, case collisions, and private-file inclusion.
+- [x] Compute a stable inventory under the course lock and copy approved files into a new staging directory using jailed reads. Recheck hashes before finalization to detect external-editor changes. Validate the snapshot, write hashes/receipt, then atomically finalize a new destination. Partial exports are never given a successful receipt.
+- [x] Keep packaging and readiness separate. A draft export is conspicuously labeled. Standard handoff blocks deterministic errors and records unperformed preview/editorial/environment checks; it cannot declare unsupported external dependencies verified.
+- [x] Generalize the existing launcher in the new release to choose study homes by sanitized course ID, course version, and package hash. Do not modify the already delivered Agent Harness Path launcher. Keep explicit provider opt-in, isolated platform/kernel environments, first-launch setup, restart, export/reset, and safe cleanup.
 
 ```python
 # Assertions added to the existing launcher-installed test harness:
@@ -295,8 +296,10 @@ assert all(".env" not in path.split("/") for path in exported_paths)
 assert receipt["student_compatibility_target"] == "0.2.0"
 ```
 
-- [ ] Export a course archive plus a macOS student bundle using verified, pinned wheel/runtime inputs. Receipt identity is generic, not hard-coded to `agent-harness-path`. A Markdown-only course does not need a project `pyproject.toml`; a notebook course needs the declared runtime inputs. Reuse verified archive extraction, license copying, provider custody, and constraints handling.
-- [ ] Validate exports using separately installed released Student v0.2.0 and candidate code. Run `uv run pytest tests/test_author_delivery.py tests/test_student_release_installed.py -q`. Commit the slice.
+- [x] Export a course archive plus a macOS student bundle using verified, pinned wheel/runtime inputs. Receipt identity is generic, not hard-coded to `agent-harness-path`. A Markdown-only course does not need a project `pyproject.toml`; a notebook course needs the declared runtime inputs. Reuse verified archive extraction, license copying, provider custody, and constraints handling.
+- [x] Validate exports using separately installed released Student v0.2.0 and candidate code. Run `uv run pytest tests/test_author_delivery.py tests/test_student_release_installed.py -q`. Commit the slice.
+
+Task 8 evidence note: the faithful selected Agent Harness Path export is a labeled draft because the pinned baseline contains one invalid Jupyter fragment in `labs/s01_loop.md`. The separate reviewed private correction passes standard export with every other included byte unchanged. Exact installed acceptance must record this one-link delta and preserve the faithful baseline control. The source and all delivered student work remain unchanged. Interrupted archive/bundle receipt reconciliation remains Task 10.
 
 ## Task 9: Replace implied preview with actual isolated student practice
 

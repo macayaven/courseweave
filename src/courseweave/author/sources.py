@@ -587,6 +587,7 @@ def save_source_snapshot(project, *, origin, content, extraction, title, policy_
     revision = previous.revision + 1 if previous else 0
     prefix = f"sources/{source_id}/snapshot-{uuid4().hex}"
     record = SourceRecord(source_id=source_id, revision=revision, title=(extraction.title or title)[:500], origin=origin,
+        course_path=previous.course_path if previous else None,
         imported_at=datetime.now(timezone.utc), retrieved_at=retrieved_at, final_url=final_url, media_type=media_type,
         raw_sha256=digest, text_sha256=text_hash, extractor_version=extraction.version if text_bytes is not None else None,
         snapshot_path=prefix + "/raw", text_path=prefix + "/text.txt" if text_bytes is not None else None,

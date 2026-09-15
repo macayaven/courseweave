@@ -4,7 +4,6 @@ The outer capability middleware authenticates before dispatch. Each child owns
 one immutable course root; switching a tab never retargets another tab's writes.
 """
 from pathlib import Path
-from datetime import date
 import asyncio
 import json
 import os
@@ -22,7 +21,7 @@ from starlette.requests import ClientDisconnect
 from starlette.responses import Response
 
 from ..contracts.models import ClosedModel, Slug
-from .contracts import Sha256, Revision, SourceStatus
+from .contracts import Sha256, Revision, SourceDecision
 from .content import (
     ContentEdit, apply_change, change_diff, list_changes, read_change, read_content,
     reject_change, stage_manual_change,
@@ -35,6 +34,8 @@ from .assistant import AuthorAssistantError, ContextRequest, build_author_contex
 from .contracts import AuthorContext, AuthorReply, ResearchRequest
 from .sources import ResearchControl, import_reference, source_excerpt, run_research, list_research_reports, read_research_report
 from .quality import FindingDecision, course_coverage, delete_review, export_review, list_reviews, read_review, save_review, update_review
+from .delivery import ExportRequest, export_course, export_payload, inspect_delivery, list_exports, student_inputs, build_student_handoff
+from .quality import student_profile
 
 
 class CreateProject(ClosedModel):
@@ -48,14 +49,14 @@ class InspectSource(ClosedModel):
     source_root: Path
 
 
-class SourceDecision(ClosedModel):
-    revision: Revision
-    title: str = Field(min_length=1, max_length=500)
-    publication_date: date | None = None
-    status: SourceStatus
-    intended_use: Literal["author_reference", "student_material"]
-    redistribution: Literal["undecided", "include", "exclude"]
-    review_note: str = Field(default="", max_length=4000)
+class CourseExport(ExportRequest):
+    destination: Path
+
+
+class StudentBundle(ClosedModel):
+    export_id: Slug
+    destination: Path
+    student_version: Literal['0.2.0', '0.3.0']
 
 
 class ImportReference(ClosedModel):
@@ -233,7 +234,8 @@ class ProjectDispatcher:
             if len(self.children) >= 32:
                 return await failure(429, "Open-project limit reached; restart Author to open more projects.")(scope, receive, send)
             child = self.factory(project.course_root, capability_token=self.owner.state.capability_token,
-                                 state_dir=project.state_root / "transactions", author_project=project)
+                                 state_dir=project.state_root / "transactions", author_project=project,
+                                 author_student_inputs=self.owner.state.author_student_inputs)
             child.state.provider_config_factory = self.owner.state.provider_config_factory
             child.state.professor_model_factory = self.owner.state.professor_model_factory
             # One cookie identifies the local Author session across project tabs.
@@ -244,9 +246,10 @@ class ProjectDispatcher:
         return await child(scope, receive, send)
 
 
-def install_routes(app, *, author_home: Path | None, author_project=None, factory):
+def install_routes(app, *, author_home: Path | None, author_project=None, student_runtime_inputs=None, factory):
     app.state.author_home = checked_local_path(author_home) if author_home is not None else None
     app.state.author_project = author_project
+    app.state.author_student_inputs = student_runtime_inputs
     app.state.author_contexts = {}
     app.state.author_drafts = {}
     app.state.author_research = {"slot": threading.Lock(), "active": None}
@@ -292,6 +295,47 @@ def install_routes(app, *, author_home: Path | None, author_project=None, factor
             if len(raw) > 1024 * 1024:
                 raise ProjectError("Request exceeds the 1 MiB limit.")
         return model.model_validate_json(bytes(raw))
+
+    @app.get("/api/author/delivery")
+    def delivery_inventory():
+        if app.state.author_project is None:
+            return failure(403, "Course delivery requires a private author project.")
+        return inspect_delivery(app.state.author_project, student_profile()) | runtime_options()
+
+    def runtime_options():
+        try:
+            return {'student_runtimes': sorted(student_inputs(app.state.author_student_inputs).runtimes)}
+        except ProjectError as exc:
+            return {'student_runtimes': [], 'student_runtime_notice': str(exc)}
+
+    @app.post('/api/author/student-bundles', status_code=201)
+    async def student_bundle(request: Request):
+        if app.state.author_project is None:
+            return failure(403, 'Student bundle creation requires a private author project.')
+        try:
+            body = await read_body(request, StudentBundle)
+        except ValidationError:
+            return failure(422, 'Choose a saved export, Student version and new bundle destination.')
+        return await run_in_threadpool(build_student_handoff, app.state.author_project, body.export_id,
+            body.destination, app.state.author_student_inputs, body.student_version)
+
+    @app.get("/api/author/exports")
+    def exports(offset: int = Query(default=0, ge=0)):
+        if app.state.author_project is None:
+            return failure(403, "Export receipts require a private author project.")
+        return list_exports(app.state.author_project, offset=offset) | runtime_options()
+
+    @app.post("/api/author/exports", status_code=201)
+    async def new_export(request: Request):
+        if app.state.author_project is None:
+            return failure(403, "Course export requires a private author project.")
+        try:
+            body = await read_body(request, CourseExport)
+        except ValidationError:
+            return failure(422, "Review the inventory, course version, export kind and new destination before exporting.")
+        selection = ExportRequest.model_validate(body.model_dump(exclude={"destination"}))
+        result = await run_in_threadpool(export_course, app.state.author_project, body.destination, student_profile(), selection)
+        return export_payload(result)
 
     @app.post("/api/author/assistant/context")
     async def author_context(request: Request):
