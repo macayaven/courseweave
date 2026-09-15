@@ -28,7 +28,8 @@ def test_fresh_author_launcher_and_interrupted_setup_preserve_projects(tmp_path)
     platform = next(home.glob('runtimes/*/platform/bin/python'))
     kernel = next(home.glob('runtimes/*/kernel/bin/python'))
     project = home / 'workspace/projects/practice'
-    code = 'from courseweave.author.project import create_project; from pathlib import Path; import sys; create_project(None, Path(sys.argv[1]), (), project_id="practice")'
+    project.parent.mkdir(parents=True)
+    code = 'from courseweave.author.project import create_project; from pathlib import Path; import sys; create_project(None, Path(sys.argv[1]), ())'
     created = subprocess.run([str(platform), '-I', '-c', code, str(project)], env=environment,
         capture_output=True, text=True, timeout=30)
     assert created.returncode == 0, created.stderr

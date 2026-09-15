@@ -66,6 +66,8 @@ releases.
   and AG-UI transport. Complete replies remain session-only until an explicit
   Save draft; exact diff review still owns application. Invalid, interrupted and
   stale replies have no durable effect and make no automatic repair request.
+- Clarified exact-quotation instructions after installed live replies supplied
+  incorrect character offsets. Citation validation still rejects mismatched spans.
 - Added explicit, bounded Author source research with an optional separate Brave
   Search credential, public HTTPS connection pinning, verified TLS, allow/deny
   rules, cancellation and durable discovery/fetch outcomes. Network stays off

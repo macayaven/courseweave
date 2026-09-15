@@ -521,3 +521,32 @@ and final bounded independent review remain required in Task11.
 ## Task 11: portable Author candidate packaging
 
 The standalone Author launcher reuses the existing Student setup/environment helpers, adds explicit Brave opt-in and binds a separate Author home to the chosen wheel. Hash checks precede setup; the application includes pinned JupyterLab and a separate kernel without CourseWeave. A complete release marker binds both Student wheels, constraints, source distribution, launcher and user documentation. The archive uses an explicit flat inventory and deterministic tar/gzip metadata. A corrupted runtime can be prepared again without replacing project files. Final installed acceptance and independent review remain open.
+
+Candidate 1 passed actual launcher setup, corrupted-readiness recovery, private
+project import, reviewed spelling correction, paired generic bundle creation,
+backup/new-project restore and Author restart in fresh test homes. The complete
+Python suites passed on 3.11 and 3.12; frontend typecheck, unit and build checks
+passed. The exact private receipts distinguish these observations from open
+live-role, full-course and final review gates.
+
+The first six-role installed live run accepted the proofreader's exact spelling
+change and the compatibility explanation. Four other replies were correctly
+rejected for quotation provenance mismatches. A separate curator diagnostic
+confirmed a real quotation with incorrect character offsets. The prompt now
+instructs the provider to copy an entire supplied excerpt and its supplied offsets,
+or leave evidence empty when it cannot establish a shorter span. Validation stays
+strict; the server neither repairs a quotation nor treats a model claim as truth.
+Eighty-one affected assistant/review/quality tests passed. A fresh built live run
+is still required to establish the observed effect of this instruction change.
+
+The versioned acceptance scripts exercise the actual Author launcher and reuse
+the existing process and credential checks. They also prepare the pinned full
+course using installed Author services, retain the faithful draft, disclose the
+single fragment correction and check both generated Student versions. Verifier
+fixes account for generic course-specific homes and the added absent Brave-key
+field in kernel isolation evidence; neither changes Student behavior.
+
+Three-spec impact: normative requirements, traceability, schema-v2 bytes and
+Student rules remain unchanged. The native Jupyter Markdown link opens its local
+target in the text editor; rendered heading scrolling is not established there.
+Actual Brave discovery and bounded independent review remain required.

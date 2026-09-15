@@ -32,7 +32,10 @@ The pinned Agent Harness Path baseline has one invalid Jupyter fragment in
 selected-file export remains a labeled draft with that error. A separate reviewed
 private copy uses `README.md#Wire-contract-%28so---replay-matches%29`; every other
 included byte remains unchanged. The exact installed navigation check must verify
-that correction. The reference course and previous Student deliveries remain intact.
+that correction. In the installed candidate, clicking that link opens the correct
+local README in Jupyter's text editor. A rendered heading jump is not established
+for this native Markdown link. The fourteen HTML lessons have separate reader
+link/fragment checks. The reference course and previous Student deliveries remain intact.
 
 Released Student v0.2.0 cannot authenticate local video playback. Candidate playback
 is fixed; paired standard handoffs block local video and support permitted HTTPS
