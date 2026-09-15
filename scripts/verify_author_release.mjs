@@ -264,13 +264,17 @@ try {
   await backup.getByRole('textbox', { name: 'Restored project ID', exact: true }).fill('restored-validation');
   // Hold the actual restore request briefly to expose the user-edit race window.
   // The installed server still performs and validates the real archive restore.
-  let releaseRestore, restoreRequested = false;
+  let releaseRestore, finishRestoreRoute, restoreRouteError, restoreRequested = false;
   const restoreHold = new Promise(ok => { releaseRestore = ok; });
+  const restoreRouteFinished = new Promise(ok => { finishRestoreRoute = ok; });
   const restoreRoute = '**/api/author/projects/restore';
   await page.route(restoreRoute, async route => {
     restoreRequested = true;
-    await restoreHold;
-    await route.continue();
+    try {
+      await restoreHold;
+      await route.continue();
+    } catch (error) { restoreRouteError = error; }
+    finally { finishRestoreRoute(); }
   });
   try {
     await backup.getByRole('button', { name: 'Restore as new project', exact: true }).click();
@@ -284,8 +288,10 @@ try {
     await page.screenshot({ path: join(evidence, 'restore-editing-locked.png') });
   } finally {
     releaseRestore();
+    if (restoreRequested) await restoreRouteFinished;
     await page.unroute(restoreRoute);
   }
+  if (restoreRouteError) throw restoreRouteError;
   await expect(author.getByRole('combobox', { name: 'Open project', exact: true })).toHaveValue('restored-validation');
   await expect(author.getByRole('textbox', { name: 'Course title', exact: true })).toBeEnabled();
   await expect(author.getByRole('textbox', { name: 'Course title', exact: true })).toHaveValue('Python data validation');
