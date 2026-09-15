@@ -517,3 +517,7 @@ engine, recorded progress and Student consent rules are unchanged. Source
 approval retained in an explicitly restored new project is not a new editorial
 judgment. The exact release archive, full-course acceptance, live Brave discovery
 and final bounded independent review remain required in Task11.
+
+## Task 11: portable Author candidate packaging
+
+The standalone Author launcher reuses the existing Student setup/environment helpers, adds explicit Brave opt-in and binds a separate Author home to the chosen wheel. Hash checks precede setup; the application includes pinned JupyterLab and a separate kernel without CourseWeave. A complete release marker binds both Student wheels, constraints, source distribution, launcher and user documentation. The archive uses an explicit flat inventory and deterministic tar/gzip metadata. A corrupted runtime can be prepared again without replacing project files. Final installed acceptance and independent review remain open.

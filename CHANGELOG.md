@@ -8,6 +8,14 @@ releases.
 
 ### Author Edition v0.3.0 work in progress
 
+- Added a separate portable Author bundle with Start Author.command, complete
+  setup/recovery README, both Student wheels and reproducible source/runtime
+  inputs. First setup creates isolated application/kernel environments; damaged
+  artifacts and unrelated work folders are rejected before setup writes.
+- Kept model and Brave search credentials off by default in the Author launcher,
+  with explicit hidden prompts or selected process-environment input for one launch.
+- Fixed the historical pilot entry point to import the shared launcher helpers
+  directly after the standalone Student resource moved into the application package.
 - Added inspected private backups and restore into a new project. Saved source
   decisions and review dispositions survive; recovered drafts and reports need
   fresh review. Complete inventories and hashes reject partial or incompatible

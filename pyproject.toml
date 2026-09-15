@@ -50,7 +50,7 @@ packages = ["src/courseweave"]
 skip-excluded-dirs = true
 include = [
     "/src", "/tests", "/frontend", "/examples", "/uv.lock", "/README.md",
-    "/CHANGELOG.md", "/CONTRIBUTING.md", "/SECURITY.md", "/AGENTS.md",
+    "/CHANGELOG.md", "/CONTRIBUTING.md", "/SECURITY.md", "/AGENTS.md", "/author-setup.md",
     "/LICENSE", "/THIRD_PARTY_LICENSES.md",
     "/.github", "/docs", "/scripts",
 ]

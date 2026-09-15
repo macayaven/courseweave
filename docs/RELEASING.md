@@ -10,6 +10,65 @@ generic handoff and explicit runtime input descriptor. Preserve the released
 v0.2.0 inputs and all student homes. Build/review new artifacts in separate local
 directories. Publication remains a later explicit owner decision.
 
+### Build the separate Author candidate
+
+Use a clean public-based candidate commit and a new nonsynced output directory.
+Keep the released v0.2.0 wheel as a separate immutable input. Verify its checksum
+against the released receipt before copying it; never rebuild that released wheel
+from candidate source. Both Student versions consume schema-v2 courses.
+
+From the candidate source checkout, after the shared source/frontend checks:
+
+```sh
+author_release_root=/absolute/nonsynced/new-author-release-inputs
+mkdir "$author_release_root"
+uv build --wheel --sdist --out-dir "$author_release_root"
+uv export --frozen --no-emit-project --no-hashes --no-header \
+  --output-file "$author_release_root/requirements.txt"
+cp /verified/released/courseweave-0.2.0-py3-none-any.whl "$author_release_root/"
+python3 - "$author_release_root" <<'PY'
+from pathlib import Path
+import hashlib, json, subprocess, sys
+root = Path(sys.argv[1])
+names = {'wheel': 'courseweave-0.3.0-py3-none-any.whl',
+         'student_wheel': 'courseweave-0.2.0-py3-none-any.whl',
+         'source': 'courseweave-0.3.0.tar.gz', 'constraints': 'requirements.txt'}
+receipt = {'platform_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode().strip(),
+           'files': {key: {'path': name, 'sha256': hashlib.sha256((root / name).read_bytes()).hexdigest()}
+                     for key, name in names.items()}}
+(root / 'build-inputs.json').write_text(json.dumps(receipt, indent=2) + '\n')
+PY
+uv run --frozen python scripts/build_author_release.py \
+  --receipt "$author_release_root/build-inputs.json" \
+  --output "$author_release_root/Author bundle" \
+  --archive "$author_release_root/courseweave-author-0.3.0-macos.tar.gz"
+```
+
+The archive has a flat, explicit file inventory, fixed archive metadata and a
+complete `release.json` marker. It includes both application wheels, full source
+distribution, pinned constraints, licenses, a complete README and **Start Author.command**.
+It includes no project, Student home, installed runtime or credential custody.
+Author setup explicitly installs JupyterLab; the base wheel alone does not provide
+the complete interactive runtime. The notebook kernel has no CourseWeave install.
+
+Extract the actual archive into a fresh nonsynced directory, then run:
+
+```sh
+COURSEWEAVE_AUTHOR_RELEASE='/absolute/extracted/CourseWeave Author Edition v0.3.0' \
+  uv run --frozen pytest tests/test_author_release_installed.py -q
+```
+
+This checks the actual entry point, fresh/repeated setup, incomplete-runtime
+recovery and preserved Author files. It does not replace the complete installed
+authoring, real-provider/research, paired-course, UI and independent-review gates in
+the [Author acceptance record](pilot/author-edition-acceptance.md). Record the exact
+archive/wheel/sdist hashes, source commit, extracted inventory and all observations.
+After a code change, build a distinct candidate and reverify affected installed
+behavior. Preserve previous candidates and any study work created with them.
+
+Use [Author setup](../author-setup.md) for the user path and
+[backup/recovery](author/recovery.md) for explicit migration to a new project/home.
+
 The following runbook records the v0.2.0 public-release procedure and exact
 historical inputs. Its Agent Harness Path bundle is not the generic Author
 implementation.

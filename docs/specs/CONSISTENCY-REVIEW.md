@@ -195,3 +195,7 @@ The three normative specs, shared facts, traceability and frozen schema-v2 bytes
 remain unchanged. TE-016 saved review backup and TE-023 recovery receive concrete
 implementation evidence. Student rules/progress are still canonical. Final V09
 archive acceptance, actual Brave discovery and independent review remain open.
+
+## Task 11 packaging self-review (acceptance in progress)
+
+The separate Author launcher and archive consume existing project, provider, delivery and preview services. No course schema, progress, assistance policy or mutation authority changes. Source/runtime inputs and both Student versions are explicit; model/search selection is opt-in and backups remain distinct from Student state. Current release guidance distinguishes released Student0.2 from unaccepted Author0.3. Normative requirements and traceability remain unchanged. Final installed/live/course evidence and bounded independent review remain required.

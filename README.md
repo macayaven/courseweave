@@ -12,20 +12,24 @@ two optional notebook-free protocols.
 
 ## Release status
 
-Use the v0.2.0 macOS student bundle when the
+Student v0.2.0 is released. The
 [v0.2.0 release page](https://github.com/macayaven/courseweave/releases/tag/v0.2.0)
-lists both `agent-harness-path-courseweave-0.2.0-macos.tar.gz` and
-`SHA256SUMS` and is no longer marked **Pre-release**. That release record provides
-the publication date, exact artifacts and public-download acceptance evidence.
+provides the macOS bundle, checksums, publication date and public-download evidence.
 The v0.1.0 wheel supports schema v1 and cannot load the current schema-v2 course.
 
-Until v0.2.0 is published and verified from its public download, use the
-[native course route](https://github.com/macayaven/agent-harness-path#quickstart).
-The earlier local full-course records remain bounded evidence for their named
-artifacts; the release record distinguishes reused checks from checks of the
-actual public download.
+Author Edition v0.3.0 is a local candidate undergoing installed acceptance. It adds
+private projects, six assistant roles, explicit source research, reviewed content
+changes, real Student preview, generic course delivery and backup/restore. Its
+separate **Start Author.command** bundle includes both Student versions and
+reproducible source/runtime inputs. See [Author setup](author-setup.md) and the
+[acceptance status](docs/pilot/author-edition-acceptance.md). This candidate has not
+been published or accepted as a complete release.
 
-## Guided macOS setup after publication
+The [native course route](https://github.com/macayaven/agent-harness-path#quickstart)
+continues to work independently. Historical local evidence remains bound to its
+named artifacts; it does not establish acceptance of a newer candidate.
+
+## Guided Student macOS setup
 
 You need macOS, internet access for first setup, and
 [uv](https://docs.astral.sh/uv/getting-started/installation/). Put the download
