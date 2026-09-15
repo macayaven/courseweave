@@ -42,8 +42,9 @@ self-review; the bounded independent review remains required in Task 11.
 
 ## Remaining work
 
-Task 6 actual Brave discovery remains open. Task 11 is closing the independent
-review findings and checking the resulting exact Author archive. Both full-course
+Task 6 actual Brave discovery remains open. Task 11's local candidate, installed
+checks and independent review follow-up are recorded; final acceptance remains
+dependent on that actual search check. Both full-course
 Student runs, the paired new-course journey, all six real-provider roles and
 failure/recovery have observations with the limitations recorded below.
 
@@ -573,10 +574,18 @@ second defect allowed editing while restore was pending, then lost that new draf
 when the restored project opened. Recovery now disables and inerts the editor and
 related panels until completion. Focused failing-then-passing regressions cover
 revocation/reapproval and restore success/failure; all 176 Author tests, typecheck
-and build pass. Fresh installed verification of these fixes remains required.
+and build pass. Candidate 5's actual installed verification passes these fixes,
+with a separate independent frozen-source and artifact review.
 
 Installed verification passed both recovery interactions. Rendered inspection
 then exposed the new fieldset collapsing the desktop grid and removing panel
 styling. The recovery wrapper now participates without a layout box; its children
 retain the existing grid/card styles. The installed verifier checks column
 positions, full-width assistant content and card backgrounds before the journey.
+Those installed checks pass. The final run also preserves both Student previews,
+notebooks/observations, restored course and restarted Author state, with no owned
+process remaining and no selected credential in the scanned test files. Exact
+candidate identity and remaining limits are in the acceptance record. Actual
+Brave discovery is still required; the existing credential-location request is
+unanswered. No further independent implementation work is known to block this
+local candidate.

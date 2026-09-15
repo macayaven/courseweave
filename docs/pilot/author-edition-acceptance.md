@@ -1,6 +1,15 @@
 # Author Edition v0.3.0 candidate acceptance
 
-**Status: in progress. No complete release or publication claim.**
+**Status: local candidate available; complete acceptance awaits actual Brave Search.**
+
+Candidate 5 is built from `c08358496b27a137f1382b011b731b09ed3ed04b`.
+Its Author wheel SHA-256 is
+`bc7f9478ee6b58717ee8609f1f17dd04334ca340d0f0bd32e8335e7936014f89`;
+the archive SHA-256 is
+`146ddffcbef4c694cba08f4ec1a54d514939b307b8b280efe44f463bcbae554a`.
+The exact private receipt links the installation, per-module/per-role evidence,
+independent review, earlier failures and unchanged-boundary reuse. Nothing is
+published, and no complete release acceptance is claimed.
 
 The [approved plan](../superpowers/plans/2026-09-14-courseweave-author-edition.md)
 defines V00–V10. Tasks 1–10 are implemented. Task 6's actual Brave discovery gate
@@ -44,10 +53,8 @@ video instead. Existing released wheel bytes have not been changed.
 ## Remaining final gates
 
 - Perform actual Brave discovery using an authorized credential.
-- Finish the bounded independent review of the immutable candidate, all three
-  specs, compatibility matrix, exact artifacts and representative UI evidence.
-- Verify the two review fixes in a fresh installed candidate and finish the
-  final local acceptance receipt.
+- After that required live check, update the exact receipt and its dependent V09
+  release status. Publication remains a separate owner decision.
 
 Candidate 2 has fresh actual Author archive setup and corrupted-readiness recovery
 evidence. The new two-module course's manual journey passes in both installed
@@ -82,9 +89,32 @@ unreviewed suggestions and acquire no source-decision or mutation authority.
 The independent review reproduced two defects: a hidden revoked permission blocked
 context recovery, and editing during restore could lose a new unsaved draft.
 Focused regressions now pass for revocation/reapproval and restore success/failure.
-The resulting archive still requires its installed checks and review follow-up.
+Candidate 5's actual installed checks and the independent follow-up resolve both
+findings. Source permission revocation retains the other selected source and
+unsent message, reapproval leaves permission unchecked, and no guide request is
+made. During an actual delayed restore, editor/research/project controls are
+disabled; after the real restore, the editor is enabled with the restored course.
+A layout regression introduced by the recovery wrapper was also fixed and
+verified through installed column/card geometry and screenshot inspection.
 
-The final receipt will identify actual wheel/source/archive hashes, input commits,
+The final installed manual run passed both Student previews, Author backup and
+restart, and the recovery checks; 83,019 files were scanned and no owned process
+survived cleanup. The Author suite passes 176 cases, with typecheck/build and an
+independent frozen-source run of the two focused files (11 cases). The broader
+Python/Lab/Learn evidence is reused for unchanged code. Candidate 5 differs from
+Candidate 2 only in Author static HTML/JS/CSS and wheel RECORD; the provider,
+context, citation and Student runtime members are identical. Model-role results
+therefore retain their exact earlier provenance and disclosed limits.
+
+Failed verifier attempts remain failed. One delayed-route cleanup race caused
+the verifier to exit before its cleanup block; a follow-up matched and stopped
+its two orphaned processes. Its lost in-memory bootstrap value cannot be scanned
+retrospectively. No real model/search key was selected in that run; both known
+unselected test credentials were scanned. A subsequent complete run passed the
+normal process/credential checks. A dismissible Jupyter news prompt can still
+overlap the lower narrow viewport.
+
+The local receipt identifies actual wheel/source/archive hashes, input commits,
 tested runtimes and commands, reused evidence with provenance, and checks not performed.
 No human learning gains, screen-reader session, general production readiness or
 external compliance is established by these automated/local checks. Public push,
