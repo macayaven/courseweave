@@ -2,6 +2,7 @@ import { authenticatedHeaders } from "@courseweave/ui";
 import type { AuthorRuntime } from "./runtime";
 import type { CompatibilityReport } from "./compatibility";
 import type { Inventory, Project, ProjectList, ProjectRequest, SourceRecord, SourceDecision } from "./project-panel";
+import type { ContentApply, ContentChange, ContentClient, ContentEdit, ContentReview, ContentSnapshot } from "./content-panel";
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -132,6 +133,19 @@ export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | 
       signal,
     );
   return {
+    getContentFiles: (signal?: AbortSignal) => json<Awaited<ReturnType<ContentClient["getContentFiles"]>>>("/api/author/content/files", {}, signal),
+    getContent: (path: string, signal?: AbortSignal) => json<ContentSnapshot>("/api/author/content?path=" + encodeURIComponent(path), {}, signal),
+    getChanges: (offset = 0, signal?: AbortSignal) => json<{ changes: ContentChange[]; total: number }>("/api/author/changes?offset=" + offset, {}, signal),
+    stageContent: (body: ContentEdit, signal?: AbortSignal) => json<ContentChange>("/api/author/changes", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    getChange: (id: string, signal?: AbortSignal) => json<ContentReview>("/api/author/changes/" + encodeURIComponent(id), {}, signal),
+    applyChange: (id: string, body: ContentApply, signal?: AbortSignal) => json("/api/author/changes/" + encodeURIComponent(id) + "/apply", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    rejectChange: (id: string, reviewed_revision: number, signal?: AbortSignal) => json<ContentChange>("/api/author/changes/" + encodeURIComponent(id) + "/reject", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewed_revision }),
+    }, signal),
     getProjects: (signal?: AbortSignal) => json<ProjectList>("/api/author/projects", {}, signal),
     inspectSource: (source_root: string, signal?: AbortSignal) => json<Inventory>("/api/author/projects/inventory", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source_root }),

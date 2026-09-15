@@ -10,7 +10,7 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Annotated, Literal, Protocol, TypeAlias
 
-from pydantic import Field, StrictInt, field_validator, model_validator
+from pydantic import ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from ..contracts.models import ClosedModel, Slug
 from ..contracts.primitives import LocalPath, NotebookCellId
@@ -90,6 +90,7 @@ class AuthorContext(ClosedModel):
     manifest_sha256: Sha256
     target_path: LocalPath
     target_sha256: Sha256
+    target_exists: bool = True
     sources: tuple[SourceRevision, ...] = Field(default=(), max_length=32)
     permission_sha256: Sha256
     prompt_version: Annotated[str, Field(min_length=1, max_length=80)]
@@ -136,11 +137,13 @@ class ValidationIssue(ClosedModel):
 
 
 class PendingChange(ClosedModel):
+    model_config = ConfigDict(ser_json_bytes="base64", val_json_bytes="base64")
     change_id: Slug
     project_id: Slug
     revision: Revision
     target_path: LocalPath
     before_sha256: Sha256
+    before_exists: bool = True
     after_sha256: Sha256
     after_bytes: Annotated[bytes, Field(max_length=8 * 1024 * 1024)]
     context_digest: Sha256

@@ -6,7 +6,8 @@ import hashlib
 import json
 import os
 import re
-import tempfile
+import stat
+from uuid import uuid4
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -161,35 +162,52 @@ def save_manifest(
     manifest: CourseManifest,
     *,
     if_match: str,
+    directory_fd: int | None = None,
 ) -> ManifestSnapshot:
     """Atomically save canonical bytes if the exact existing-byte ETag matches."""
 
     root = Path(course_root)
     manifest = parse_manifest_data(manifest, root)
     root.mkdir(parents=True, exist_ok=True)
-    path = root / MANIFEST_NAME
-    current = path.read_bytes() if path.exists() else None
-    current_etag = manifest_etag(current) if current is not None else '""'
-    if if_match != current_etag:
-        raise ETagMismatchError(
-            f"If-Match {if_match!r} does not match current ETag {current_etag!r}"
-        )
-
     validate_paths(manifest, root)
     raw_bytes = manifest_bytes(manifest)
-    fd, temp_name = tempfile.mkstemp(prefix=".courseweave.", suffix=".tmp", dir=root)
+    # Author may supply its already-opened, no-follow directory. Existing
+    # callers keep the same canonical save/ETag contract.
+    parent = os.dup(directory_fd) if directory_fd is not None else os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    temp_name = f".courseweave.{uuid4().hex}.tmp"
     try:
+        def current_bytes():
+            try:
+                current_fd = os.open(MANIFEST_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            except FileNotFoundError:
+                return None
+            with os.fdopen(current_fd, "rb") as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    raise ManifestValidationError("Manifest target must be an ordinary file")
+                return stream.read()
+
+        current = current_bytes()
+        current_etag = manifest_etag(current) if current is not None else '""'
+        if if_match != current_etag:
+            raise ETagMismatchError("Saved manifest changed; reload before saving")
+        fd = os.open(temp_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
         with os.fdopen(fd, "wb") as stream:
             stream.write(raw_bytes)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temp_name, path)
-    except BaseException:
+        if current_bytes() != current:
+            raise ETagMismatchError("Saved manifest changed while preparing the save")
+        if current is None:
+            os.link(temp_name, MANIFEST_NAME, src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
+        else:
+            os.replace(temp_name, MANIFEST_NAME, src_dir_fd=parent, dst_dir_fd=parent)
+        os.fsync(parent)
+    finally:
         try:
-            os.unlink(temp_name)
+            os.unlink(temp_name, dir_fd=parent)
         except FileNotFoundError:
             pass
-        raise
+        os.close(parent)
     return ManifestSnapshot(
         manifest=manifest,
         raw_bytes=raw_bytes,

@@ -5,6 +5,7 @@ one immutable course root; switching a tab never retargets another tab's writes.
 """
 from pathlib import Path
 from datetime import date
+import json
 import os
 from typing import Literal
 
@@ -16,6 +17,10 @@ from starlette.datastructures import Headers
 
 from ..contracts.models import ClosedModel, Slug
 from .contracts import Sha256, Revision, SourceStatus
+from .content import (
+    ContentEdit, apply_change, change_diff, list_changes, read_change, read_content,
+    reject_change, stage_manual_change,
+)
 from .project import (
     ProjectError, checked_local_path, create_project, inspect_source,
     local_directory, open_project, read_sources, update_source,
@@ -41,6 +46,15 @@ class SourceDecision(ClosedModel):
     intended_use: Literal["author_reference", "student_material"]
     redistribution: Literal["undecided", "include", "exclude"]
     review_note: str = Field(default="", max_length=4000)
+
+
+class ReviewedRevision(ClosedModel):
+    reviewed_revision: Revision
+
+
+class ApplyChange(ReviewedRevision):
+    operation_id: Slug
+    context_digest: Sha256
 
 
 def failure(status: int, message: str) -> JSONResponse:
@@ -166,3 +180,69 @@ def install_routes(app, *, author_home: Path | None, author_project=None, factor
         record = await run_in_threadpool(update_source, app.state.author_project, store, source_id,
                                         body.revision, body.model_dump(exclude={"revision"}))
         return record.model_dump(mode="json")
+
+    @app.get("/api/author/content/files")
+    def content_files():
+        if app.state.author_project is None:
+            return failure(403, "Content editing requires a private author project.")
+        inventory = inspect_source(app.state.author_project.course_root)
+        return {"files": [f.model_dump() for f in inventory.files], "omitted": [o.model_dump() for o in inventory.omitted]}
+
+    @app.get("/api/author/content")
+    def content(path: str):
+        if app.state.author_project is None:
+            return failure(403, "Content editing requires a private author project.")
+        return read_content(app.state.author_project, path)
+
+    @app.get("/api/author/changes")
+    def changes(offset: int = 0):
+        if app.state.author_project is None:
+            return failure(403, "Content review requires a private author project.")
+        return list_changes(app.state.author_project, offset=offset)
+
+    @app.post("/api/author/changes", status_code=201)
+    async def manual_change(request: Request):
+        if app.state.author_project is None:
+            return failure(403, "Content editing requires a private author project.")
+        try:
+            body = await read_body(request, ContentEdit)
+        except ValidationError:
+            return failure(422, "The file edit is invalid; select a supported action and saved revision.")
+        change = await run_in_threadpool(stage_manual_change, app.state.author_project, body)
+        return change.model_dump(mode="json", exclude={"after_bytes"})
+
+    @app.get("/api/author/changes/{change_id}")
+    def review_change(change_id: str):
+        if app.state.author_project is None:
+            return failure(403, "Content review requires a private author project.")
+        change = read_change(app.state.author_project, change_id)
+        result = {**change.model_dump(mode="json", exclude={"after_bytes"}),
+                  "diff": change_diff(app.state.author_project, change_id)}
+        if change.target_path.lower().endswith(".md"):
+            result["text"] = change.after_bytes.decode("utf-8")
+        elif change.target_path.lower().endswith(".ipynb"):
+            result["notebook"] = json.loads(change.after_bytes)
+        return result
+
+    @app.post("/api/author/changes/{change_id}/apply")
+    async def apply_reviewed_change(change_id: str, request: Request):
+        if app.state.author_project is None:
+            return failure(403, "Content review requires a private author project.")
+        try:
+            body = await read_body(request, ApplyChange)
+        except ValidationError:
+            return failure(422, "Review the exact candidate revision and use a valid operation ID.")
+        receipt = await run_in_threadpool(apply_change, app.state.author_project, change_id,
+            body.reviewed_revision, body.operation_id, context_digest=body.context_digest)
+        return receipt.model_dump(mode="json")
+
+    @app.post("/api/author/changes/{change_id}/reject")
+    async def reject_reviewed_change(change_id: str, request: Request):
+        if app.state.author_project is None:
+            return failure(403, "Content review requires a private author project.")
+        try:
+            body = await read_body(request, ReviewedRevision)
+        except ValidationError:
+            return failure(422, "Review the exact candidate revision before rejecting it.")
+        change = await run_in_threadpool(reject_change, app.state.author_project, change_id, body.reviewed_revision)
+        return change.model_dump(mode="json", exclude={"after_bytes"})

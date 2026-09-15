@@ -148,6 +148,19 @@ def _file_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+@contextmanager
+def _exclusive_lock(lock_path: Path):
+    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        if fcntl is not None:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 def resolve_state_dir(course_root: Path, course_id: str) -> Path:
     """Personal platform data; neither source nor legacy state are touched."""
     override = os.environ.get("COURSEWEAVE_STATE_HOME")
@@ -1145,26 +1158,33 @@ class CourseStore:
         """Serialize adjacent author artifacts with the canonical course store.
 
         Callers must not nest store mutations while holding this non-reentrant
-        lock. Manifest changes continue to use the existing store transaction.
+        lock. Author journals use the canonical manifest writer inside it.
         """
         with self._locked():
             yield
 
+    @staticmethod
+    @contextmanager
+    def author_project_lock(course_root: Path, state_dir: Path) -> Iterator[str | None]:
+        """The same lock, without requiring a parseable manifest for recovery.
+
+        Yield the registered identity for the Author service to compare before
+        staging/applying a new change. No learner state is initialized or reset.
+        """
+        root = Path(course_root).resolve()
+        directory, lock_path, _ = _storage_paths(root, empty_manifest_draft(root).id, state_dir)
+        lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with _exclusive_lock(lock_path):
+            yield _database_identity(root, directory)
+
     @contextmanager
     def _locked(self, *, validate_identity: bool = True) -> Iterator[None]:
-        descriptor = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            if fcntl is not None:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
+        with _exclusive_lock(self.lock_path):
             if validate_identity:
                 registered = self._stored_identity()
                 if registered is not None and registered != self.course_id:
                     raise CourseIdentityChangedError('Draft identity changed; reopen the course')
             yield
-        finally:
-            if fcntl is not None:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
 
     def _read_state(self, connection: sqlite3.Connection) -> LearnerState:
         row = connection.execute(

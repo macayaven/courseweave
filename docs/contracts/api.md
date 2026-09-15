@@ -270,8 +270,9 @@ The approved [three-spec bundle](../specs/README.md) adds author-only Python
 contracts in `courseweave.author.contracts`. They are separate from schema-v2
 student manifests and from this API's existing runtime authority. Draft reply
 types cannot carry target paths/revisions, human dispositions or deterministic
-compatibility flags. The new project, research, review and delivery routes are
-subsequent implementation tasks; this foundation does not claim they exist.
+compatibility flags. Implemented compatibility, project and content routes are
+described below. Source research, model review and delivery remain subsequent
+implementation tasks.
 See [implementation status](../author/implementation.md) for verified scope.
 
 `POST /api/author/compatibility` accepts `{ "manifest": ...,
@@ -303,3 +304,46 @@ Ordinary Student or single-course launches report `{"enabled": false}` for the
 hub and reject private project creation/source curation. Project requests and
 source decisions accept at most 1 MiB of JSON. No model chooses a local root,
 approves a source, sets redistribution or obtains filesystem write authority.
+
+## Reviewed author content (v0.3.0 candidate)
+
+These routes require an authenticated private Author project. Ordinary Student
+and legacy single-course launches cannot use them.
+
+- `GET /api/author/content/files`: bounded course-file inventory.
+- `GET /api/author/content?path=...`: a selected Markdown/notebook/asset snapshot,
+  its exact SHA-256, existence, project revision and manifest hash. Initial
+  manifest Save is required before lesson editing.
+- `POST /api/author/changes`: stage a direct human edit. The closed request has
+  `path`, `before_sha256`, `before_exists`, `project_revision`, `manifest_sha256`
+  and a discriminated `action`. Supported actions are `markdown_replace` (`text`),
+  `notebook_cells` (`replace_sources` keyed by existing IDs), `notebook_scaffold`
+  (`title`), `notebook_add_cell` (`cell_type`, `source`), or `import_replace`
+  (`source_path`, an explicit absolute local file). Returns a saved pending
+  change without writing the course file.
+- `GET /api/author/changes?offset=0`: up to 20 change summaries plus `total`;
+  candidate bytes are not loaded for the list.
+- `GET /api/author/changes/{change_id}`: the saved status/revision, before/after
+  hashes, exact diff, and editable Markdown/notebook candidate when applicable.
+- `POST /api/author/changes/{change_id}/apply`: accepts `reviewed_revision`,
+  `context_digest` and `operation_id`. A successful retry with the same operation
+  returns the immutable original receipt. A changed request under that ID, stale
+  target/context/revision, rejected candidate or failed prior operation conflicts.
+- `POST /api/author/changes/{change_id}/reject`: accepts `reviewed_revision`;
+  records rejection without a course-file write.
+
+Only the service constructs assistant targets from AuthorContext and validates
+closed ChangeDraft data. The manual route is a direct authenticated author action,
+not a tool granted to a model. Manifest fragment candidates use the existing
+canonical manifest composition/validation/save path.
+
+Candidate snapshots/backups are at most 8 MiB per file, individual draft texts
+at most 64,000 characters, and request JSON at most 1 MiB. Notebook validation
+does not execute cells. Imported replacements remain separate candidate sources
+with undecided redistribution. Private paths, symlinks and special files are
+rejected. A file's absence is part of its reviewed identity.
+
+The existing course lock protects the adjacent prepare/apply journal. Restart
+reconciles prepared operations by exact target hashes without overwriting a
+conflict. Reported failed operations do not become successful receipts on retry.
+Draft structural validity does not imply runnable assets or export readiness.

@@ -173,8 +173,10 @@ def test_project_creation_never_replaces_source(tmp_path):
 
 **Consumes:** AuthorProject, AuthorContext, ChangeDraft. **Produces:** `stage_change`/`apply_change`, V03.
 
-- [ ] Add regression tests for reject/no-write, stale target, same request replay, two tabs, interrupted acceptance, and changed notebook cells. Notebook fixtures must contain untouched cell IDs, metadata, code outputs, and a selector referring to a named cell.
-- [ ] Implement validated assembly. Manifest fragment edits target the server-selected course/module/phase/learning node and compose into a full manifest candidate using current bytes. Reuse existing manifest replacement review/save. Markdown writes and notebook-cell changes may target only selected author files; arbitrary paths/scripts are denied.
+**Development status:** Content service/UI and crash recovery are implemented and verified. The two unchecked items below include export assertions: output-free source copies are verified through reviewed file apply, while actual export output clearing and missing-asset export rejection remain open for Task 7's generic packager. This records the dependency without weakening either assertion.
+
+- [x] Add regression tests for reject/no-write, stale target, same request replay, two tabs, interrupted acceptance, and changed notebook cells. Notebook fixtures must contain untouched cell IDs, metadata, code outputs, and a selector referring to a named cell.
+- [x] Implement validated assembly. Manifest fragment edits target the server-selected course/module/phase/learning node and compose into a full manifest candidate using current bytes. Reuse existing manifest replacement review/save. Markdown writes and notebook-cell changes may target only selected author files; arbitrary paths/scripts are denied.
 
 ```python
 def test_cell_source_replacement_preserves_identity_and_other_cells():
@@ -195,7 +197,7 @@ def test_cell_source_replacement_preserves_identity_and_other_cells():
 
 - [ ] Implement one-file atomic apply with a hash-bound journal: `prepared` records before/after hash and backup; replace/fsync the file; persist `applied`. On restart, an exact after-hash reconciles to applied, an exact before-hash remains unapplied, and any third hash is a visible conflict. Repeated operation IDs return the original receipt. A failed write cannot silently mutate the receipt to success. Extend the notebook tests through the actual file boundary to cover output-free export, original/student-copy preservation, unmatched cell IDs, and new-cell ID assignment.
 - [ ] Expose exact diffs and separate structural/readiness status. A draft may temporarily reference missing assets; standard export fails until repaired. Do not promise atomic multi-file changes or automatically apply a sequence.
-- [ ] Run `uv run pytest tests/test_author_content.py tests/test_store.py -q` and focused proposal/content frontend tests. Verify keyboard rejection, conflict recovery, and preserved cell selection in the UI. Commit the slice.
+- [x] Run `uv run pytest tests/test_author_content.py tests/test_store.py -q` and focused proposal/content frontend tests. Verify keyboard rejection, conflict recovery, and preserved cell selection in the UI. Commit the slice.
 
 ## Task 5: Deliver the six-role assistant on the real text-only route
 

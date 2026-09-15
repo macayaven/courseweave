@@ -64,3 +64,19 @@ A cross-edition self-review confirmed that lifecycle wording and completed Task 
 checkboxes change no normative requirement, shared fact, or traceability mapping.
 See the implementation notes for authority/evidence limits and open release gates.
 Independent review remains required at the exact candidate boundary in Task 11.
+
+## Reviewed content implementation update, 2026-09-15
+
+Tasks 2–4 add deterministic compatibility, private project/source ownership, and
+reviewed one-file editing. The shared schema-v2 facts and normative requirement
+rows remain identical to the approved handoff. The content journal uses the same
+CourseStore lock and canonical manifest writer; it adds no student progress or
+permission authority. Source/student originals remain preserved, and notebook
+execution is reserved for later isolated preview.
+
+The Task 4 content and recovery checks have development UI/API evidence. Two
+export-specific assertions in its checklist depend on the Task 7 generic
+packager and remain explicitly unchecked. Session role/context revocation is
+Task 5 work. Exact installed gates, live six-role/research observations, human
+visual review and the bounded independent review remain open. This update is a
+mechanical audit and implementation self-review, not release acceptance.

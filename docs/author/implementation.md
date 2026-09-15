@@ -42,7 +42,7 @@ self-review; the bounded independent review remains required in Task 11.
 
 ## Remaining work
 
-Tasks 4–11, installed Author/Student journeys, actual public research, all six
+Tasks 5–11, installed Author/Student journeys, actual public research, all six
 real-provider roles, failure/recovery, rendered UI and independent final review
 remain required. Source declarations and fixtures do not satisfy those gates.
 
@@ -124,3 +124,67 @@ Three-spec impact: schema-v2 rules, progress and Student consent are unchanged.
 Project metadata and source decisions remain outside the student manifest and
 student state. Normative requirements and traceability are unchanged. There is
 no general production, compliance or learning-effectiveness claim.
+
+## Task 4: reviewed content and interrupted-save recovery
+
+The Lesson files panel edits private Markdown and selected stable notebook cells,
+creates a small two-cell notebook scaffold, and adds new cells through explicit
+author actions. Imported asset replacements retain a separate source snapshot
+and origin, candidate status and undecided redistribution. They do not execute.
+Only a new cell receives a new ID. Notebook assembly preserves existing IDs and
+metadata; code outputs/counts are cleared in the reviewed source candidate.
+Original imports and student copies receive no writes.
+
+Each edit produces immutable before/after files plus closed candidate metadata
+under adjacent author state. Applying requires review of that candidate revision,
+an operation ID, matching context digest, project revision, source revisions,
+manifest hash, target hash and target existence. An absent file differs from an
+existing empty file. Diffs show exact text changes, including final newlines;
+binary imports show byte counts and before/after hashes. Rejected and stale
+candidates cannot apply. Editing a candidate creates a new saved candidate.
+Unsaved edits in other cells remain in the tab.
+
+Manifest fragments compose into the selected course/module/phase/learning node,
+then use the canonical schema-v2 validator and manifest writer. A selected
+module/phase and the course retain their IDs. Missing future assets can be a
+structurally valid draft; runnable/package checks remain separate. Content changes
+do not introduce student manifest fields or a second course-rule engine.
+
+The shared CourseStore lock now has a narrow recovery entry point that yields
+the registered course identity without needing a parseable current manifest.
+It uses the same lock file as normal store transactions and never initializes
+or resets learner state. The canonical manifest writer also accepts that open
+directory descriptor, checks the exact ETag, and fsyncs the directory after its
+atomic publication. It rejects symlink targets and detects an intervening edit.
+
+An apply journal is prepared before the single target write. After a crash, an
+exact after-hash publishes an applied receipt, an exact before-hash leaves the
+candidate pending with that interrupted operation failed, and a third hash or
+symlink substitution exposes a conflict. Recovery never overwrites a third file.
+Repeated successful operation IDs return the original receipt. Reported write
+failures are terminal for that operation; if the target changed before a late
+failure, the project revision also advances to invalidate other old candidates.
+Apply is one file, not a multi-file transaction.
+
+Content and backups are bounded to 8 MiB each; direct Markdown/cell text uses the
+64,000-character draft contract and HTTP requests remain capped at 1 MiB. A project
+supports 1,000 saved changes and 10,000 operation records, with review lists paged
+20 at a time. Reaching a limit requires archiving the project rather than silent
+history loss. Invalid/corrupt artifacts remain visible errors.
+
+Validation includes selected manifest fragment composition, structural/readiness
+separation, two-tab conflicts, same-operation replay, source revocation, ordinary
+write failures, three crash positions, corrupt external manifest recovery, and
+original/student notebook preservation. The real CLI/Jupyter development journey
+checks keyboard rejection, an applied Markdown edit, an external editor conflict,
+named notebook cell selection after apply, and a 390-pixel review layout. The
+rendered UI and screenshots are automated/assistant evidence, not human visual
+review or exact release installation. Stable snapshots, notebook export, actual
+Student preview, six live Author roles and final release acceptance remain later
+tasks.
+
+Three-spec impact: TE-013 through TE-015 and the reviewed mutation portions of
+TE-003/TE-010/TE-026 now have implementation evidence. Session role/context
+revocation is completed with the Task 5 assistant. V03 development checks do not
+satisfy the separate V07–V10 installed/export/preview gates. Normative rows, shared
+facts and traceability remain unchanged.

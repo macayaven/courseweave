@@ -18,6 +18,8 @@ it("replaces the editor and sources when projects change, including a return to 
     else if (path === "/api/course") body = { ...template, title: project === "two" ? "Second course" : "First course" };
     else if (path === "/api/proposals") body = [];
     else if (path === "/api/author/sources") body = { sources: [] };
+    else if (path === "/api/author/content/files") body = { files: [], omitted: [] };
+    else if (path === "/api/author/changes") body = { changes: [], total: 0 };
     else throw new Error(`Unexpected fixture route: ${path}`);
     return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json", ETag: '"fixture"' } });
   }));

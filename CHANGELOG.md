@@ -20,6 +20,14 @@ releases.
   shared course lock and reviewed revisions. Import leaves original files intact.
 - Added project switching and source review controls, with unsaved-work protection,
   readable selection controls and a collapsed sidebar on Author launch.
+- Added reviewed Markdown, named notebook-cell edits, new notebook scaffolds and
+  cells, and explicit imported asset replacements. Pending diffs survive restart;
+  original imports and student notebooks retain their bytes.
+- Added hash/revision-checked one-file apply, immutable replay receipts and crash
+  reconciliation under the existing course lock. External edits, source revocation,
+  missing-versus-empty files and late write failures have explicit outcomes.
+- Added file review controls with keyboard rejection, preserved cell selection,
+  editable candidate copies, conflict reload and narrow-window layout checks.
 - The complete Author Edition and its installed/live-provider acceptance are
   still in development; see [implementation notes](docs/author/implementation.md).
 

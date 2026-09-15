@@ -132,6 +132,11 @@ def atomic_json(path: Path, value: object, *, replace: bool = False) -> None:
     the reviewed revision before entering this function.
     """
     data = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode()
+    atomic_bytes(path, data, replace=replace)
+
+
+def atomic_bytes(path: Path, data: bytes, *, replace: bool = False) -> None:
+    """Publish immutable bytes, or replace under the caller's course lock."""
     with local_directory(path.parent, create=True) as parent:
         temporary = f".write-{uuid4().hex}"
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
@@ -154,6 +159,10 @@ def atomic_json(path: Path, value: object, *, replace: bool = False) -> None:
 
 def _excluded(name: str) -> bool:
     return name.startswith(".") or name.casefold() in _EXCLUDED or name.casefold().endswith((".pyc", ".pem", ".key", ".env"))
+
+
+def excluded_path(relative: str) -> bool:
+    return any(_excluded(part) for part in Path(relative).parts)
 
 
 def _identity(info):
@@ -344,6 +353,41 @@ def read_sources(project: AuthorProject) -> tuple[SourceRecord, ...]:
         return records
     except (ValueError, OSError):
         raise ProjectError("Source registry is corrupt; restore a verified backup.") from None
+
+
+def import_resource(project: AuthorProject, source_path: Path) -> SourceRecord:
+    """Snapshot one explicitly chosen replacement, under the caller's course lock.
+
+    It remains a candidate with undecided redistribution. No course file is
+    changed here. The import origin and snapshot survive a rejected replacement.
+    """
+    source_path = checked_local_path(source_path)
+    if any(_excluded(part) for part in source_path.parts[1:]):
+        raise ProjectError("Private or runtime files cannot be imported as lesson resources.")
+    data = read_private(source_path.parent, source_path.name, max_bytes=8 * 1024 * 1024)
+    records = list(read_sources(project))
+    if len(records) >= MAX_FILES:
+        raise ProjectError("Source registry limit reached.")
+    source_id = f"source-{uuid4().hex}"
+    snapshot = f"sources/{source_id}/raw"
+    digest = hashlib.sha256(data).hexdigest()
+    _copy_selected(source_path.parent, InventoryFile(path=source_path.name, size=len(data), sha256=digest),
+                   (project.state_root / snapshot,))
+    text = None
+    if source_path.suffix.lower() in _TEXT_EXTENSIONS and len(data) <= TEXT_BYTES:
+        try:
+            data.decode("utf-8")
+            text = snapshot
+        except UnicodeError:
+            pass
+    record = SourceRecord(source_id=source_id, revision=0, title=source_path.name, origin=str(source_path),
+        imported_at=datetime.now(timezone.utc), raw_sha256=digest, text_sha256=digest if text else None,
+        snapshot_path=snapshot, text_path=text, extractor_version="utf8-v1" if text else None,
+        policy_decision="local", extraction="text" if text else "unsupported", intended_use="student_material")
+    atomic_json(project.state_root / "sources" / source_id / "revision-0.json", record.model_dump(mode="json"))
+    records.append(record)
+    atomic_json(project.state_root / "sources.json", [r.model_dump(mode="json") for r in records], replace=True)
+    return record
 
 
 def update_source(project: AuthorProject, store, source_id: str, revision: int, decision: dict) -> SourceRecord:

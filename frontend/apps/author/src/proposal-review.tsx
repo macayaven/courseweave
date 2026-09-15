@@ -1,5 +1,6 @@
 import { Button, type Proposal } from "@courseweave/ui";
 import { useEffect, useRef, useState } from "react";
+import type { ContentReview } from "./content-panel";
 
 type ProposalClient = {
   validateCourse(manifest: unknown, signal?: AbortSignal): Promise<{ formatted_json?: unknown }>;
@@ -8,6 +9,42 @@ type ProposalClient = {
   rejectProposal(proposalId: string, body: { expected_revision: number }, signal?: AbortSignal): Promise<Proposal>;
 };
 type RefreshResult = { committed: boolean };
+
+/** The server returns the immutable diff; the UI never composes write authority. */
+export function ContentChangeReview({ review, disabled, onApply, onReject, onEdit }: {
+  review: ContentReview; disabled: boolean; onApply(): Promise<void>; onReject(): Promise<void>; onEdit(): void;
+}) {
+  const [acknowledged, setAcknowledged] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const restoreFocus = useRef(false);
+  useEffect(() => {
+    setAcknowledged(false);
+    if (restoreFocus.current) { heading.current?.focus(); restoreFocus.current = false; }
+  }, [review.status, review.change_id, review.revision]);
+  const pending = review.status === "pending";
+  return <article aria-label="File change review">
+    <h3 ref={heading} tabIndex={-1}>Review {review.target_path}</h3>
+    <p>Status: {review.status} · Revision: {review.revision}</p>
+    <details><summary>{review.before_exists ? "Replacement file hashes" : "New file hash"}</summary>
+      <p>Before: {review.before_exists ? review.before_sha256 : "file absent"}<br />After: {review.after_sha256}</p>
+    </details>
+    <h4>Exact file diff</h4><pre>{review.diff}</pre>
+    <p>Candidate file checks passed. Export readiness is checked separately.</p>
+    {review.issues.map((issue, index) => <p key={issue.code + ":" + index}>{issue.message}</p>)}
+    {pending && <>
+      <label><input type="checkbox" checked={acknowledged} disabled={disabled}
+        onChange={(event) => setAcknowledged(event.target.checked)} />I reviewed this exact diff</label>
+      <Button disabled={disabled || !acknowledged} onClick={(event) => {
+        restoreFocus.current = document.activeElement === event.currentTarget; void onApply();
+      }}>Apply reviewed change</Button>
+      {(review.text !== undefined || review.notebook) && <Button disabled={disabled} onClick={onEdit}>Edit this change</Button>}
+    </>}
+    {["pending", "stale", "conflict", "failed"].includes(review.status) && <Button disabled={disabled} onClick={(event) => {
+      restoreFocus.current = document.activeElement === event.currentTarget; void onReject();
+    }}>Reject change</Button>}
+    {["stale", "conflict", "failed"].includes(review.status) && <p role="status">Inspect the saved file, then create and review a new edit. This candidate cannot apply.</p>}
+  </article>;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
