@@ -389,6 +389,7 @@ class LaunchSupervisor:
         state_dir: Path | None = None,
         kernel_python: Path | None = None,
         mode: Literal["learn", "author"] = "learn",
+        author_home: Path | None = None,
         lock_factory: Callable[[Path], Any] = CourseLock,
         listener_factory: Callable[[int], Any] = reserve_listener,
         api_server_factory: Callable[[Any, int], Any] = _make_api_server,
@@ -410,6 +411,9 @@ class LaunchSupervisor:
             raise ValueError("course_root must be a directory")
         if mode not in {"learn", "author"}:
             raise ValueError("mode must be learn or author")
+        if author_home is not None and mode != "author":
+            raise ValueError("author_home requires Author mode")
+        self.author_home = author_home
         self.kernel_python = None
         self._kernel_root: Path | None = None
         if kernel_python is not None:
@@ -487,7 +491,8 @@ class LaunchSupervisor:
             service_url = f"http://{_HOST}:{api_port}"
             self.capability_token = self._secret_factory(32)
             application = create_app(
-                self.course_root, capability_token=self.capability_token, state_dir=self.state_dir
+                self.course_root, capability_token=self.capability_token, state_dir=self.state_dir,
+                **({"author_home": self.author_home} if self.author_home is not None else {}),
             )
             self._api_server = self._api_server_factory(application, api_port)
             self._start_api()

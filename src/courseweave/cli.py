@@ -130,11 +130,13 @@ def serve(
 
 
 def _run_jupyter_mode(
-    course_root: Path, port: int, mode: Literal["learn", "author"], state_dir: Path | None = None, kernel_python: Path | None = None
+    course_root: Path, port: int, mode: Literal["learn", "author"], state_dir: Path | None = None, kernel_python: Path | None = None,
+    author_home: Path | None = None,
 ) -> None:
     try:
         exit_code = LaunchSupervisor(course_root, port=port, mode=mode,
             **({"state_dir": state_dir} if state_dir else {}),
+            **({"author_home": author_home} if author_home else {}),
             **({"kernel_python": kernel_python} if kernel_python else {})).run()
     except ValueError as exc:
         typer.echo(str(exc), err=True)
@@ -163,8 +165,8 @@ def launch(
 
 @app.command()
 def author(
-    course_root: Path = typer.Option(
-        ...,
+    course_root: Path | None = typer.Option(
+        None,
         "--course-root",
         exists=True,
         file_okay=False,
@@ -174,9 +176,24 @@ def author(
     port: int = typer.Option(8765, "--port", min=1024, max=65535),
     state_dir: Path | None = typer.Option(None, "--state-dir", resolve_path=True),
     kernel_python: Path | None = typer.Option(None, "--kernel-python", help="Absolute course Python with ipykernel (preserves venv path)."),
+    home: Path | None = typer.Option(None, "--home", help="Private nonsynced Author home for creating and importing projects."),
 ) -> None:
     """Open CourseWeave Author in authenticated JupyterLab."""
-    _run_jupyter_mode(course_root, port, "author", state_dir, kernel_python)
+    if (home is None) == (course_root is None):
+        raise typer.BadParameter("Choose one of --home (private projects) or --course-root (existing single course).")
+    if home is not None:
+        from .author.project import checked_local_path, local_directory, ProjectError
+        if state_dir is not None:
+            raise typer.BadParameter("Author home manages its own isolated project state; omit --state-dir.")
+        try:
+            home = checked_local_path(home)
+            course_root = home / ".launcher"
+            with local_directory(course_root, create=True):
+                pass
+            state_dir = home / ".launcher-state"
+        except ProjectError as exc:
+            raise typer.BadParameter(str(exc)) from None
+    _run_jupyter_mode(course_root, port, "author", state_dir, kernel_python, home)
 
 
 @app.command()

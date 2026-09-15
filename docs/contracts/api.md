@@ -282,3 +282,24 @@ a server-derived `passed` flag. Draft reports have no stable inventory hash.
 A passing preliminary report does not certify a course export or installed
 execution. Unknown request fields, oversized bodies and unsupported profiles
 are rejected. No code execution, source fetch or state write occurs.
+
+
+## Author private projects (v0.3.0 candidate)
+
+A launch with `author --home` enables the authenticated project hub:
+
+- `GET /api/author/projects`: list completed projects and unavailable/incomplete IDs.
+- `POST /api/author/projects/inventory`: inspect an explicit `source_root`, returning bounded ordinary files, omissions and a root/content digest.
+- `POST /api/author/projects`: create a new `project_id` with `selected_paths`; imports additionally require `source_root` and the reviewed `expected_inventory`. Existing destinations are rejected.
+- `GET /api/author/sources`: read the selected project's source decisions.
+- `PUT /api/author/sources/{source_id}`: save a human decision with its reviewed `revision`, title, optional publication date, review status, intended use, redistribution and review note. Extra authority fields are rejected; stale decisions return a conflict.
+
+The browser sends `X-CourseWeave-Project: <project_id>` on project requests.
+Authentication runs before project resolution. Each selected project uses the
+existing application, manifest validator, store and context registry with its
+own immutable root; selecting another project cannot retarget old tabs. Hub
+routes remain global to that Author home. Other unselected mutations fail closed.
+Ordinary Student or single-course launches report `{"enabled": false}` for the
+hub and reject private project creation/source curation. Project requests and
+source decisions accept at most 1 MiB of JSON. No model chooses a local root,
+approves a source, sets redistribution or obtains filesystem write authority.

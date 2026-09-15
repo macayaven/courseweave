@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -34,6 +35,7 @@ import { useAuthorRuntime } from "./runtime";
 import { CurriculumThread } from "./curriculum-thread";
 import { ProposalReview } from "./proposal-review";
 import { CompatibilityPanel } from "./compatibility";
+import { ProjectPanel, SourceLibrary, type ProjectList } from "./project-panel";
 
 type Client = ReturnType<typeof createAuthorClient>;
 type CheckState = {
@@ -254,6 +256,7 @@ function AuthorEditor({
   courseAuthorityEpoch,
   sourceId,
   onCourseSaved,
+  onDirtyChange,
 }: {
   course: CourseResponse;
   client: Client;
@@ -262,6 +265,7 @@ function AuthorEditor({
   courseAuthorityEpoch: number;
   sourceId: string;
   onCourseSaved(course: CourseResponse): void;
+  onDirtyChange(dirty: boolean): void;
 }) {
   const [state, setState] = useState<AuthorDocumentState>(() =>
     documentState(course.manifest as AuthorManifest),
@@ -303,6 +307,7 @@ function AuthorEditor({
   const currentState = useRef(state);
   currentState.current = state;
   const dirty = isDraftDirty(state.draft, state.saved);
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
   useBeforeUnload(dirty);
   useEffect(() => {
     checks.current.structural?.abort();
@@ -752,12 +757,18 @@ export function AuthorApp() {
     "loading",
   );
   const [course, setCourse] = useState<CourseResponse | null>(null);
+  const [projects, setProjects] = useState<ProjectList | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [sourcesDirty, setSourcesDirty] = useState(false);
   const [courseAuthorityEpoch, setCourseAuthorityEpoch] = useState(-1);
   const retainedConnection = useRef(false);
   const client = useRef<Client | null>(null);
+  const currentClient = useMemo(() => runtime.status === "ready"
+    ? createAuthorClient(runtime.runtime, projectId) : null, [runtime.status, runtime.runtime, projectId]);
   const identity =
     runtime.status === "ready"
-      ? `${runtime.runtime.serviceOrigin}\u0000${runtime.runtime.capabilityToken}\u0000${runtime.runtime.sourceId}`
+      ? `${runtime.runtime.serviceOrigin}\u0000${runtime.runtime.capabilityToken}\u0000${runtime.runtime.sourceId}\u0000${projectId ?? ""}`
       : runtime.status;
   const previousIdentity = useRef(identity);
   const connectionEpoch = useRef(0);
@@ -765,8 +776,7 @@ export function AuthorApp() {
     previousIdentity.current = identity;
     connectionEpoch.current += 1;
   }
-  if (runtime.status === "ready")
-    client.current = createAuthorClient(runtime.runtime);
+  if (currentClient) client.current = currentClient;
   useEffect(() => {
     if (runtime.status !== "ready") {
       if (course) setLoad("disconnected");
@@ -775,11 +785,20 @@ export function AuthorApp() {
     retainedConnection.current = course !== null;
     const controller = new AbortController();
     setLoad("loading");
-    void client
-      .current!.getCourse(controller.signal)
-      .then((next) => {
+    // The course read also serves the legacy single-course launch. The home
+    // response determines whether a project must be selected before editing.
+    const courseRequest = client.current!.getCourse(controller.signal);
+    const projectsRequest = client.current!.getProjects(controller.signal);
+    void Promise.allSettled([courseRequest, projectsRequest])
+      .then(([courseResult, projectResult]) => {
         if (!controller.signal.aborted) {
-          setCourse(next);
+          if (projectResult.status !== "fulfilled") { setLoad("disconnected"); return; }
+          setProjects(projectResult.value);
+          if (projectResult.value.enabled && !projectId) {
+            setCourse(null); setLoad("ready"); return;
+          }
+          if (courseResult.status !== "fulfilled") { setLoad("disconnected"); return; }
+          setCourse(courseResult.value);
           setCourseAuthorityEpoch(connectionEpoch.current);
           setLoad("ready");
         }
@@ -788,7 +807,16 @@ export function AuthorApp() {
         if (!controller.signal.aborted) setLoad("disconnected");
       });
     return () => controller.abort();
-  }, [runtime.status, runtime.runtime]);
+  }, [runtime.status, runtime.runtime, projectId]);
+  const selectProject = (id: string) => {
+    if (dirty || sourcesDirty || id === projectId) return;
+    setCourse(null); setLoad("loading"); setProjectId(id);
+  };
+  const projectPanel = projects?.enabled && client.current ? <ProjectPanel client={client.current}
+    projects={projects.projects ?? []} unavailable={projects.unavailable ?? []} selected={projectId}
+    disabled={dirty || sourcesDirty || runtime.status !== "ready" || load !== "ready"} onSelect={selectProject} /> : null;
+  if (projects?.enabled && !projectId && load === "ready")
+    return <AuthorShell state="Choose or create a private author project.">{projectPanel}</AuthorShell>;
   if (runtime.status === "connecting" && !course)
     return (
       <>
@@ -830,7 +858,9 @@ export function AuthorApp() {
       }
       provider="not_configured"
     >
+      {projectPanel}
       <AuthorEditor
+        key={`editor-${projectId ?? "single-course"}`}
         course={course}
         client={client.current}
         connected={connected}
@@ -841,7 +871,9 @@ export function AuthorApp() {
           setCourse(next);
           setCourseAuthorityEpoch(connectionEpoch.current);
         }}
+        onDirtyChange={setDirty}
       />
+      {projectId && <SourceLibrary key={`sources-${projectId}`} client={client.current} projectId={projectId} disabled={!connected} onDirtyChange={setSourcesDirty} />}
       {!connected ? (
         <button type="button" onClick={runtime.retry}>
           Reconnect

@@ -23,6 +23,7 @@ const app = vi.hoisted(() => ({
 }));
 vi.mock("../src/api", () => ({
   createAuthorClient: () => ({
+      getProjects: vi.fn().mockResolvedValue({ enabled: false }),
     getCourse: app.getCourse,
     getProposals: app.getProposals,
     validateCourse: app.validateCourse,

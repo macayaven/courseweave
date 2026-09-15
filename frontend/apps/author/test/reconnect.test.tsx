@@ -17,6 +17,7 @@ const appMocks = vi.hoisted(() => ({
 }));
 vi.mock("../src/api", () => ({
   createAuthorClient: () => ({
+      getProjects: vi.fn().mockResolvedValue({ enabled: false }),
     getCourse: appMocks.getCourse,
     validateCourse: appMocks.validateCourse,
     putCourse: appMocks.putCourse,
@@ -114,6 +115,9 @@ async function startDirtyApp() {
   fireEvent.click(
     screen.getByRole("button", { name: "Select surface surface" }),
   );
+  // Initial proposal authority is loaded asynchronously after the course. A
+  // real user cannot save until that read enables the control.
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled());
   return view;
 }
 

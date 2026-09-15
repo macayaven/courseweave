@@ -147,7 +147,7 @@ def test_author_metadata_is_not_a_student_manifest_field():
 
 **Consumes:** AuthorProject/contracts. **Produces:** V02 and the project used by all later services.
 
-- [ ] Add import tests before writes: source remains byte-identical; imported manifest/assets are copied; selected symlinks and special files fail; duplicate destination fails; excluded `.git`, `.env`, runtimes, state, and chats never copy. Cover the bounded traversal and size/file-count limits with small fixtures.
+- [x] Add import tests before writes: source remains byte-identical; imported manifest/assets are copied; selected symlinks and special files fail; duplicate destination fails; excluded `.git`, `.env`, runtimes, state, and chats never copy. Cover the bounded traversal and size/file-count limits with small fixtures.
 
 ```python
 def test_project_creation_never_replaces_source(tmp_path):
@@ -162,10 +162,10 @@ def test_project_creation_never_replaces_source(tmp_path):
     assert project.state_root != project.course_root
 ```
 
-- [ ] Implement new/import flows with an inventory preview. Use the existing empty manifest draft for a new project; save only on direct author action. Limit initial inventory traversal to 10,000 files/1 GiB within the explicitly selected local root; individual model-readable files obey smaller context limits. Larger projects receive an explicit unsupported-size error, not a partial copy called complete.
-- [ ] Store author state adjacent to the course, using atomic JSON and immutable saved artifacts. Store references/hashes rather than duplicate all course bytes in every report. Reuse the existing course lock through a small public context-manager seam if necessary; do not reach across processes with an unrelated lock.
-- [ ] Add source metadata fields from TE-004 and separate `author_reference`/`student_material` decisions. Show unsupported extraction explicitly; preserve binary files without pretending the assistant read them.
-- [ ] Run `uv run pytest tests/test_author_project.py tests/test_author_api.py -q` and the new project-panel tests. Inspect first-launch and import screens. Commit the slice.
+- [x] Implement new/import flows with an inventory preview. Use the existing empty manifest draft for a new project; save only on direct author action. Limit initial inventory traversal to 10,000 files/1 GiB within the explicitly selected local root; individual model-readable files obey smaller context limits. Larger projects receive an explicit unsupported-size error, not a partial copy called complete.
+- [x] Store author state adjacent to the course, using atomic JSON and immutable saved artifacts. Store references/hashes rather than duplicate all course bytes in every report. Reuse the existing course lock through a small public context-manager seam if necessary; do not reach across processes with an unrelated lock.
+- [x] Add source metadata fields from TE-004 and separate `author_reference`/`student_material` decisions. Show unsupported extraction explicitly; preserve binary files without pretending the assistant read them.
+- [x] Run `uv run pytest tests/test_author_project.py tests/test_author_api.py -q` and the new project-panel tests. Inspect first-launch and import screens. Commit the slice.
 
 ## Task 4: Add reviewed Markdown and notebook edits without student mutation
 

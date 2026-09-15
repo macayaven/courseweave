@@ -41,7 +41,7 @@
     "webpackConfig": "webpack.config.cjs",
     "outputDir": "../../../src/courseweave/labextension",
     "_build": {
-      "load": "static/remoteEntry.8c605221990be3bb.js",
+      "load": "static/remoteEntry.ab693dbc53e39132.js",
       "extension": "./extension"
     }
   }

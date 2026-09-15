@@ -318,6 +318,11 @@ async function handleApi(route: Route, api: AuthorApiFixture): Promise<void> {
   }
   api.authenticatedRequests += 1;
 
+  if (method === "GET" && url.pathname === "/api/author/projects" && url.search === "") {
+    await json(route, { enabled: false });
+    return;
+  }
+
   if (method === "GET" && url.pathname === "/api/course" && url.search === "") {
     api.counts.courseGets += 1;
     await route.fulfill({ contentType: "application/json", headers: { etag: api.etag }, body: api.raw });

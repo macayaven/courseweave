@@ -876,6 +876,29 @@ def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_ch
     assert state["lock"].release_calls == 1
 
 
+def test_author_home_launch_isolated_from_course_sources(tmp_path, monkeypatch):
+    calls = []
+    class FakeSupervisor:
+        def __init__(self, course_root, **options):
+            calls.append((course_root, options))
+        def run(self):
+            return 0
+    monkeypatch.setattr("courseweave.cli.LaunchSupervisor", FakeSupervisor)
+    home = tmp_path / "private-home"
+    result = CliRunner().invoke(app, ["author", "--home", str(home), "--port", "43124"])
+    assert result.exit_code == 0, result.output
+    root, options = calls[0]
+    assert root == home / ".launcher"
+    assert root.is_dir()
+    assert options["author_home"] == home
+    assert options["mode"] == "author"
+    assert options["state_dir"].is_relative_to(home)
+    assert not (root / "courseweave.json").exists()
+    mixed = CliRunner().invoke(app, ["author", "--home", str(home), "--course-root", str(tmp_path)])
+    assert mixed.exit_code != 0
+    assert len(calls) == 1
+
+
 @pytest.mark.parametrize("command,mode", [("launch", "learn"), ("author", "author")])
 def test_cli_modes_share_the_supervisor_and_propagate_status(
     tmp_path: Path,

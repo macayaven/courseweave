@@ -1,6 +1,7 @@
 import { authenticatedHeaders } from "@courseweave/ui";
 import type { AuthorRuntime } from "./runtime";
 import type { CompatibilityReport } from "./compatibility";
+import type { Inventory, Project, ProjectList, ProjectRequest, SourceRecord, SourceDecision } from "./project-panel";
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -80,7 +81,7 @@ function safeEnvelope(value: unknown, capabilityToken: string): ErrorEnvelope {
     : fallback;
 }
 
-export function createAuthorClient(runtime: AuthorRuntime) {
+export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | null) {
   const serviceOrigin = new URL(runtime.serviceOrigin).origin;
   const capabilityToken = runtime.capabilityToken;
   const request = async (
@@ -88,10 +89,12 @@ export function createAuthorClient(runtime: AuthorRuntime) {
     init: RequestInit = {},
     signal?: AbortSignal,
   ): Promise<Response> => {
+    const headers = authenticatedHeaders(capabilityToken, init.headers);
+    if (projectId) headers.set("X-CourseWeave-Project", projectId);
     const response = await fetch(`${serviceOrigin}${path}`, {
       ...init,
       signal,
-      headers: authenticatedHeaders(capabilityToken, init.headers),
+      headers,
       credentials: "include",
       cache: "no-store",
     });
@@ -129,6 +132,17 @@ export function createAuthorClient(runtime: AuthorRuntime) {
       signal,
     );
   return {
+    getProjects: (signal?: AbortSignal) => json<ProjectList>("/api/author/projects", {}, signal),
+    inspectSource: (source_root: string, signal?: AbortSignal) => json<Inventory>("/api/author/projects/inventory", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source_root }),
+    }, signal),
+    createProject: (body: ProjectRequest, signal?: AbortSignal) => json<Project>("/api/author/projects", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    getSources: (signal?: AbortSignal) => json<{ sources: SourceRecord[] }>("/api/author/sources", {}, signal),
+    updateSource: (id: string, body: SourceDecision, signal?: AbortSignal) => json<SourceRecord>(`/api/author/sources/${encodeURIComponent(id)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
     async getCourse(signal?: AbortSignal): Promise<CourseResponse> {
       const response = await request("/api/course", { method: "GET" }, signal);
       const raw = await response.text();

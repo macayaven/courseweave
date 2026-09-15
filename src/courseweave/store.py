@@ -1141,6 +1141,16 @@ class CourseStore:
             connection.commit()
 
     @contextmanager
+    def author_lock(self) -> Iterator[None]:
+        """Serialize adjacent author artifacts with the canonical course store.
+
+        Callers must not nest store mutations while holding this non-reentrant
+        lock. Manifest changes continue to use the existing store transaction.
+        """
+        with self._locked():
+            yield
+
+    @contextmanager
     def _locked(self, *, validate_identity: bool = True) -> Iterator[None]:
         descriptor = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:

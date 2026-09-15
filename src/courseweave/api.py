@@ -162,6 +162,8 @@ def create_app(
     *,
     capability_token: str | None = None,
     state_dir: Path | None = None,
+    author_home: Path | None = None,
+    author_project=None,
 ) -> FastAPI:
     """Create the CourseWeave service application.
 
@@ -196,6 +198,9 @@ def create_app(
     app.state.proposal_candidates: dict[str, _ProposalCandidate] = {}
     app.state.provider_config_factory = lambda: ProviderConfig.from_environ(os.environ)
     app.state.professor_model_factory = create_model
+    from .author.api import install_routes
+    install_routes(app, author_home=author_home, author_project=author_project, factory=create_app)
+    # Added last so authentication runs before project selection/path access.
     app.add_middleware(
         _CapabilityTokenMiddleware, capability_token=app.state.capability_token
     )

@@ -14,6 +14,12 @@ releases.
   server-selected targets, deterministic compatibility, and human decisions.
 - Added a preliminary Student compatibility report using the existing validators,
   explicit unchecked scope, and canonical-schema inspector choices.
+- Added private Author homes with new/imported projects, bounded file inventory,
+  source snapshots and explicit approval, intended-use and redistribution decisions.
+  Project requests retain their selected root across tabs. Source changes use the
+  shared course lock and reviewed revisions. Import leaves original files intact.
+- Added project switching and source review controls, with unsaved-work protection,
+  readable selection controls and a collapsed sidebar on Author launch.
 - The complete Author Edition and its installed/live-provider acceptance are
   still in development; see [implementation notes](docs/author/implementation.md).
 
