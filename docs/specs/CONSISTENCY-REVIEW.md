@@ -180,3 +180,18 @@ Normative rows, shared facts and traceability remain unchanged. Preview
 observations do not become Student completion or deterministic compatibility.
 Tasks10–11 and real Brave discovery remain required. This is implementation
 self-review; final independent acceptance is still open.
+
+## Task 10 implementation self-review
+
+Private backup/restore, prepared-save/export recovery, preview ownership and
+supervisor-loss cleanup implement the approved V10 boundary. Restore always
+creates a new project and keeps recovered drafts/reports stale; source decisions
+and human dispositions retain their ownership. No pending operation, provider
+credential, conversation or Student workspace is restored as Author authority.
+Real-process and installed paired preview faults are distinct from synthetic
+source transport, provider and structural evidence.
+
+The three normative specs, shared facts, traceability and frozen schema-v2 bytes
+remain unchanged. TE-016 saved review backup and TE-023 recovery receive concrete
+implementation evidence. Student rules/progress are still canonical. Final V09
+archive acceptance, actual Brave discovery and independent review remain open.

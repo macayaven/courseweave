@@ -53,6 +53,13 @@ Remote URLs are not fetched by the static compatibility check.
 
 A failed setup retains its files and reports a failure. Check pinned release
 inputs, internet access and free space before preparing a new preview. Normal
-Author shutdown closes its preview. Recovery after an abrupt exit, restored
-projects and interrupted receipt writes remains under implementation in Task 10;
-this development document does not claim those release gates are complete.
+Author shutdown closes its preview. After an abrupt exit, reload preview inputs
+to reconcile the recorded process, then explicitly stop, keep or discard it.
+See [Author backup and recovery](recovery.md) for the supported recovery behavior.
+
+To reopen a retained preview manually, use its generated launcher with the same
+study folder shown on the receipt. For example, run
+`"/local/author-home/previews/preview-ID/bundle/Start Course.command" start --home "/local/author-home/previews/preview-ID/study" --no-provider`
+from Terminal, replacing both paths with the saved preview's actual paths.
+Double-clicking the bundle without `--home` chooses its normal separate default
+study home. Stop that Terminal launch before using the same study folder again.

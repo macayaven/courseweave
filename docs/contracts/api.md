@@ -511,3 +511,45 @@ Brave uses only `BRAVE_SEARCH_API_KEY`, supplied to the Author backend. The
 fetcher never uses browser cookies, student credentials or model keys. Invalid
 URLs and denied origins cause no source transport calls; redirects repeat policy
 and destination checks. See [Author research setup and limits](../author/research.md).
+
+## Private Author backup and recovery (v0.3.0 candidate)
+
+These closed requests use the existing capability authentication, 1 MiB request
+bound and project header. The two `projects/restore` routes belong to the Author
+home and are available before a project is selected. Ordinary Student launches
+cannot back up or restore Author projects.
+
+- `POST /api/author/backups/inspect`: `{categories: []}` with optional `changes`,
+  `reviews`, `research` selections. Returns the full hash inventory, byte count,
+  exclusions and `inventory_sha256`. Applied changes needed for provenance are
+  core backup artifacts regardless of the optional draft selection.
+- `POST /api/author/backups`: the same categories plus a new local `.tar`
+  `destination` and reviewed `inventory_sha256`; 201 returns destination,
+  `archive_sha256`, file count and categories. Changed content/decisions return
+  409 before publishing an archive. An existing destination is not replaced.
+- `POST /api/author/projects/restore/inspect`: `{archive: "/local/backup.tar"}`.
+  Verifies the complete supported archive and returns its SHA-256, original
+  project ID, selected artifact categories and counts.
+- `POST /api/author/projects/restore`: `archive`, reviewed `archive_sha256` and a
+  new `project_id`. Returns the created project with 201. Partial, incompatible
+  or changed inputs and existing destinations return 409. A restored project has
+  a new revision, stale pending drafts/reviews, retained source decisions and
+  dispositions, and no replayed operations or restored process handles.
+- `GET /api/author/recovery`: reconciles exact export hashes/receipts and reports
+  interrupted/conflicting attempts and any retained owned staging directories.
+- `POST /api/author/recovery/exports/{export_id}/discard`: `{confirm: true}`
+  explicitly removes only that attempt’s marked staging directory. The final
+  exported archive is never deleted by this route.
+
+Author backup version 1 is an uncompressed tar with an exact, closed inventory,
+up to 40,000 files and 2 GiB. Restore checks artifact identities, dependencies,
+hashes, local paths, file types and collisions before creating a new destination.
+Its final `project.json` is the completion marker. See
+[backup and recovery](../author/recovery.md) for included artifacts and limitations.
+
+Preview records now include the owned process start stamp. Listing after a
+restart marks an interrupted preview explicitly; Stop checks PID, start time,
+dedicated process group and preview identity before signalling a surviving child.
+Discard records its intent before deletion and reconciles a completed deletion
+after restart. Candidate Jupyter watches its OS parent and shuts down normally
+when its owning supervisor is lost.

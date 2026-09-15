@@ -329,9 +329,9 @@ Task 9 evidence note: installed preview checks cover both Student versions, all 
 
 **Consumes:** durable author artifacts and operation receipts. **Produces:** V10 and the complete recovery contract.
 
-- [ ] Inject failure before file replace, after replace/before receipt, during source fetch, during export, and after preview start. Restart and reconcile from exact hashes/owned process records.
-- [ ] Verify duplicate acceptance, stale manifest/file revision, external edit, two author tabs, changed source approval, deleted report, and canceled response cannot resurrect a rejected change or revoked context.
-- [ ] Add author backup/restore as a distinct explicit operation. Backup includes selected author artifacts but no credentials/chat/student data. Restore always creates a new project; it never overwrites the working or student home. Report partial/incompatible archives before mutation.
+- [x] Inject failure before file replace, after replace/before receipt, during source fetch, during export, and after preview start. Restart and reconcile from exact hashes/owned process records.
+- [x] Verify duplicate acceptance, stale manifest/file revision, external edit, two author tabs, changed source approval, deleted report, and canceled response cannot resurrect a rejected change or revoked context.
+- [x] Add author backup/restore as a distinct explicit operation. Backup includes selected author artifacts but no credentials/chat/student data. Restore always creates a new project; it never overwrites the working or student home. Report partial/incompatible archives before mutation.
 
 | Injected failure | Required outcome after actual restart |
 | --- | --- |
@@ -342,10 +342,10 @@ Task 9 evidence note: installed preview checks cover both Student versions, all 
 | Preview startup interrupted | Only the recorded child may be reconciled/stopped; pre-existing user processes remain running |
 | Source revoked or report deleted | No dependent replay or automatic reactivation; private backups are only restored through a new explicit project restore |
 
-- [ ] For each case above, compare the original author source and separate student state/notebooks before and after, inspect durable receipts after reopening the application, and scan resulting artifacts for planted synthetic secrets. These are end-to-end fault tests, not tests of an isolated status helper.
+- [x] For each case above, compare the original author source and separate student state/notebooks before and after, inspect durable receipts after reopening the application, and scan resulting artifacts for planted synthetic secrets. These are end-to-end fault tests, not tests of an isolated status helper.
 
-- [ ] Test provider/search keys through the established protected input mechanism, request redaction, and child-process cleanup. Never delete or rotate the user's pre-existing credentials. Verify no test token in logs, reports, exports, browser storage, or persistent environment artifacts.
-- [ ] Run `uv run pytest tests/test_author_recovery.py tests/test_store.py tests/test_student_release_installed.py -q` and affected browser recovery journeys. Commit the slice.
+- [x] Test provider/search keys through the established protected input mechanism, request redaction, and child-process cleanup. Never delete or rotate the user's pre-existing credentials. Verify no test token in logs, reports, exports, browser storage, or persistent environment artifacts.
+- [x] Run `uv run pytest tests/test_author_recovery.py tests/test_store.py tests/test_student_release_installed.py -q` and affected browser recovery journeys. Commit the slice.
 
 ## Task 11: Build and verify the exact paired release
 

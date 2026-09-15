@@ -24,6 +24,7 @@ import { ImportExport } from "./import-export";
 import { Inspector } from "./inspector";
 import { Outline } from "./outline";
 import { AuthorPreview, StudentPreview } from "./preview";
+import { RecoveryPanel } from './recovery-panel';
 import { useBeforeUnload } from "./reconnect";
 import { SaveConflict, type SavedCourse } from "./save-conflict";
 import {
@@ -789,6 +790,7 @@ export function AuthorApp() {
   const [researchBusy, setResearchBusy] = useState(false);
   const [reviewDirty, setReviewDirty] = useState(false);
   const [previewDirty, setPreviewDirty] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [reviewEpoch, setReviewEpoch] = useState(0);
   const [coverageEpoch, setCoverageEpoch] = useState(0);
   const [openReportId, setOpenReportId] = useState<string | null>(null);
@@ -842,14 +844,19 @@ export function AuthorApp() {
     return () => controller.abort();
   }, [runtime.status, runtime.runtime, projectId]);
   const selectProject = (id: string) => {
-    if (dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || previewDirty || id === projectId) return;
+    if (dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || previewDirty || recoveryBusy || id === projectId) return;
     setCourse(null); setLoad("loading"); setProjectId(id);
     setOpenChangeId(null);
     setOpenReportId(null);
   };
-  const projectPanel = projects?.enabled && client.current ? <ProjectPanel client={client.current}
+  const projectLocked = dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || previewDirty || runtime.status !== 'ready' || load !== 'ready';
+  const projectPanel = projects?.enabled && client.current ? <><ProjectPanel client={client.current}
     projects={projects.projects ?? []} unavailable={projects.unavailable ?? []} selected={projectId}
-    disabled={dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || previewDirty || runtime.status !== "ready" || load !== "ready"} onSelect={selectProject} /> : null;
+    disabled={projectLocked || recoveryBusy} onSelect={selectProject} />
+    <RecoveryPanel key={'recovery-' + projectId} client={client.current} projectId={projectId} disabled={projectLocked}
+      onBusyChange={setRecoveryBusy} onRestore={id => {
+        setCourse(null); setLoad('loading'); setProjectId(id); setOpenChangeId(null); setOpenReportId(null);
+      }} /></> : null;
   if (projects?.enabled && !projectId && load === "ready")
     return <AuthorShell state="Choose or create a private author project.">{projectPanel}</AuthorShell>;
   if (runtime.status === "connecting" && !course)

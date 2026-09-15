@@ -9,6 +9,7 @@ import type { ReviewClient, ReviewDecision, ReviewReport } from "./review-panel"
 import type { CoverageReport } from "./coverage-panel";
 import type { DeliveryClient, DeliveryInventory, CourseExportRequest, CourseExportReceipt, StudentBundleReceipt } from "./delivery-panel";
 import type { StudentPreviewClient, StudentPreviewRecord } from './preview';
+import type { RecoveryClient, BackupCategory, BackupInventory, RestoreInventory, RecoveryStatus } from './recovery-panel';
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -208,6 +209,22 @@ export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | 
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewed_revision }),
     }, signal),
     getProjects: (signal?: AbortSignal) => json<ProjectList>("/api/author/projects", {}, signal),
+    inspectBackup: (categories: BackupCategory[], signal?: AbortSignal) => json<BackupInventory>('/api/author/backups/inspect', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({categories}),
+    }, signal),
+    createBackup: (body: Parameters<RecoveryClient['createBackup']>[0], signal?: AbortSignal) => json<Awaited<ReturnType<RecoveryClient['createBackup']>>>('/api/author/backups', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    }, signal),
+    inspectRestore: (archive: string, signal?: AbortSignal) => json<RestoreInventory>('/api/author/projects/restore/inspect', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({archive}),
+    }, signal),
+    restoreBackup: (body: Parameters<RecoveryClient['restoreBackup']>[0], signal?: AbortSignal) => json<Project>('/api/author/projects/restore', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    }, signal),
+    getRecovery: (signal?: AbortSignal) => json<RecoveryStatus>('/api/author/recovery', {}, signal),
+    discardExportStaging: (exportId: string, signal?: AbortSignal) => json('/api/author/recovery/exports/' + encodeURIComponent(exportId) + '/discard', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({confirm: true}),
+    }, signal),
     inspectSource: (source_root: string, signal?: AbortSignal) => json<Inventory>("/api/author/projects/inventory", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source_root }),
     }, signal),

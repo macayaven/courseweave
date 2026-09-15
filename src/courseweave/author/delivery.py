@@ -27,7 +27,7 @@ import zipfile
 import mistune
 from pydantic import Field
 
-from ..contracts.models import ArtifactExistsRequirement, ClosedModel
+from ..contracts.models import ArtifactExistsRequirement, ClosedModel, Slug
 from ..contracts.primitives import LocalPath, local_path
 from ..engine.manifest import _local_sources, parse_manifest_data
 from .content import _imported_file_sources, _lock, _recover, output_free_notebook
@@ -58,6 +58,98 @@ class ExportRequest(ClosedModel):
     course_version: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$")
     kind: str = Field(pattern=r"^(?:draft|student_handoff)$")
     selected_paths: tuple[LocalPath, ...] = Field(min_length=1, max_length=10_000)
+
+
+class ExportAttempt(ClosedModel):
+    format: Literal[1] = 1
+    export_id: Slug
+    project_id: Slug
+    destination: Path
+    status: Literal['preparing', 'ready', 'complete', 'interrupted', 'conflict'] = 'preparing'
+    receipt: ExportReceipt | None = None
+
+
+def _attempt_stage(attempt):
+    return checked_local_path(attempt.destination).parent / ('.courseweave-' + attempt.export_id)
+
+
+def _save_attempt(project, attempt, *, replace=True):
+    atomic_bytes(project.state_root / 'export-attempts' / (attempt.export_id + '.json'),
+        (attempt.model_dump_json(indent=2) + '\n').encode(), replace=replace)
+
+
+def _export_attempts(project):
+    with local_directory(project.state_root / 'export-attempts', create=True) as fd:
+        names = sorted(name for name in os.listdir(fd) if not name.startswith('.write-'))
+    if len(names) > MAX_EXPORTS:
+        raise DeliveryError('Export recovery limit reached; archive this project.')
+    result = []
+    for name in names:
+        try:
+            if not re.fullmatch(r'export-[a-f0-9]{32}\.json', name):
+                raise ValueError()
+            attempt = ExportAttempt.model_validate_json(read_private(project.state_root,
+                'export-attempts/' + name, max_bytes=8 * 1024 * 1024))
+            if (attempt.project_id != project.project_id or attempt.export_id + '.json' != name
+                    or checked_local_path(attempt.destination).is_relative_to(project.course_root.parent)
+                    or (attempt.receipt and (attempt.receipt.export_id != attempt.export_id
+                        or attempt.receipt.project_id != project.project_id or attempt.receipt.destination != attempt.destination))):
+                raise ValueError()
+        except ValueError:
+            raise DeliveryError('Export recovery record is invalid; inspect the project before changing its files.') from None
+        result.append(attempt)
+    return result
+
+
+def _recover_exports(project):
+    """Called under the canonical project lock; never recreate a missing archive."""
+    for attempt in _export_attempts(project):
+        if attempt.status not in {'preparing', 'ready'}:
+            continue
+        status = 'interrupted'
+        if attempt.destination.exists() or attempt.destination.is_symlink():
+            status = 'conflict'
+            if attempt.receipt:
+                try:
+                    with source_file(attempt.destination.parent, attempt.destination.name) as fd, os.fdopen(os.dup(fd), 'rb') as stream:
+                        matches = os.fstat(fd).st_size <= 2 * 1024**3 and hashlib.file_digest(stream, 'sha256').hexdigest() == attempt.receipt.package_sha256
+                    if matches:
+                        path = project.state_root / 'exports' / (attempt.export_id + '.json')
+                        if path.exists():
+                            saved = ExportReceipt.model_validate_json(read_private(path.parent, path.name, max_bytes=8 * 1024 * 1024))
+                            if saved != attempt.receipt:
+                                raise DeliveryError('Export receipt and recovery record disagree; inspect them before continuing.')
+                        else:
+                            atomic_bytes(path, (attempt.receipt.model_dump_json(indent=2) + '\n').encode())
+                        status = 'complete'
+                except (OSError, ValueError):
+                    pass
+        _save_attempt(project, attempt.model_copy(update={'status': status}))
+
+
+def recovery_status(project):
+    with _lock(project):
+        _recover(project)
+        _recover_exports(project)
+        return {'exports': [a.model_dump(mode='json', exclude={'receipt'}) | {
+            'staging': str(_attempt_stage(a)), 'staging_present': _attempt_stage(a).exists()}
+            for a in _export_attempts(project) if a.status != 'complete' or _attempt_stage(a).exists()]}
+
+
+def discard_interrupted_export(project, export_id):
+    with _lock(project):
+        _recover_exports(project)
+        attempt = next((a for a in _export_attempts(project) if a.export_id == export_id), None)
+        if attempt is None or attempt.status in {'preparing', 'ready'}:
+            raise DeliveryError('Reload export recovery before removing staging files.')
+        stage = _attempt_stage(attempt)
+        if stage.exists() or stage.is_symlink():
+            expected = {'project_id': project.project_id, 'export_id': export_id}
+            if json.loads(read_private(stage, 'owner.json', max_bytes=1024)) != expected:
+                raise DeliveryError('Export staging ownership changed; no files were removed.')
+            with local_directory(stage.parent) as parent:
+                shutil.rmtree(stage.name, dir_fd=parent)
+        return {'export_id': export_id, 'staging_removed': True}
 
 
 class RuntimeInput(ClosedModel):
@@ -401,8 +493,9 @@ def export_payload(receipt: ExportReceipt) -> dict:
 def list_exports(project, *, offset=0) -> dict:
     with _lock(project):
         _recover(project)
+        _recover_exports(project)
         with local_directory(project.state_root / "exports", create=True) as directory:
-            names = sorted(os.listdir(directory))
+            names = sorted(name for name in os.listdir(directory) if not name.startswith('.write-'))
         if len(names) > MAX_EXPORTS:
             raise DeliveryError("Export receipt limit exceeded.")
         reports = []
@@ -429,6 +522,9 @@ def export_course(project, destination: Path, profile: StudentProfile, request: 
         raise DeliveryError("Export outside the working author project.")
     with local_directory(destination.parent) as parent, _lock(project):
         _recover(project)
+        _recover_exports(project)
+        if len(_export_attempts(project)) >= MAX_EXPORTS:
+            raise DeliveryError('Export recovery limit reached; archive this project.')
         plan = _inspection(project, profile)
         if any(getattr(request, key) != plan[key] for key in ("project_revision", "inventory_sha256", "source_decisions_sha256")):
             raise DeliveryError("Export review is stale; files or source decisions changed. Inspect the inventory again.")
@@ -447,10 +543,14 @@ def export_course(project, destination: Path, profile: StudentProfile, request: 
             if len(os.listdir(exports_fd)) >= MAX_EXPORTS:
                 raise DeliveryError("Export receipt limit reached; archive this author project.")
         export_id = "export-" + uuid4().hex
-        staging_root = Path(tempfile.mkdtemp(prefix=".courseweave-export-", dir=destination.parent))
+        attempt = ExportAttempt(export_id=export_id, project_id=project.project_id, destination=destination)
+        _save_attempt(project, attempt, replace=False)
+        staging_root = _attempt_stage(attempt)
+        staging_root.mkdir(mode=0o700)
+        atomic_bytes(staging_root / 'owner.json', _json({'project_id': project.project_id, 'export_id': export_id}))
         stage = staging_root / "course"
         stage.mkdir()
-        archive_name = "." + export_id + ".tar"
+        archive_name = str(staging_root / 'package.tar')
         try:
             for name in sorted(selected):
                 reviewed = InventoryFile(**{key: files[name][key] for key in ("path", "size", "sha256")})
@@ -499,7 +599,7 @@ def export_course(project, destination: Path, profile: StudentProfile, request: 
                             info.mode = 0o755 if name in files and files[name]["executable"] else 0o644
                             archive.addfile(info, content)
                 stream.flush(); os.fsync(stream.fileno())
-            with source_file(destination.parent, archive_name) as file_fd, os.fdopen(os.dup(file_fd), "rb") as content:
+            with source_file(staging_root, 'package.tar') as file_fd, os.fdopen(os.dup(file_fd), "rb") as content:
                 try:
                     with tarfile.open(fileobj=content) as archive:
                         archive_members(archive)
@@ -511,12 +611,15 @@ def export_course(project, destination: Path, profile: StudentProfile, request: 
                 course_id=plan["course_id"], course_version=request.course_version, destination=destination,
                 package_sha256=digest, inventory=inventory, compatibility=compatibility, kind=request.kind,
                 created_at=datetime.now(timezone.utc))
+            attempt = attempt.model_copy(update={'status': 'ready', 'receipt': receipt})
+            _save_attempt(project, attempt)
             try:
                 os.link(archive_name, destination.name, src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
             except FileExistsError:
                 raise DeliveryError("Export destination appeared while preparing; nothing was replaced.") from None
             os.fsync(parent)
             atomic_bytes(project.state_root / "exports" / (export_id + ".json"), (receipt.model_dump_json(indent=2) + "\n").encode())
+            _save_attempt(project, attempt.model_copy(update={'status': 'complete'}))
             return receipt
         finally:
             os.unlink(archive_name, dir_fd=parent) if (destination.parent / archive_name).exists() else None

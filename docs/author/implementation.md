@@ -476,3 +476,44 @@ unsupported-rendering reporting is strengthened by the observed released-video
 limit. Preview observations acquire no progress or compatibility authority.
 Task10 recovery, Task6 actual Brave discovery, exact final candidate acceptance
 and the bounded independent review remain open.
+
+## Task 10: backup, restore and interrupted work
+
+Private backup inspection selects optional drafts and saved research/review
+reports, alongside the saved course, current source snapshots and applied
+provenance. A closed inventory and file hashes are checked again before
+publication. Restore validates a complete supported archive before creating a
+new project, then publishes its completion marker last. Pending changes and
+reports become stale; rejected changes and human dispositions retain their
+states. No apply journal, preview home, conversation or credential custody is
+restored. See [recovery](recovery.md) for the 2 GiB/40,000-file scope and exclusions.
+
+Export journals close the gap between publishing the final tar and saving its
+private receipt. Exact archives reconcile once; incomplete attempts stay
+interrupted and offer explicit removal of only their marked staging directory.
+Content recovery now rejects mismatched operation/change pairs and cannot
+resurrect a terminal rejected change. Preview records persist their process
+identity and deletion intent; receipt-write failure cannot bypass child cleanup.
+
+A real SIGKILL test reproduced an inherited Jupyter course lock after Author
+death. Candidate Jupyter now monitors its OS parent relationship and uses its
+existing shutdown path on parent loss. The real process regression passed,
+including a separate surviving witness. The installed browser journey exercised
+backup/restore, real notebook Run All/Save, forced Author death, owned Jupyter and
+kernel exit, immediate Author restart, preview reconciliation and Keep in both
+Student versions. A further two-tab run proved stale apply/backup rejection while
+preserving a newer explicitly reviewed file and the separate saved notebook.
+
+Task10 development verification includes 50 required Python3.11 checks with an
+actual generated Student launcher, 249 affected Python3.12 cases (one explicit
+full-course fixture skip), and 88 launch/Jupyter checks with18 subtests. These
+groups overlap; their counts are not a combined acceptance score. Fault workers
+actually exit inside apply, export and a synthetic source-fetch pipeline. Public
+discovery and live model use are separate gates. Exact artifacts, failures and
+representative rendered screenshots are recorded privately with the task receipt.
+
+Three-spec impact: V10 gains development recovery evidence. The shared schema,
+engine, recorded progress and Student consent rules are unchanged. Source
+approval retained in an explicitly restored new project is not a new editorial
+judgment. The exact release archive, full-course acceptance, live Brave discovery
+and final bounded independent review remain required in Task11.

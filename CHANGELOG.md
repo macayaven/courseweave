@@ -8,6 +8,13 @@ releases.
 
 ### Author Edition v0.3.0 work in progress
 
+- Added inspected private backups and restore into a new project. Saved source
+  decisions and review dispositions survive; recovered drafts and reports need
+  fresh review. Complete inventories and hashes reject partial or incompatible
+  archives before creating the restored project.
+- Added export journals and explicit staging cleanup, recorded preview process
+  identities, and interrupted-discard recovery. A crashed Author now causes its
+  owned Jupyter child to stop and release the course lock.
 - Added actual installed Student practice from saved exports, with separate
   notebooks/state, explicit provider opt-in, owned start/open/stop controls and
   revision-checked observations and keep/discard decisions.

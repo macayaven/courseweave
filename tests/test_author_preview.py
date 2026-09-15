@@ -229,3 +229,21 @@ def main(args,root):
         if process.poll() is None:os.killpg(process.pid,signal.SIGKILL)
         process.wait(timeout=5)
         witness.terminate();witness.wait(timeout=5)
+
+
+def test_receipt_write_failure_still_stops_child_and_releases_preview_slot(preview, monkeypatch):
+    manager, project, export, catalog, _ = preview
+    write=manager._write
+    processes=[]
+    def factory(*args,**kwargs):
+        process=Process(*args,**kwargs);processes.append(process);return process
+    manager.process_factory=factory
+    def failing_write(project,record,**kwargs):
+        if record.status != 'preparing': raise OSError('Synthetic receipt failure')
+        return write(project,record,**kwargs)
+    monkeypatch.setattr(manager,'_write',failing_write)
+    manager.start(project,export.export_id,catalog,'0.2.0')
+    deadline=time.monotonic()+5
+    while manager.active is not None and time.monotonic()<deadline: time.sleep(.01)
+    assert processes and all(process.poll() is not None for process in processes)
+    assert manager.active is None

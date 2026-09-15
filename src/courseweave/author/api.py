@@ -37,6 +37,26 @@ from .quality import FindingDecision, course_coverage, delete_review, export_rev
 from .delivery import ExportRequest, export_course, export_payload, inspect_delivery, list_exports, student_inputs, build_student_handoff
 from .quality import student_profile
 from .preview import PreviewManager, PreviewObservations
+from .backup import BackupSelection, inspect_backup, backup_project, inspect_restore, restore_backup
+from .delivery import recovery_status, discard_interrupted_export
+
+
+class ProjectBackup(BackupSelection):
+    destination: Path
+    inventory_sha256: Sha256
+
+
+class InspectRestore(ClosedModel):
+    archive: Path
+
+
+class RestoreProject(InspectRestore):
+    project_id: Slug
+    archive_sha256: Sha256
+
+
+class ConfirmRemoval(ClosedModel):
+    confirm: Literal[True]
 
 
 class CreateProject(ClosedModel):
@@ -321,6 +341,65 @@ def install_routes(app, *, author_home: Path | None, author_project=None, studen
             if len(raw) > 1024 * 1024:
                 raise ProjectError("Request exceeds the 1 MiB limit.")
         return model.model_validate_json(bytes(raw))
+
+    @app.post('/api/author/backups/inspect')
+    async def backup_inventory(request: Request):
+        if app.state.author_project is None:
+            return failure(403, 'Backup requires a private author project.')
+        try:
+            body = await read_body(request, BackupSelection)
+        except ValidationError:
+            return failure(422, 'Select the saved author artifacts to back up.')
+        return await run_in_threadpool(inspect_backup, app.state.author_project, body.categories)
+
+    @app.post('/api/author/backups', status_code=201)
+    async def save_backup(request: Request):
+        if app.state.author_project is None:
+            return failure(403, 'Backup requires a private author project.')
+        try:
+            body = await read_body(request, ProjectBackup)
+        except ValidationError:
+            return failure(422, 'Inspect the backup selection and choose a new local .tar file.')
+        return await run_in_threadpool(backup_project, app.state.author_project,
+            body.destination, body.categories, body.inventory_sha256)
+
+    @app.post('/api/author/projects/restore/inspect')
+    async def restore_inventory(request: Request):
+        if app.state.author_home is None:
+            return failure(403, 'Restore requires an Author home launch.')
+        try:
+            body = await read_body(request, InspectRestore)
+        except ValidationError:
+            return failure(422, 'Choose a local Author backup archive.')
+        return await run_in_threadpool(inspect_restore, body.archive)
+
+    @app.post('/api/author/projects/restore', status_code=201)
+    async def restore_project(request: Request):
+        if app.state.author_home is None:
+            return failure(403, 'Restore requires an Author home launch.')
+        try:
+            body = await read_body(request, RestoreProject)
+        except ValidationError:
+            return failure(422, 'Inspect the backup and choose a new project ID before restoring.')
+        project = await run_in_threadpool(restore_backup, body.archive,
+            app.state.author_projects_root / body.project_id, body.archive_sha256)
+        return project.model_dump(mode='json')
+
+    @app.get('/api/author/recovery')
+    def project_recovery():
+        if app.state.author_project is None:
+            return failure(403, 'Recovery requires a private author project.')
+        return recovery_status(app.state.author_project)
+
+    @app.post('/api/author/recovery/exports/{export_id}/discard')
+    async def discard_export_staging(export_id: str, request: Request):
+        if app.state.author_project is None:
+            return failure(403, 'Recovery requires a private author project.')
+        try:
+            await read_body(request, ConfirmRemoval)
+        except ValidationError:
+            return failure(422, 'Confirm removal of this export attempt’s staging files.')
+        return await run_in_threadpool(discard_interrupted_export, app.state.author_project, export_id)
 
     @app.get("/api/author/delivery")
     def delivery_inventory():

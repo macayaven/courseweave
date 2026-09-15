@@ -6,7 +6,7 @@ import type { CourseExportReceipt, DeliveryClient } from './delivery-panel';
 export interface PreviewObservations { surfaces: string[]; actions: string[]; notes: string; category?: 'author_reported'; }
 export interface StudentPreviewRecord {
   preview_id: string; revision: number; status: 'preparing' | 'running' | 'stopped' | 'failed';
-  files: 'retained' | 'kept' | 'discarded'; home: string; package_sha256: string;
+  files: 'retained' | 'kept' | 'discarding' | 'discarded'; home: string; package_sha256: string;
   student_version: string; provider_mode: 'off' | 'configured'; error: string;
   observations: PreviewObservations | null;
 }

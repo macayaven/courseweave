@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 import re
+import signal
 import stat
 from pathlib import Path
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from pydantic import ValidationError
 from tornado import web
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest, HTTPResponse
 from tornado.httputil import HTTPHeaders
+from tornado.ioloop import PeriodicCallback
 
 from .models import WorkspaceContext
 from .reader import read_reader_file
@@ -40,6 +42,7 @@ _SUPERVISED_ENVIRONMENT_KEYS = (
     "COURSEWEAVE_CAPABILITY_TOKEN",
     "COURSEWEAVE_RUNTIME_ID",
     "COURSEWEAVE_LAUNCH_MODE",
+    "COURSEWEAVE_PARENT_PID",
 )
 _JSON_CONTENT_TYPE = re.compile(
     r'application/json(?:[ \t]*;[ \t]*charset[ \t]*=[ \t]*(?:utf-8|"utf-8"))?[ \t]*',
@@ -406,6 +409,28 @@ def _guard_jupyter_runtime_files(serverapp: Any) -> None:
     setattr(serverapp, _SERVER_INFO_GUARD, True)
 
 
+def _watch_supervisor(parent_pid: str | None):
+    """End this Jupyter server if its owning supervisor dies unexpectedly.
+
+    The OS parent relationship cannot silently attach to a reused PID. SIGTERM
+    uses Jupyter's existing shutdown path, including its own notebook kernels.
+    """
+    if parent_pid is None:
+        return None
+    if not re.fullmatch(r'[1-9][0-9]{0,9}', parent_pid) or int(parent_pid) < 2:
+        raise ValueError('Invalid CourseWeave parent process identity.')
+    expected = int(parent_pid)
+
+    def check_parent():
+        if os.getppid() != expected:
+            watch.stop()
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    watch = PeriodicCallback(check_parent, 500)
+    watch.start()
+    return watch
+
+
 def _load_jupyter_server_extension(serverapp: Any) -> None:
     """Load using only public Jupyter Server 2.21 extension contracts."""
 
@@ -414,6 +439,7 @@ def _load_jupyter_server_extension(serverapp: Any) -> None:
     if any(key in os.environ for key in _SUPERVISED_ENVIRONMENT_KEYS):
         _guard_jupyter_runtime_files(serverapp)
     settings = RuntimeSettings.from_environ(os.environ)
+    parent_pid = os.environ.get('COURSEWEAVE_PARENT_PID')
     if any(key in os.environ for key in _SUPERVISED_ENVIRONMENT_KEYS):
         # IdentityProvider reads JUPYTER_TOKEN lazily. Capture it before clearing
         # startup custody so authentication survives and new kernels inherit none.
@@ -421,6 +447,8 @@ def _load_jupyter_server_extension(serverapp: Any) -> None:
         for key in (*_SUPERVISED_ENVIRONMENT_KEYS, "JUPYTER_TOKEN"):
             os.environ.pop(key, None)
     web_app = serverapp.web_app
+    if settings is not None and parent_pid is not None:
+        web_app.settings['courseweave_parent_watch'] = _watch_supervisor(parent_pid)
     web_app.settings[_SETTINGS_KEY] = settings
     page_config = web_app.settings.setdefault("page_config_data", {})
     for key in _PAGE_CONFIG_KEYS:

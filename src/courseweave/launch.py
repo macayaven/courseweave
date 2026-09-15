@@ -576,6 +576,7 @@ class LaunchSupervisor:
                 "COURSEWEAVE_CAPABILITY_TOKEN": self.capability_token,
                 "COURSEWEAVE_RUNTIME_ID": self.runtime_id,
                 "COURSEWEAVE_LAUNCH_MODE": self.mode,
+                "COURSEWEAVE_PARENT_PID": str(os.getpid()),
                 "JUPYTER_TOKEN": self.jupyter_token,
                 "JUPYTER_CONFIG_DIR": str(config_dir),
                 "JUPYTER_RUNTIME_DIR": str(runtime_dir),

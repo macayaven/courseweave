@@ -318,3 +318,8 @@ pre {
 .delivery-files > div { padding: 0.5rem 0; border-bottom: 1px solid #dce2e9; }
 .delivery-files small { display: block; }
 .delivery-files code, .delivery-receipt code, .delivery-receipt p { overflow-wrap: anywhere; }
+.recovery-panel { overflow-wrap: anywhere; }
+.recovery-panel fieldset { margin-block: 1rem; }
+.recovery-panel label { display: block; margin-block: .5rem; }
+.recovery-panel input:not([type="checkbox"]) { width: 100%; box-sizing: border-box; }
+.recovery-panel input[type="checkbox"] { width: 20px; height: 20px; margin-right: .5rem; vertical-align: middle; }

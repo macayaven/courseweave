@@ -261,6 +261,9 @@ def _recover(project: AuthorProject) -> None:
             continue
         saved = _saved(project, operation.change_id)
         change = saved.change
+        if (operation.reviewed_revision != change.revision or operation.context_digest != change.context_digest
+                or change.status not in {"pending", "prepared", "applied"}):
+            raise ContentError("Apply journal does not match its reviewed change; inspect recovery before continuing.")
         try:
             exists, raw = _read_target(project, change.target_path)
         except ContentError:

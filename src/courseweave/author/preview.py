@@ -57,14 +57,32 @@ class PreviewRecord(ClosedModel):
     created_at: datetime
     revision: Revision = 0
     status: Literal['preparing', 'running', 'stopped', 'failed'] = 'preparing'
-    files: Literal['retained', 'kept', 'discarded'] = 'retained'
+    files: Literal['retained', 'kept', 'discarding', 'discarded'] = 'retained'
     provider_mode: Literal['off', 'configured'] = 'off'
     process_id: int | None = None
+    process_started: str | None = Field(default=None, max_length=120)
     api_port: int | None = None
     jupyter_port: int | None = None
     runner_sha256: Sha256 | None = None
     error: str = Field(default='', max_length=1000)
     observations: dict | None = None
+
+
+def process_stamp(pid, preview_id):
+    """OS start time plus the dedicated session/UUID; never persist command output."""
+    if pid is None or pid < 2:
+        return None
+    try:
+        result = subprocess.run(['/bin/ps', '-p', str(pid), '-o', 'lstart=', '-o', 'pgid=', '-o', 'command='],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}, text=True, timeout=5)
+        parts = result.stdout.strip().split(maxsplit=6)
+        if (result.returncode or len(parts) != 7 or parts[5] != str(pid)
+                or preview_id not in parts[6].split() or 'student_preview.py' not in parts[6]):
+            return None
+        return ' '.join(parts[:5])
+    except (OSError, subprocess.TimeoutExpired):
+        raise ProjectError('Could not verify the recorded preview process identity. Retry Stop before changing its files.') from None
 
 
 @dataclass
@@ -146,10 +164,24 @@ class PreviewManager:
             names = os.listdir(fd)
             if len(names) > 200:
                 raise ProjectError('Preview record limit exceeded. Archive this author project.')
-            records = [self._read(project, n[:-5]) for n in names if n.endswith('.json')]
+            records = [self._reconcile(project, self._read(project, n[:-5])) for n in names if n.endswith('.json')]
             records.sort(key=lambda r: r.created_at, reverse=True)
             return {'previews': [r.model_dump(mode='json') for r in records[offset:offset+20]],
                 'next_offset': offset+20 if offset+20 < len(records) else None}
+
+    def _reconcile(self, project, record):
+        if self.active and self.active.preview_id == record.preview_id:
+            return record
+        if record.files == 'discarding' and not self._directory(record.preview_id).exists():
+            self._update(project, record.preview_id, expected_revision=record.revision, files='discarded')
+            record = self._read(project, record.preview_id)
+        if record.status in {'preparing', 'running'}:
+            live = process_stamp(record.process_id, record.preview_id)
+            self._update(project, record.preview_id, expected_revision=record.revision, status='failed',
+                error=('Preview was interrupted. Its recorded process still needs Stop; files are retained.' if live
+                    else 'Preview was interrupted and its recorded process has ended. Files are retained; keep or discard them explicitly.'))
+            record = self._read(project, record.preview_id)
+        return record
 
     def start(self, project, export_id, catalog_path, version, *, provider=None):
         environment = preview_environment(provider)
@@ -203,6 +235,7 @@ class PreviewManager:
             environment.clear()
             peer.close();peer = None
             self._update(project, preview_id, process_id=active.process.pid,
+                process_started=process_stamp(active.process.pid, preview_id),
                 runner_sha256=hashlib.sha256(runner.read_bytes()).hexdigest())
             deadline, received = time.monotonic() + self.startup_timeout, bytearray()
             while b'\n' not in received:
@@ -235,9 +268,9 @@ class PreviewManager:
                         raise ProjectError('Student preview stopped unexpectedly. Its files are retained; inspect them before starting another preview.')
                     return
         except ProjectError as exc:
-            self._update(project, preview_id, status='failed', error=str(exc))
+            self._record_failure(project, preview_id, str(exc))
         except Exception:
-            self._update(project, preview_id, status='failed', error='Student preview could not start safely. Its test files are retained; inspect the release inputs and try a new preview.')
+            self._record_failure(project, preview_id, 'Student preview could not start safely. Its test files are retained; inspect the release inputs and try a new preview.')
         finally:
             environment.clear()
             if peer is not None:
@@ -246,13 +279,22 @@ class PreviewManager:
             with self.lock:
                 active.url = None
                 if stopped:
-                    record = self._read(project, preview_id)
-                    if record.status != 'failed':
-                        self._update(project, preview_id, status='stopped')
                     if self.active is active:
                         self.active = None
+                    try:
+                        record = self._read(project, preview_id)
+                        if record.status != 'failed':
+                            self._update(project, preview_id, status='stopped')
+                    except (ProjectError, OSError):
+                        pass  # Reopening reconciles the retained record; cleanup still releases this slot.
                 else:
-                    self._update(project, preview_id, status='failed', error='Preview cleanup is incomplete. Its owned process remains recorded; retry Stop before changing its files.')
+                    self._record_failure(project, preview_id, 'Preview cleanup is incomplete. Its owned process remains recorded; retry Stop before changing its files.')
+
+    def _record_failure(self, project, preview_id, message):
+        try:
+            self._update(project, preview_id, status='failed', error=message)
+        except (ProjectError, OSError):
+            pass  # A failed receipt write must not bypass owned process cleanup.
 
     def _terminate(self, active):
         if active.channel is not None:
@@ -267,8 +309,13 @@ class PreviewManager:
         try:
             process.wait(timeout=15)
         except subprocess.TimeoutExpired:
-            if process.poll() is None and os.getpgid(process.pid) == process.pid:
-                os.killpg(process.pid, signal.SIGKILL)
+            try:
+                if process.poll() is None and os.getpgid(process.pid) == process.pid:
+                    os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                return False
             try:
                 process.wait(timeout=3)
             except subprocess.TimeoutExpired:
@@ -287,10 +334,27 @@ class PreviewManager:
 
     def stop(self, project, preview_id):
         with self.lock:
-            self._read(project, preview_id)
+            record = self._read(project, preview_id)
             active = self.active
             if active is None or active.project.project_id != project.project_id or active.preview_id != preview_id:
-                return self.read(project, preview_id)
+                live = process_stamp(record.process_id, preview_id)
+                if live:
+                    if live != record.process_started:
+                        raise ProjectError('The recorded preview process identity changed. No process was stopped; inspect it before changing these files.')
+                    try:
+                        os.kill(record.process_id, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    deadline = time.monotonic() + 15
+                    while process_stamp(record.process_id, preview_id) == live and time.monotonic() < deadline:
+                        time.sleep(.1)
+                    if process_stamp(record.process_id, preview_id) == live:
+                        try:
+                            os.killpg(record.process_id, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        raise ProjectError('The interrupted preview needed forced cleanup. Retry Stop to confirm its process has ended.')
+                return self._update(project, preview_id, expected_revision=record.revision, status='stopped')
             active.cancel.set()
         active.thread.join(timeout=20)
         if active.thread.is_alive():
@@ -316,7 +380,7 @@ class PreviewManager:
     def keep(self, project, preview_id, revision):
         with self.lock:
             record = self._read(project, preview_id)
-            if record.revision != revision or record.files == 'discarded':
+            if record.revision != revision or record.files in {'discarding', 'discarded'}:
                 raise ProjectError('Preview record changed. Reload before keeping these files.')
             return self._update(project, preview_id, expected_revision=revision, files='kept')
 
@@ -328,12 +392,17 @@ class PreviewManager:
             directory = self._directory(preview_id)
             if record.files == 'discarded':
                 return record.model_dump(mode='json')
+            if process_stamp(record.process_id, preview_id):
+                raise ProjectError('Stop the recorded preview process before discarding its files.')
+            if record.files == 'discarding' and not directory.exists():
+                return self._update(project, preview_id, expected_revision=revision, files='discarded')
             expected = {'format': 1, 'preview_id': preview_id, 'project_id': project.project_id}
             if json.loads(read_private(directory, 'owner.json', max_bytes=1024)) != expected:
                 raise ProjectError('Preview ownership marker changed. No files were discarded.')
+            record = PreviewRecord.model_validate(self._update(project, preview_id, expected_revision=revision, files='discarding'))
             with local_directory(self.root) as fd:
                 shutil.rmtree(preview_id, dir_fd=fd)
-            return self._update(project, preview_id, expected_revision=revision, files='discarded')
+            return self._update(project, preview_id, expected_revision=record.revision, files='discarded')
 
     def close(self):
         active = self.active
