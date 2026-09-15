@@ -607,7 +607,7 @@ class ReaderWidget extends Widget {
     }
   }
 
-  navigate(source: string, localHtml: boolean): void {
+  navigate(source: string, localHtml: boolean, localVideo = false): void {
     // Jupyter rejects an opaque-origin or referrer-free navigation to its
     // authenticated /files handler. Local course HTML therefore keeps its
     // Jupyter origin and same-origin referrer while scripts/forms remain off;
@@ -621,6 +621,19 @@ class ReaderWidget extends Widget {
     iframe.referrerPolicy = localHtml ? "same-origin" : "no-referrer";
     this.pendingFragment = true;
     iframe.src = source;
+    if (localVideo) {
+      // Navigating directly to Jupyter /files makes its sandboxed media
+      // document lose the origin needed for authenticated range requests.
+      // Embed only a browser video element in our scripts-disabled frame;
+      // the media bytes never become executable document content.
+      const video = document.createElement("video");
+      video.src = source;
+      video.controls = true;
+      video.preload = "metadata";
+      video.style.cssText = "width:100%;height:100%;object-fit:contain";
+      video.textContent = "Your browser cannot play this video.";
+      iframe.srcdoc = '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; media-src \'self\'; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'"></head><body style="margin:0;height:100vh;background:#000">' + video.outerHTML + '</body></html>';
+    }
     this.iframe = iframe;
     previous.replaceWith(iframe);
   }
@@ -877,6 +890,7 @@ export class CourseSurfaceFactory {
       this.reader.navigate(
         source,
         surface.type === "html" || !surface.src?.startsWith("https://"),
+        surface.type === "video" && !surface.src?.startsWith("https://"),
       );
       this.metadata.set(this.reader, {
         activePath: surface.type === "html" ? (surface.path ?? null) : null,

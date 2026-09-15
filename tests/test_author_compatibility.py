@@ -98,6 +98,21 @@ def test_workspace_declarations_do_not_claim_assistant_write_support(course):
     assert issue.location == "/policies/allowed_proposal_types"
 
 
+def test_released_student_reports_observed_local_video_authentication_limit(course):
+    from courseweave.author.quality import check_manifest, student_profile
+    data, root = course
+    (root / 'clip.mp4').write_bytes(b'fixture video bytes')
+    data['modules'][0]['phases'][0]['surfaces'].append({'id': 'clip', 'type': 'video',
+        'purpose': 'reference', 'label': 'Clip', 'src': 'clip.mp4'})
+    released = check_manifest(data, root, student_profile('0.2.0'))
+    assert not released.passed
+    issue = next(i for i in released.profile_issues if i.code == 'released_local_video_unavailable')
+    assert issue.severity == 'error' and issue.location.endswith('/surfaces/1/src')
+    assert check_manifest(data, root, student_profile('0.3.0')).passed
+    data['modules'][0]['phases'][0]['surfaces'][-1]['src'] = 'https://video.example.test/clip.mp4'
+    assert check_manifest(data, root, student_profile('0.2.0')).passed
+
+
 def test_candidate_profile_is_bound_to_the_released_schema():
     from courseweave.author.quality import student_profile
     profile = student_profile()

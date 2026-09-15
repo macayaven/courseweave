@@ -160,3 +160,23 @@ unchanged. Task 4's output-clearing and missing-asset export assertions are now
 implemented. Actual preview, backup/restore, live Brave discovery, full exact
 acceptance and independent review remain required. This is implementation
 self-review, not final release acceptance.
+
+## Student preview implementation update, 2026-09-15
+
+Task9 now opens a saved export in the selected installed Student supervisor,
+with separate notebooks/state, explicit model opt-in, owned shutdown, and
+revision-checked author observations. Both Student versions have installed
+seven-surface/native-check/notebook/unaided development evidence. Provider-off,
+normal Author restart and child credential isolation are separately recorded.
+
+The candidate fixes a verified local-video reader defect; released0.2.0 remains
+unchanged and its Author profile now reports that rendering limitation. A paired
+standard handoff cannot bypass this error through candidate diagnostics. This
+implements SE-003's requirement to report unsupported rendering without changing
+surface/schema facts or weakening the unchanged-course preservation gate. The
+HTTPS media fixture and real installed local playback are distinct evidence.
+
+Normative rows, shared facts and traceability remain unchanged. Preview
+observations do not become Student completion or deterministic compatibility.
+Tasks10–11 and real Brave discovery remain required. This is implementation
+self-review; final independent acceptance is still open.

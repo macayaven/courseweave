@@ -23,7 +23,7 @@ import {
 import { ImportExport } from "./import-export";
 import { Inspector } from "./inspector";
 import { Outline } from "./outline";
-import { AuthorPreview } from "./preview";
+import { AuthorPreview, StudentPreview } from "./preview";
 import { useBeforeUnload } from "./reconnect";
 import { SaveConflict, type SavedCourse } from "./save-conflict";
 import {
@@ -788,6 +788,7 @@ export function AuthorApp() {
   const [contentDirty, setContentDirty] = useState(false);
   const [researchBusy, setResearchBusy] = useState(false);
   const [reviewDirty, setReviewDirty] = useState(false);
+  const [previewDirty, setPreviewDirty] = useState(false);
   const [reviewEpoch, setReviewEpoch] = useState(0);
   const [coverageEpoch, setCoverageEpoch] = useState(0);
   const [openReportId, setOpenReportId] = useState<string | null>(null);
@@ -841,14 +842,14 @@ export function AuthorApp() {
     return () => controller.abort();
   }, [runtime.status, runtime.runtime, projectId]);
   const selectProject = (id: string) => {
-    if (dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || id === projectId) return;
+    if (dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || previewDirty || id === projectId) return;
     setCourse(null); setLoad("loading"); setProjectId(id);
     setOpenChangeId(null);
     setOpenReportId(null);
   };
   const projectPanel = projects?.enabled && client.current ? <ProjectPanel client={client.current}
     projects={projects.projects ?? []} unavailable={projects.unavailable ?? []} selected={projectId}
-    disabled={dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || runtime.status !== "ready" || load !== "ready"} onSelect={selectProject} /> : null;
+    disabled={dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || previewDirty || runtime.status !== "ready" || load !== "ready"} onSelect={selectProject} /> : null;
   if (projects?.enabled && !projectId && load === "ready")
     return <AuthorShell state="Choose or create a private author project.">{projectPanel}</AuthorShell>;
   if (runtime.status === "connecting" && !course)
@@ -938,6 +939,8 @@ export function AuthorApp() {
       {projectId && <DeliveryPanel key={"delivery-" + projectId} client={client.current}
         disabled={!connected || dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty}
         epoch={sourcesEpoch + connectionEpoch.current} />}
+      {projectId && <StudentPreview key={"student-preview-" + projectId} client={client.current}
+        disabled={!connected} onDirtyChange={setPreviewDirty} />}
       {!connected ? (
         <button type="button" onClick={runtime.retry}>
           Reconnect

@@ -8,6 +8,12 @@ releases.
 
 ### Author Edition v0.3.0 work in progress
 
+- Added actual installed Student practice from saved exports, with separate
+  notebooks/state, explicit provider opt-in, owned start/open/stop controls and
+  revision-checked observations and keep/discard decisions.
+- Fixed local video playback in candidate Student's scripts-disabled reader.
+  Author now reports the observed released v0.2.0 local-video limitation and
+  prevents a candidate profile from bypassing paired-handoff requirements.
 - Added reviewed course archives with linked-asset/fragment validation, explicit
   source redistribution, reproducible file inventories and notebook output
   clearing confined to the exported copy. Existing destinations and stale export

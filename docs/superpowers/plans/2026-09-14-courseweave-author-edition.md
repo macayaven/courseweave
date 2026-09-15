@@ -307,9 +307,9 @@ Task 8 evidence note: the faithful selected Agent Harness Path export is a label
 
 **Consumes:** ExportReceipt/StudentRuntime. **Produces:** V08 and preview receipts.
 
-- [ ] Preserve the current inert card preview and its label. Add an explicit actual Student preview action that uses a stable exported snapshot, unique home, port, process ownership record, and capability token.
-- [ ] Use the existing student launch path and LaunchSupervisor. Do not embed a second renderer or recreate student policy in Author JavaScript. Preview shares no author token, private source catalogue, student state directory, or parent provider environment by default. Preserve the existing child environment allowlist so neither model keys nor the new search key enters the notebook kernel.
-- [ ] Extend existing learner E2E helpers with the fresh authored course: navigate every surface, use keyboard controls, run the notebook manually through the supported UI, submit a prediction, reveal a hint, answer every native check, and enter/exit the optional unaided activity.
+- [x] Preserve the current inert card preview and its label. Add an explicit actual Student preview action that uses a stable exported snapshot, unique home, port, process ownership record, and capability token.
+- [x] Use the existing student launch path and LaunchSupervisor. Do not embed a second renderer or recreate student policy in Author JavaScript. Preview shares no author token, private source catalogue, student state directory, or parent provider environment by default. Preserve the existing child environment allowlist so neither model keys nor the new search key enters the notebook kernel.
+- [x] Extend existing learner E2E helpers with the fresh authored course: navigate every surface, use keyboard controls, run the notebook manually through the supported UI, submit a prediction, reveal a hint, answer every native check, and enter/exit the optional unaided activity.
 
 ```ts
 // Add to the real-backend round-trip journey, after entering its unaided phase.
@@ -318,8 +318,10 @@ await expect(page.getByRole("button", { name: /send/i })).toBeDisabled();
 // The server receipt must independently show zero provider calls for that phase.
 ```
 
-- [ ] Record package hash, student runtime version, exercised surfaces, manual notebook/check actions, synthetic versus real-provider usage, and unperformed work. Stopping preview cleans only the owned process; save or discard its test home explicitly. Keep real study homes untouched.
-- [ ] Run the new preview tests and existing learner/native reader/Author keyboard tests affected by integration. Inspect actual rendered UI, narrow layout, citations/diffs, focus, errors, and return-to-author workflow. Commit the slice.
+- [x] Record package hash, student runtime version, exercised surfaces, manual notebook/check actions, synthetic versus real-provider usage, and unperformed work. Stopping preview cleans only the owned process; save or discard its test home explicitly. Keep real study homes untouched.
+- [x] Run the new preview tests and existing learner/native reader/Author keyboard tests affected by integration. Inspect actual rendered UI, narrow layout, citations/diffs, focus, errors, and return-to-author workflow. Commit the slice.
+
+Task 9 evidence note: installed preview checks cover both Student versions, all seven surfaces, manual notebook Run All/Save after the native kernel reaches Idle, native checks, unaided Send restrictions, provider opt-in/default-off, Author restart and explicit Keep. At 390 pixels, the native Jupyter sidebar toggles alternate the guide and notebook. Local video exposed a released v0.2.0 authentication defect: candidate playback is fixed and Author blocks local-video surfaces in paired standard handoffs. The paired journey uses a controlled HTTPS video response; this is synthetic media evidence. Crash reconciliation and restore remain Task 10.
 
 ## Task 10: Complete restart, restore, conflict, and cleanup behavior
 

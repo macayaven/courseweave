@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from fastapi import Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, StrictBool
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
 from starlette.requests import ClientDisconnect
@@ -36,6 +36,7 @@ from .sources import ResearchControl, import_reference, source_excerpt, run_rese
 from .quality import FindingDecision, course_coverage, delete_review, export_review, list_reviews, read_review, save_review, update_review
 from .delivery import ExportRequest, export_course, export_payload, inspect_delivery, list_exports, student_inputs, build_student_handoff
 from .quality import student_profile
+from .preview import PreviewManager, PreviewObservations
 
 
 class CreateProject(ClosedModel):
@@ -57,6 +58,21 @@ class StudentBundle(ClosedModel):
     export_id: Slug
     destination: Path
     student_version: Literal['0.2.0', '0.3.0']
+
+
+class PreviewStart(ClosedModel):
+    export_id: Slug
+    student_version: Literal['0.2.0', '0.3.0']
+    share_provider: StrictBool = False
+
+
+class PreviewNotes(PreviewObservations):
+    revision: Revision
+
+
+class PreviewFileDecision(ClosedModel):
+    revision: Revision
+    confirm: StrictBool
 
 
 class ImportReference(ClosedModel):
@@ -242,6 +258,7 @@ class ProjectDispatcher:
             # Histories, previews and candidates remain separate in each child.
             child.state.guide_sessions = self.owner.state.guide_sessions
             child.state.author_research = self.owner.state.author_research
+            child.state.author_previews = self.owner.state.author_previews
             self.children[project.project_id] = child
         return await child(scope, receive, send)
 
@@ -253,6 +270,15 @@ def install_routes(app, *, author_home: Path | None, author_project=None, studen
     app.state.author_contexts = {}
     app.state.author_drafts = {}
     app.state.author_research = {"slot": threading.Lock(), "active": None}
+    preview_root = app.state.author_home / 'previews' if app.state.author_home is not None else (
+        author_project.course_root.parent.parent / '.courseweave-previews' if author_project is not None else None)
+    app.state.author_previews = PreviewManager(preview_root) if preview_root else None
+
+    async def close_previews():
+        if app.state.author_previews is not None:
+            await run_in_threadpool(app.state.author_previews.close)
+
+    app.router.add_event_handler('shutdown', close_previews)
     app.state.author_projects_root = app.state.author_home / "projects" if app.state.author_home is not None else None
     if app.state.author_home is not None:
         with local_directory(app.state.author_projects_root, create=True):
@@ -336,6 +362,60 @@ def install_routes(app, *, author_home: Path | None, author_project=None, studen
         selection = ExportRequest.model_validate(body.model_dump(exclude={"destination"}))
         result = await run_in_threadpool(export_course, app.state.author_project, body.destination, student_profile(), selection)
         return export_payload(result)
+
+    @app.get('/api/author/previews')
+    def previews(offset: int = Query(default=0, ge=0)):
+        if app.state.author_project is None:
+            return failure(403, 'Student preview requires a private author project.')
+        return app.state.author_previews.list(app.state.author_project, offset=offset)
+
+    @app.post('/api/author/previews', status_code=202)
+    async def start_preview(request: Request):
+        if app.state.author_project is None:
+            return failure(403, 'Student preview requires a private author project.')
+        try:
+            body = await read_body(request, PreviewStart)
+            provider = app.state.provider_config_factory() if body.share_provider else None
+        except (ValidationError, ValueError):
+            return failure(422, 'Choose a saved export, Student version and explicit provider-sharing decision.')
+        return await run_in_threadpool(app.state.author_previews.start, app.state.author_project,
+            body.export_id, app.state.author_student_inputs, body.student_version, provider=provider)
+
+    @app.post('/api/author/previews/{preview_id}/open')
+    def open_preview(preview_id: str):
+        if app.state.author_project is None:
+            return failure(403, 'Student preview requires a private author project.')
+        return app.state.author_previews.open(app.state.author_project, preview_id)
+
+    @app.post('/api/author/previews/{preview_id}/stop')
+    def stop_preview(preview_id: str):
+        if app.state.author_project is None:
+            return failure(403, 'Student preview requires a private author project.')
+        return app.state.author_previews.stop(app.state.author_project, preview_id)
+
+    @app.post('/api/author/previews/{preview_id}/observations')
+    async def preview_observations(preview_id: str, request: Request):
+        if app.state.author_project is None:
+            return failure(403, 'Student preview requires a private author project.')
+        try:
+            body = await read_body(request, PreviewNotes)
+        except ValidationError:
+            return failure(422, 'Choose observed surfaces/actions and bounded notes for the reviewed preview revision.')
+        return await run_in_threadpool(app.state.author_previews.observe, app.state.author_project,
+            preview_id, body.revision, body.model_dump(exclude={'revision'}))
+
+    @app.post('/api/author/previews/{preview_id}/{action}')
+    async def preview_files(preview_id: str, action: Literal['keep', 'discard'], request: Request):
+        if app.state.author_project is None:
+            return failure(403, 'Student preview requires a private author project.')
+        try:
+            body = await read_body(request, PreviewFileDecision)
+            if not body.confirm:
+                raise ValueError()
+        except (ValidationError, ValueError):
+            return failure(422, 'Confirm the file decision for this preview revision.')
+        operation = app.state.author_previews.keep if action == 'keep' else app.state.author_previews.discard
+        return await run_in_threadpool(operation, app.state.author_project, preview_id, body.revision)
 
     @app.post("/api/author/assistant/context")
     async def author_context(request: Request):

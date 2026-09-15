@@ -8,6 +8,7 @@ import type { ResearchClient, ResearchRequest, ResearchReport, ResearchStatus, S
 import type { ReviewClient, ReviewDecision, ReviewReport } from "./review-panel";
 import type { CoverageReport } from "./coverage-panel";
 import type { DeliveryClient, DeliveryInventory, CourseExportRequest, CourseExportReceipt, StudentBundleReceipt } from "./delivery-panel";
+import type { StudentPreviewClient, StudentPreviewRecord } from './preview';
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -138,6 +139,18 @@ export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | 
       signal,
     );
   return {
+    getPreviews: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<StudentPreviewClient['getPreviews']>>>('/api/author/previews?offset='+offset,{},signal),
+    startPreview: (body: Parameters<StudentPreviewClient['startPreview']>[0],signal?: AbortSignal) => json<StudentPreviewRecord>('/api/author/previews',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),
+    },signal),
+    openPreview: (id: string,signal?: AbortSignal) => json<{opened:boolean}>(`/api/author/previews/${encodeURIComponent(id)}/open`,{method:'POST'},signal),
+    stopPreview: (id: string,signal?: AbortSignal) => json<StudentPreviewRecord>(`/api/author/previews/${encodeURIComponent(id)}/stop`,{method:'POST'},signal),
+    savePreviewObservations: (id: string,body: Parameters<StudentPreviewClient['savePreviewObservations']>[1],signal?: AbortSignal) => json<StudentPreviewRecord>(`/api/author/previews/${encodeURIComponent(id)}/observations`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),
+    },signal),
+    previewFiles: (id: string,action:'keep'|'discard',revision:number,signal?:AbortSignal) => json<StudentPreviewRecord>(`/api/author/previews/${encodeURIComponent(id)}/${action}`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision,confirm:true}),
+    },signal),
     inspectDelivery: (signal?: AbortSignal) => json<DeliveryInventory>("/api/author/delivery", {}, signal),
     buildStudentBundle: (body: Parameters<DeliveryClient["buildStudentBundle"]>[0], signal?: AbortSignal) => json<StudentBundleReceipt>("/api/author/student-bundles", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),

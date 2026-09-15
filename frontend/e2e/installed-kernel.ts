@@ -24,7 +24,7 @@ export async function inspectInstalledNotebookKernel(page: Page, notebookPath: s
       'import json, os, sys',
       'from ipykernel.kernelapp import IPKernelApp',
       'cw_app = IPKernelApp.instance()',
-      'print(json.dumps({"executable":sys.executable,"prefix":sys.prefix,"base_prefix":sys.base_prefix,"secret_presence":{name:name in os.environ for name in ["OPENAI_API_KEY","ANTHROPIC_API_KEY","AGENT_KB_LITELLM_KEY","COURSEWEAVE_CAPABILITY_TOKEN","JUPYTER_TOKEN"]},"transport":cw_app.transport,"bind_ip":cw_app.ip,"message_authentication":cw_app.session.signature_scheme,"message_key_present":bool(cw_app.session.key)}))',
+      'print(json.dumps({"executable":sys.executable,"prefix":sys.prefix,"base_prefix":sys.base_prefix,"secret_presence":{name:name in os.environ for name in ["OPENAI_API_KEY","ANTHROPIC_API_KEY","AGENT_KB_LITELLM_KEY","BRAVE_SEARCH_API_KEY","COURSEWEAVE_CAPABILITY_TOKEN","JUPYTER_TOKEN"]},"transport":cw_app.transport,"bind_ip":cw_app.ip,"message_authentication":cw_app.session.signature_scheme,"message_key_present":bool(cw_app.session.key)}))',
     ].join('\n');
     const execution=await new Promise<Record<string,unknown>>((resolve,reject)=>{
       const socket=new WebSocket(url);

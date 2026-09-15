@@ -298,6 +298,26 @@ describe('CourseSurfaceFactory', () => {
     expect(shell.add).toHaveBeenCalledOnce();
   });
 
+  it('embeds a local video as media so its authenticated range requests retain the Jupyter origin', async () => {
+    const { factory, shell } = harness();
+    const local = structuredClone(course);
+    local.modules[0]!.phases[0]!.surfaces.find(s => s.id === 'video')!.src = 'media/clip.mp4';
+    factory.setCourse(local);
+    const result = await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'video' });
+    const reader = shell.add.mock.calls[0]![0];
+    const iframe = reader.node.querySelector('iframe') as HTMLIFrameElement;
+    expect(result.htmlSource).toBe('https://lab.test/base/files/media/clip.mp4');
+    expect(iframe.getAttribute('sandbox')).toBe('allow-same-origin');
+    const document = new DOMParser().parseFromString(iframe.srcdoc, 'text/html');
+    expect(document.querySelector('video')?.getAttribute('src')).toBe(result.htmlSource);
+    expect(document.querySelector('video')?.hasAttribute('controls')).toBe(true);
+    expect(document.querySelector('video')?.hasAttribute('autoplay')).toBe(false);
+    expect(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toContain("script-src 'none'");
+    expect(document.querySelector('script')).toBeNull();
+    await factory.open({ moduleId: 'm01', phaseId: 'p01', surfaceId: 'html' });
+    expect(reader.node.querySelector('iframe')?.srcdoc).toBe('');
+  });
+
   it.each([
     '../secret.html',
     '/absolute.html',

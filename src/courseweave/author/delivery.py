@@ -36,7 +36,7 @@ from .project import (
     ProjectError, _copy_selected, atomic_bytes, checked_local_path, excluded_path,
     inspect_source, local_directory, open_project, read_private, read_sources, source_file,
 )
-from .quality import check_manifest
+from .quality import check_manifest, student_profile
 
 MAX_TEXT_BYTES = 2 * 1024 * 1024
 MAX_LINKS = 10_000
@@ -348,6 +348,13 @@ def _validate_snapshot(root: Path, profile: StudentProfile, paths: set[str]):
     data = json.loads(read_private(root, "courseweave.json", max_bytes=1024 * 1024))
     manifest = parse_manifest_data(data, root)
     report = check_manifest(data, root, profile)
+    # Every standard package promises the released Student target. Selecting
+    # candidate diagnostics cannot bypass an observed released-reader limit.
+    if profile.application_version != '0.2.0':
+        released = check_manifest(data, root, student_profile('0.2.0'))
+        report = report.model_copy(update={'profile_issues': report.profile_issues + tuple(
+            issue for issue in released.profile_issues
+            if issue.severity == 'error' and issue not in report.profile_issues)})
     issues, parsed, total_links = [], {}, 0
     for name in sorted(paths):
         with source_file(root, name) as fd:

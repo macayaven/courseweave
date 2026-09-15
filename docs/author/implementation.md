@@ -42,7 +42,7 @@ self-review; the bounded independent review remains required in Task 11.
 
 ## Remaining work
 
-Task 6 live discovery and Tasks 7–11, installed Author/Student journeys, all six
+Task 6 live discovery and Tasks 10–11, exact-archive Author/Student journeys, all six
 real-provider roles, failure/recovery, rendered UI and independent final review
 remain required. Source declarations and fixtures do not satisfy those gates.
 
@@ -422,3 +422,57 @@ now names the 0.3.0 candidate. Task 4's two export assertions are covered here.
 Task 10 still owns interrupted export/bundle reconciliation and backup/restore;
 Task 11 owns the exact archive and bounded independent review. No publication or
 production-readiness claim is made.
+
+## Task 9: actual installed Student practice
+
+A private preview manager consumes a saved standard export and the configured
+Student input descriptor. It builds a new bundle and study home outside the
+Author project, then starts the selected installed Student LaunchSupervisor.
+The existing schema, course engine, consent and native notebook path stay
+responsible for learner behavior. One preview may run per Author home.
+
+Start/Open/Stop and explicit observation/Keep/Discard controls distinguish
+process readiness from what an author reports checking. A private inherited
+socket carries readiness and controls child lifetime. Tokens are never written
+to preview receipts or returned by the preview API. Provider use is unchecked
+by default; explicit opt-in transfers only the configured model fields to the
+Student supervisor. Search and application credentials stay out of its kernel.
+A valid 8,000-character Unicode note can be saved and reopened.
+
+Installed development evidence covers both released Student0.2.0 and candidate
+Student0.3.0: seven surface types, a prediction, an authored hint, a native check,
+manual notebook Run All and Save, a permitted synthetic response, unaided Send
+restrictions with unchanged provider counters, explicit Keep, and reopening the
+saved observations/notebook after Author restart. A separate default-off run
+made zero model requests despite planted parent credentials. The real notebook
+kernel reported none of the tested model/search/application credentials.
+
+Rendered desktop/390-pixel inspection found that the native Jupyter panes need
+its existing sidebar toggles at narrow widths. With the file browser closed,
+the guide fits; hide the guide to read/edit the notebook. Jupyter's own news
+notification can overlap lower controls until dismissed. Author controls, long
+receipt paths and notes wrap without horizontal overflow. This is automated UI
+and assistant visual evidence, not human learning or final archive acceptance.
+
+The installed local-video check exposed an old reader defect: Jupyter's /files
+media document loses authentication under its opaque sandbox. Candidate0.3.0
+now embeds a browser video element in the same scripts-disabled reader, allowing
+authenticated media/range requests without treating course bytes as a document.
+Actual metadata and playback pass. Released0.2.0 remains unchanged; Author
+reports its observed limitation and blocks local-video surfaces in a paired
+standard handoff even with candidate diagnostics selected. The paired fixture's
+HTTPS video response is explicitly synthetic and establishes no public-media
+availability. Failed attempts and their causes remain in the private evidence.
+
+Validation: 169 Author cases, 80 Lab cases and frontend typechecks pass. The
+Python3.12 affected preview/compatibility/export/kernel/Jupyter group passed86
+cases and18 subtests with one explicit full-course integration skip; focused
+Python3.11 checks passed46 with two explicit external-fixture skips. The current
+installed wheel is bound to its source/assets in the private Task9 receipt.
+
+Three-spec impact: V08 gains installed development evidence. Normative rows,
+shared facts, traceability and frozen schema-v2 bytes are unchanged. SE-003's
+unsupported-rendering reporting is strengthened by the observed released-video
+limit. Preview observations acquire no progress or compatibility authority.
+Task10 recovery, Task6 actual Brave discovery, exact final candidate acceptance
+and the bounded independent review remain open.

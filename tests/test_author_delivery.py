@@ -81,6 +81,20 @@ def test_same_selected_bytes_produce_reproducible_packages(delivery_project, tmp
     assert first.export_id != second.export_id
 
 
+def test_candidate_profile_cannot_bypass_paired_released_video_limit(delivery_project, tmp_path):
+    from courseweave.author.delivery import export_course
+    p = delivery_project
+    path = p.course_root / 'courseweave.json'
+    data = json.loads(path.read_text())
+    # Existing approved bytes are enough for the static check; nothing executes.
+    data['modules'][0]['phases'][0]['surfaces'].append({'id': 'clip', 'type': 'video',
+        'purpose': 'reference', 'label': 'Clip', 'src': 'images/flow.svg'})
+    path.write_text(json.dumps(data))
+    with pytest.raises(ProjectError, match='released_local_video_unavailable'):
+        export_course(p, tmp_path / 'paired.tar', student_profile('0.3.0'), export_request(p))
+    assert not (tmp_path / 'paired.tar').exists()
+
+
 @pytest.mark.parametrize('change', ['missing', 'fragment', 'escape', 'private-link', 'lfs', 'case-collision'])
 def test_standard_handoff_rejects_broken_or_unsafe_assets(delivery_project, tmp_path, change):
     from courseweave.author.delivery import export_course

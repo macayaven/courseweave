@@ -27,6 +27,12 @@ runtime-input errors. A **DRAFT** retains reported incompleteness and cannot bec
 a Student bundle. Neither kind grants an editorial, installed-environment or
 learning pass. External URLs are not fetched during packaging.
 
+Released Student v0.2.0 has an observed local-video playback limitation with the
+pinned Jupyter runtime. A paired standard handoff therefore requires an explicitly
+selected HTTPS video or removal of the local-video surface. Candidate v0.3.0 fixes
+local playback, but selecting candidate diagnostics does not waive the released
+target. See [Student practice preview](preview.md).
+
 `COURSEWEAVE-PACKAGE.json` contains the course identity, selected course-file
 inventory, required directories and compatibility report. Its inventory covers
 course inputs after output clearing; generated setup/metadata are additionally

@@ -441,6 +441,30 @@ Student rules. Source-file associations survive source-title edits, refresh and
 rejected replacement imports; only an actually applied replacement changes the
 file's import association.
 
+## Private installed Student previews (v0.3.0 candidate)
+
+These routes use the same capability and `X-CourseWeave-Project` guard. One
+preview may prepare or run per Author home; its files are outside every project.
+
+- `GET /api/author/previews?offset=0`: twenty private saved records per page.
+- `POST /api/author/previews`: closed `export_id`, configured `student_version`
+  and optional strict boolean `share_provider` (default false). Response202
+  records preparation; it does not certify successful learner actions.
+- `POST /api/author/previews/{id}/open`: explicitly opens the ready Student
+  browser through the supervisor's opener. Bootstrap credentials stay in memory.
+- `POST /api/author/previews/{id}/stop`: stops that owned process and retains files.
+- `POST /api/author/previews/{id}/observations`: exact record `revision`, supported
+  `surfaces`, declared `actions` and notes up to 8,000 characters. Saves the
+  `author_reported` category; it grants no deterministic compatibility authority.
+- `POST /api/author/previews/{id}/keep` or `/discard`: exact record `revision`
+  and strict `confirm: true`. Discard requires a stopped preview and matching
+  ownership marker, deletes only that preview folder, and retains its record.
+
+Records contain package identity, installed Student version, process status,
+owned folder and author observations. They contain no provider or browser token.
+See [Student practice preview](../author/preview.md) for the user workflow and
+the separately observed v0.2.0 local-video rendering limitation.
+
 ## Private Author sources and research (v0.3.0 candidate)
 
 All routes below require an authenticated private project. Ordinary Student

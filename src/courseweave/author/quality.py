@@ -90,6 +90,14 @@ inventory/link checks; installed execution and editorial review remain separate.
                 "/policies/allowed_proposal_types", "warning"))
         for mi, module in enumerate(manifest.modules):
             for pi, phase in enumerate(module.phases):
+                for si, surface in enumerate(phase.surfaces):
+                    if (profile.application_version == '0.2.0' and surface.type == 'video'
+                            and not surface.src.startswith('https://')):
+                        profile_issues.append(_issue('released_local_video_unavailable',
+                            'Released Student v0.2.0 cannot authenticate local video playback in its reader. '
+                            'For a paired handoff, use an explicitly selected HTTPS video or remove this surface. '
+                            'Candidate v0.3.0 fixes local playback; no video was fetched by this check.',
+                            f'/modules/{mi}/phases/{pi}/surfaces/{si}/src', 'error'))
                 if "workspace" in phase.teacher.proposals.allow:
                     profile_issues.append(_issue("workspace_proposals_inactive",
                         "This declaration grants no Student assistant file writes or code execution.",
