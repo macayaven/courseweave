@@ -18,8 +18,8 @@
     "docs/specs/COURSEWEAVE-TEACHER-EDITION.md": "d25e40a5c5a59ad354b5b71ec40ce0cccce450ee7236f14670d0b53f3c35d092",
     "docs/specs/COURSEWEAVE-STUDENT-EDITION.md": "efe352d579b1844fad3ee2a1b9a8cb2787374f76fa020e85b40cadfb083d2592",
     "docs/specs/README.md": "1923f65756ff62fa0c469205e97cbda749a6f45198d9c3a29ad9c15d5e686f8b",
-    "docs/specs/CONSISTENCY-REVIEW.md": "6ccaf64be001f21990d25c88dbc72d3f819193ce942d10653dabe4d62a89c207",
-    "docs/superpowers/plans/2026-09-14-courseweave-author-edition.md": "fdba7d85e2240fe314ab2bcedd826c185a53e938efa7cb910517fa104714afaf",
+    "docs/specs/CONSISTENCY-REVIEW.md": "0802279917ac0ca46f2e465f2e00e3b1f3cceddba6d33b852a9ee823af26889f",
+    "docs/superpowers/plans/2026-09-14-courseweave-author-edition.md": "a2164bf6907ab49582681b0e5a855e956f6ba6aa934a9ed8785e17ada3d431a6",
     "docs/superpowers/specs/2026-09-14-chatgpt-courseweave-feasibility.md": "7f9b4810b9ec1b28714c5fb512e54788fa82052695ffafcae6467b9eecf361ed",
     "src/courseweave/author/contracts.py": "6c092e107914bccd1cb4f59006a68b303c92b9c782d66c0d2e20c5d949342b79",
     "src/courseweave/author/content.py": "f5f170c3d261087c4f0f0e11201414e00fe3ad3f3e447c1ff9fda1c1f31db76d",
@@ -31,7 +31,7 @@
     "docs/specs/traceability.csv": "bdc794d4ccd90310bc9d0e2c3617bba882466a34077792935415a50a936c9b7f"
   },
   "checked_date": "2026-09-15",
-  "source_revision_at_check": "b51c9ff3640ce780c4527073b6d72cb992da4b94",
+  "source_revision_at_check": "ac4162bf9628890eaeea51bf15468c39ad09145d",
   "working_tree_changed": true,
   "review_kind": "mechanical audit and implementation self-review; independent release review pending"
 }

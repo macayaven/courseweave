@@ -75,7 +75,7 @@ permission authority. Source/student originals remain preserved, and notebook
 execution is reserved for later isolated preview.
 
 The Task 4 content and recovery checks have development UI/API evidence. Two
-export-specific assertions in its checklist depend on the Task 7 generic
+export-specific assertions in its checklist depend on the Task 8 generic
 packager and remain explicitly unchecked. Session role/context revocation is
 Task 5 work. Exact installed gates, live six-role/research observations, human
 visual review and the bounded independent review remain open. This update is a

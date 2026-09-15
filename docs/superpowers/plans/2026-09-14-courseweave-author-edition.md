@@ -173,7 +173,7 @@ def test_project_creation_never_replaces_source(tmp_path):
 
 **Consumes:** AuthorProject, AuthorContext, ChangeDraft. **Produces:** `stage_change`/`apply_change`, V03.
 
-**Development status:** Content service/UI and crash recovery are implemented and verified. The two unchecked items below include export assertions: output-free source copies are verified through reviewed file apply, while actual export output clearing and missing-asset export rejection remain open for Task 7's generic packager. This records the dependency without weakening either assertion.
+**Development status:** Content service/UI and crash recovery are implemented and verified. The two unchecked items below include export assertions: output-free source copies are verified through reviewed file apply, while actual export output clearing and missing-asset export rejection remain open for Task 8's generic packager. This records the dependency without weakening either assertion.
 
 - [x] Add regression tests for reject/no-write, stale target, same request replay, two tabs, interrupted acceptance, and changed notebook cells. Notebook fixtures must contain untouched cell IDs, metadata, code outputs, and a selector referring to a named cell.
 - [x] Implement validated assembly. Manifest fragment edits target the server-selected course/module/phase/learning node and compose into a full manifest candidate using current bytes. Reuse existing manifest replacement review/save. Markdown writes and notebook-cell changes may target only selected author files; arbitrary paths/scripts are denied.
