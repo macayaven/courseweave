@@ -92,6 +92,7 @@ export async function verifyAuthorStudentPreviews({ session, report, evidence, p
       .fill('Automated UI protocol check only. No human independent practice or mastery is claimed.');
     await guide.getByRole('button', { name: 'Save response', exact: true }).click();
     await expect(guide.getByText('Saved response', { exact: true })).toBeVisible();
+    await student.locator('.jp-toastContainer').getByRole('button', { name: 'No', exact: true }).click({ timeout: 1000 }).catch(() => {});
     await student.screenshot({ path: join(evidence, `student-${version}-unaided.png`) });
     await navigation.getByRole('button', { name: 'Open Validation notebook', exact: true }).click();
     await expect(guide.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();

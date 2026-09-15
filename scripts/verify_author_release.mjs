@@ -86,6 +86,7 @@ async function launch() {
   await page.getByTitle('Hide notification', { exact: true }).click({ timeout: 1000 }).catch(() => {});
   const author = page.frameLocator('iframe[title="CourseWeave author"]');
   await expect(author.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible({ timeout: 30_000 });
+  await page.locator('.jp-toastContainer').getByRole('button', { name: 'No', exact: true }).click({ timeout: 2500 }).catch(() => {});
   tracker.refresh(); report.owned_processes = trackers.flatMap(t => t.snapshot()); await saveReceipt();
   async function nextOpenedPage() {
     await expect.poll(() => openings.length, { timeout: 30_000 }).toBeGreaterThan(0);
