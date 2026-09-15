@@ -901,8 +901,7 @@ export function AuthorApp() {
       provider="not_configured"
     >
       {projectPanel}
-      <fieldset disabled={recoveryBusy} inert={recoveryBusy} aria-busy={recoveryBusy}
-        style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+      <fieldset className="author-recovery-lock" disabled={recoveryBusy} inert={recoveryBusy} aria-busy={recoveryBusy}>
       <AuthorEditor
         key={`editor-${projectId ?? "single-course"}`}
         course={course}

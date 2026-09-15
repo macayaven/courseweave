@@ -574,3 +574,9 @@ when the restored project opened. Recovery now disables and inerts the editor an
 related panels until completion. Focused failing-then-passing regressions cover
 revocation/reapproval and restore success/failure; all 176 Author tests, typecheck
 and build pass. Fresh installed verification of these fixes remains required.
+
+Installed verification passed both recovery interactions. Rendered inspection
+then exposed the new fieldset collapsing the desktop grid and removing panel
+styling. The recovery wrapper now participates without a layout box; its children
+retain the existing grid/card styles. The installed verifier checks column
+positions, full-width assistant content and card backgrounds before the journey.

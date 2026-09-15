@@ -150,6 +150,20 @@ try {
   await projects.getByRole('button', { name: 'Select all listed files', exact: true }).click();
   await projects.getByRole('button', { name: 'Create project', exact: true }).click();
   await expect(author.getByRole('combobox', { name: 'Open project', exact: true })).toHaveValue('validation-course');
+  const panelBox = name => author.getByRole('region', { name, exact: true }).evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, background: getComputedStyle(element).backgroundColor };
+  });
+  const outlineBox = await panelBox('Outline'), inspectorBox = await panelBox('Inspector'), previewBox = await panelBox('Preview');
+  const assistantBox = await panelBox('Author assistant');
+  expect(outlineBox.x).toBeLessThan(inspectorBox.x);
+  expect(inspectorBox.x).toBeLessThan(previewBox.x);
+  expect(Math.abs(outlineBox.y - inspectorBox.y)).toBeLessThan(1);
+  expect(assistantBox.width).toBeGreaterThan(outlineBox.width * 2);
+  for (const box of [outlineBox, inspectorBox, previewBox, assistantBox]) expect(box.background).toBe('rgb(255, 255, 255)');
+  report.desktop_layout = { outline: outlineBox, inspector: inspectorBox, preview: previewBox, assistant: assistantBox };
+  await author.getByRole('region', { name: 'Outline', exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(evidence, 'desktop-layout.png') });
   const project = join(home, 'workspace/projects/validation-course');
   const research = author.getByRole('region', { name: 'Research and references', exact: true });
   const library = author.getByRole('region', { name: 'Sources', exact: true });

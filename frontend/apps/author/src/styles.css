@@ -84,8 +84,12 @@ main[aria-label="CourseWeave Author"] > header > * {
   margin-block: 0.15rem;
 }
 
-main[aria-label="CourseWeave Author"] > section,
-main[aria-label="CourseWeave Author"] > p[role="status"] {
+.author-recovery-lock {
+  display: contents;
+}
+
+:is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > section,
+:is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > p[role="status"] {
   min-width: 0;
   padding: 1rem;
   overflow-wrap: anywhere;
@@ -95,21 +99,21 @@ main[aria-label="CourseWeave Author"] > p[role="status"] {
   box-shadow: 0 0.1rem 0.35rem rgb(23 59 102 / 8%);
 }
 
-main[aria-label="CourseWeave Author"] > section[aria-label="Outline"] {
+:is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > section[aria-label="Outline"] {
   grid-column: 1;
 }
 
-main[aria-label="CourseWeave Author"] > section[aria-label="Inspector"] {
+:is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > section[aria-label="Inspector"] {
   grid-column: 2;
 }
 
-main[aria-label="CourseWeave Author"] > section[aria-label="Preview"],
-main[aria-label="CourseWeave Author"] > section[aria-label="Curriculum teacher"] {
+:is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > section[aria-label="Preview"],
+:is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > section[aria-label="Curriculum teacher"] {
   grid-column: 3;
 }
 
-main[aria-label="CourseWeave Author"] > section:not([aria-label="Outline"]):not([aria-label="Inspector"]):not([aria-label="Preview"]):not([aria-label="Curriculum teacher"]),
-main[aria-label="CourseWeave Author"] > p[role="status"] {
+:is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > section:not([aria-label="Outline"]):not([aria-label="Inspector"]):not([aria-label="Preview"]):not([aria-label="Curriculum teacher"]),
+:is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > p[role="status"] {
   grid-column: 1 / -1;
 }
 
@@ -259,12 +263,13 @@ pre {
     padding: 0.5rem;
   }
 
-  main[aria-label="CourseWeave Author"] > * + * {
+  main[aria-label="CourseWeave Author"] > * + *,
+  .author-recovery-lock > * {
     margin-top: 0.75rem;
   }
 
-  main[aria-label="CourseWeave Author"] > section,
-  main[aria-label="CourseWeave Author"] > p[role="status"] {
+  :is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > section,
+  :is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > p[role="status"] {
     width: 100%;
     padding: 0.75rem;
   }
@@ -276,8 +281,8 @@ pre {
   }
 
   main[aria-label="CourseWeave Author"] > header,
-  main[aria-label="CourseWeave Author"] > section,
-  main[aria-label="CourseWeave Author"] > p[role="status"],
+  :is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > section,
+  :is(main[aria-label="CourseWeave Author"], .author-recovery-lock) > p[role="status"],
   pre {
     border: 1px solid CanvasText;
   }
