@@ -81,7 +81,8 @@ project ID, or inspect an explicit local directory and select files to copy.
 The existing `--course-root` single-course launch remains available. These
 options are mutually exclusive; an Author home owns its own state locations.
 
-Each project contains adjacent `course/` and `author-state/` directories. New
+Each project lives under `author-home/projects/<project-id>/` and contains
+adjacent `course/` and `author-state/` directories, matching the approved spec. New
 projects use the existing unsaved manifest draft; only a direct Save writes the
 manifest. Import inventories are limited to 10,000 files, 1 GiB, 40,000 traversal
 entries and 64 directory levels. The reviewed digest binds the source root,

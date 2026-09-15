@@ -29,7 +29,8 @@ def test_inventory_excludes_private_files_and_preserves_duplicate_identities(tmp
     source = tmp_path / "source"
     source.mkdir()
     for rel in ("lesson.md", "second.md", ".env", "state/records.json", ".git/config",
-                ".venv/bin/python", "author-state/report.json", "chat.json", "__pycache__/x.pyc"):
+                ".venv/bin/python", "author-state/report.json", "chat.json", "__pycache__/x.pyc",
+                "build/generated.js", "dist/wheel.whl", "cache/local.tmp", "courseweave.db"):
         p = source / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("private" if rel not in ("lesson.md", "second.md") else "Same lesson\n")
@@ -150,6 +151,7 @@ def test_project_requests_are_bound_to_the_selected_project_not_global_state(tmp
     first = client.post("/api/author/projects", headers=auth, json={"project_id": "first", "selected_paths": []})
     second = client.post("/api/author/projects", headers=auth, json={"project_id": "second", "selected_paths": []})
     assert first.status_code == second.status_code == 201
+    assert Path(first.json()["course_root"]) == home / "projects" / "first" / "course"
     a = {**auth, "X-CourseWeave-Project": "first"}
     b = {**auth, "X-CourseWeave-Project": "second"}
     for header, title in ((a, "First project"), (b, "Second project")):

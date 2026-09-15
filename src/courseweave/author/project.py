@@ -30,6 +30,7 @@ _EXCLUDED = {
     "node_modules", "__pycache__", "venv", "env", "runtimes", "runtime",
     "state", "user-state", "author-state", "personal-notebooks", "chats",
     "chat.json", "conversation.json", "credentials.json", "secrets.json",
+    "cache", "build", "dist", "courseweave.db", "courseweave.db-wal", "courseweave.db-shm",
 }
 _TEXT_EXTENSIONS = {".md", ".txt", ".rst", ".csv"}
 

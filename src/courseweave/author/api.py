@@ -63,7 +63,7 @@ class ProjectDispatcher:
             return await failure(409, "Select an author project first.")(scope, receive, send)
         try:
             request = CreateProject(project_id=selected)
-            project = await run_in_threadpool(open_project, self.owner.state.author_home / request.project_id)
+            project = await run_in_threadpool(open_project, self.owner.state.author_projects_root / request.project_id)
         except ValidationError:
             return await failure(422, "Invalid project ID.")(scope, receive, send)
         except ProjectError as exc:
@@ -83,8 +83,9 @@ class ProjectDispatcher:
 def install_routes(app, *, author_home: Path | None, author_project=None, factory):
     app.state.author_home = checked_local_path(author_home) if author_home is not None else None
     app.state.author_project = author_project
+    app.state.author_projects_root = app.state.author_home / "projects" if app.state.author_home is not None else None
     if app.state.author_home is not None:
-        with local_directory(app.state.author_home, create=True):
+        with local_directory(app.state.author_projects_root, create=True):
             pass
         app.add_middleware(ProjectDispatcher, owner=app, factory=factory)
 
@@ -94,7 +95,7 @@ def install_routes(app, *, author_home: Path | None, author_project=None, factor
 
     @app.get("/api/author/projects")
     def projects():
-        home = app.state.author_home
+        home = app.state.author_projects_root
         if home is None:
             return {"enabled": False}
         projects, unavailable = [], []
@@ -142,7 +143,7 @@ def install_routes(app, *, author_home: Path | None, author_project=None, factor
             return failure(422, "The project selection is invalid.")
         if body.source_root is not None and body.expected_inventory is None:
             return failure(422, "Inspect and review the source inventory before importing.")
-        project = await run_in_threadpool(create_project, body.source_root, app.state.author_home / body.project_id,
+        project = await run_in_threadpool(create_project, body.source_root, app.state.author_projects_root / body.project_id,
                                          body.selected_paths, expected_inventory=body.expected_inventory)
         return project.model_dump(mode="json")
 
