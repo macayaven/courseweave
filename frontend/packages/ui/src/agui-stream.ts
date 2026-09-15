@@ -1,5 +1,14 @@
 import type { EffectiveTeacherPolicy } from "./courseweave-types";
 
+export type AuthorRole = "curator" | "curriculum_designer" | "source_researcher" | "fact_checker" | "proofreader" | "compatibility_reviewer";
+export interface AuthorReplyMetadata {
+  draft_id: string; context_digest: string;
+  reply: { version: "author-reply-v1"; role: AuthorRole; message: string;
+    change: Record<string, unknown> | null;
+    findings: { claim_id: string; judgment: string; explanation: string;
+      evidence: { source_id: string; revision: number; quote: string; start: number; end: number }[] }[] };
+}
+
 export interface LessonScopeMetadata {
   id: string;
   module_id: string;
@@ -28,6 +37,7 @@ export interface TurnContextMetadata {
   run_id: string;
   evidence_dependency: string;
   evidence_references: string[];
+  author?: { context_id: string; digest: string; role: AuthorRole; selection: Record<string, unknown>; source_count: number; omissions: string[] };
   assistant_name: "Course assistant";
   lesson: LessonScopeMetadata | Record<string, never>;
   workspace_share: null | {
@@ -41,7 +51,7 @@ export interface ProviderOutcomeMetadata {
   status: "ok";
   profile: string;
   capability_version: "capabilities-v1";
-  prompt_version: "course-assistant-v1";
+  prompt_version: "course-assistant-v1" | "author-assistant-v1";
   config_fingerprint: string;
   duration_ms: number;
   input_tokens: number;
@@ -61,6 +71,7 @@ export const guideErrorMessages = {
     "This request and its required teaching context exceed the input limit.",
   course_identity_changed:
     "The draft identity changed; reopen the course to load its current state.",
+  author_reply_invalid: "The Author draft was rejected or its context changed. Preview current context, request a smaller draft, or edit the retained response manually. No repair request was made.",
 } as const;
 export type GuideErrorCode = keyof typeof guideErrorMessages;
 function safeErrorCode(value: unknown): GuideErrorCode | undefined {
@@ -158,7 +169,7 @@ export function isProviderOutcomeMetadata(
     value.status === "ok" &&
     typeof value.profile === "string" &&
     value.capability_version === "capabilities-v1" &&
-    value.prompt_version === "course-assistant-v1" &&
+    ["course-assistant-v1", "author-assistant-v1"].includes(String(value.prompt_version)) &&
     typeof value.config_fingerprint === "string" &&
     ["duration_ms", "input_tokens", "output_tokens", "requests"].every((key) =>
       nonnegative(value[key]),
@@ -191,6 +202,25 @@ export interface StreamOutcome {
   candidates: string[];
   message?: string;
   code?: GuideErrorCode;
+  authorReply?: AuthorReplyMetadata;
+}
+
+function isAuthorReply(value: unknown): value is AuthorReplyMetadata {
+  if (!record(value) || Object.keys(value).sort().join(",") !== "context_digest,draft_id,reply"
+      || typeof value.draft_id !== "string" || !/^draft-[a-f0-9]{32}$/.test(value.draft_id)
+      || typeof value.context_digest !== "string" || !/^[a-f0-9]{64}$/.test(value.context_digest)
+      || !record(value.reply)) return false;
+  const reply = value.reply;
+  return Object.keys(reply).sort().join(",") === "change,findings,message,role,version"
+    && reply.version === "author-reply-v1" && typeof reply.message === "string" && reply.message.length <= 64000
+    && typeof reply.role === "string" && ["curator", "curriculum_designer", "source_researcher", "fact_checker", "proofreader", "compatibility_reviewer"].includes(reply.role)
+    && (reply.change === null || (record(reply.change) && ["markdown_replace", "notebook_cells", "manifest_fragment_replace"].includes(String(reply.change.kind))))
+    && Array.isArray(reply.findings) && reply.findings.length <= 64 && reply.findings.every(finding =>
+      record(finding) && typeof finding.claim_id === "string" && typeof finding.explanation === "string"
+      && ["supported", "contradicted", "insufficient", "not_checked"].includes(String(finding.judgment))
+      && Array.isArray(finding.evidence) && finding.evidence.length <= 8 && finding.evidence.every(citation =>
+        record(citation) && typeof citation.source_id === "string" && typeof citation.quote === "string"
+        && nonnegative(citation.revision) && nonnegative(citation.start) && nonnegative(citation.end)));
 }
 
 function invalid(): never {
@@ -268,6 +298,7 @@ export async function consumeAguiStream(
     threadId: string;
     runId: string;
     candidateTypes?: readonly ("profile_patch" | "manifest_replace")[];
+    authorContext?: { context_id: string; digest: string; role: AuthorRole };
   },
   onEvent: (event: AguiEvent) => void,
   signal?: AbortSignal,
@@ -279,12 +310,13 @@ export async function consumeAguiStream(
   let messageId: string | null = null;
   let contextSeen = false;
   let providerSeen = false;
+  let authorReply: AuthorReplyMetadata | undefined;
   let text = "";
   const candidates: string[] = [];
   let outcome: StreamOutcome | null = null;
 
-  const consume = (record: string) => {
-    const data = recordData(record);
+  const consume = (sseRecord: string) => {
+    const data = recordData(sseRecord);
     if (data === null) return;
     let event: AguiEvent;
     try {
@@ -333,9 +365,13 @@ export async function consumeAguiStream(
         !contextSeen &&
         isTurnContextMetadata(event.value) &&
         event.value.run_id === expected.runId
-      )
+      ) {
+        if (expected.authorContext && (!record(event.value.author)
+            || event.value.author.context_id !== expected.authorContext.context_id
+            || event.value.author.digest !== expected.authorContext.digest
+            || event.value.author.role !== expected.authorContext.role)) return invalid();
         contextSeen = true;
-      else if (
+      } else if (
         event.type === "CUSTOM" &&
         event.name === "courseweave.provider_outcome" &&
         messageId !== null &&
@@ -367,6 +403,14 @@ export async function consumeAguiStream(
       else return invalid();
     } else if (stage === "ended") {
       if (event.type === "CUSTOM") {
+        if (event.name === "courseweave.author_reply" && expected.authorContext) {
+          if (authorReply || !contextSeen || !providerSeen || !isAuthorReply(event.value)
+              || event.value.context_digest !== expected.authorContext.digest
+              || event.value.reply.role !== expected.authorContext.role) return invalid();
+          authorReply = event.value;
+          onEvent(event);
+          return;
+        }
         const id = candidateId(
           event,
           expected.candidateTypes ?? ["manifest_replace"],
@@ -379,7 +423,8 @@ export async function consumeAguiStream(
         event.threadId === expected.threadId
       ) {
         stage = "terminal";
-        outcome = { status: "finished", text, candidates };
+        if (expected.authorContext && !contextSeen) return invalid();
+        outcome = { status: "finished", text, candidates, ...(authorReply ? { authorReply } : {}) };
       } else return invalid();
     } else return invalid();
     onEvent(event);

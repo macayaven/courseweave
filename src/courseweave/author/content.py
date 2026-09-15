@@ -382,7 +382,9 @@ def _compose_manifest(project: AuthorProject, selection: AuthorSelection, value:
     if selection.manifest_unit == "course":
         if value.get("id") != candidate["id"]:
             raise ContentError("The saved course ID must be preserved.")
-        candidate = deepcopy(value)
+        if "modules" in value:
+            raise ContentError("Course metadata excludes modules; select a module to edit its activity structure.")
+        candidate = {**deepcopy(value), "modules": candidate["modules"]}
     else:
         module = next((m for m in candidate["modules"] if m["id"] == selection.module_id), None)
         if module is None:
@@ -437,7 +439,7 @@ def _stage(project: AuthorProject, basis: ChangeBasis, target: str, before: byte
     return change
 
 
-def stage_change(project: AuthorProject, context: AuthorContext, draft: ChangeDraft) -> PendingChange:
+def stage_change(project: AuthorProject, context: AuthorContext, draft: ChangeDraft, *, validate_only=False) -> PendingChange | None:
     """Only the server constructs context; a model cannot set paths or authority."""
     try:
         draft = TypeAdapter(ChangeDraft).validate_python(draft)
@@ -466,14 +468,17 @@ def stage_change(project: AuthorProject, context: AuthorContext, draft: ChangeDr
                         or not set(draft.replace_sources).issubset(context.selection.cell_ids)):
                     raise ContentError("Select the existing notebook and each named cell before requesting an edit.")
                 after = _json_bytes(output_free_notebook(assemble_notebook(json.loads(before), draft.replace_sources)))
-            return _stage(project, basis, target, before, exists, after)
+            if len(after) > MAX_CONTENT_BYTES or (exists and after == before):
+                raise ContentError("Candidate is unchanged or exceeds the 8 MiB limit.")
+            if not validate_only:
+                return _stage(project, basis, target, before, exists, after)
     except (ManifestError, ValueError) as exc:
         if isinstance(exc, ContentError):
             raise
         raise ContentError("Candidate is invalid; repair it before review.") from exc
 
 
-def read_content(project: AuthorProject, path: str) -> dict:
+def read_content(project: AuthorProject, path: str, *, include_manifest=False) -> dict:
     with _lock(project):
         _recover(project)
         current = open_project(project.course_root.parent)
@@ -484,6 +489,8 @@ def read_content(project: AuthorProject, path: str) -> dict:
         kind = "markdown" if Path(path).suffix.lower() == ".md" else "notebook" if Path(path).suffix.lower() == ".ipynb" else "asset"
         result = {"path": path, "exists": exists, "sha256": _hash(raw), "size": len(raw), "kind": kind,
                   "project_revision": current.revision, "manifest_sha256": _hash(manifest_raw)}
+        if include_manifest:
+            result["manifest"] = parse_manifest_bytes(manifest_raw, project.course_root).model_dump(mode="json")
         try:
             if kind == "markdown":
                 result["text"] = raw.decode("utf-8")

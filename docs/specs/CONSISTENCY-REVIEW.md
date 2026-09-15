@@ -80,3 +80,25 @@ packager and remain explicitly unchecked. Session role/context revocation is
 Task 5 work. Exact installed gates, live six-role/research observations, human
 visual review and the bounded independent review remain open. This update is a
 mechanical audit and implementation self-review, not release acceptance.
+
+## Author assistant implementation update, 2026-09-15
+
+Task 5 adds the six visible rubrics, server-selected bounded context, exact source
+quotation validation, session-only conversation/drafts and explicit draft saving.
+It shares the existing provider lifecycle and AG-UI parser. The real text-only
+reviewed-edit path passed with separate rejected and applied revisions. An earlier
+invalid response failed closed; no automatic repair or native tools were used.
+The desktop diff and narrow controls have assistant visual inspection, with no
+human visual or learning claim.
+
+Course-level assistant selection is explicitly course metadata with modules
+preserved on the server. Module selection supports activity-structure edits, and
+activity/learning/file selections bound the smaller editable unit. This clarifies
+composition without changing schema-v2 semantics or the approved requirements.
+Changing hats preserves valid conversation but revokes in-flight candidates;
+deliberately saved changes retain their separate durable review lifecycle.
+
+Normative rows, shared facts and traceability remain unchanged across all three
+specifications. Task 6 research, Task 7 saved reviews, Task 8 export, Task 9 actual
+preview, Task 10 recovery and Task 11 exact acceptance/independent review remain
+required. All-six-role live acceptance and actual Brave research are open gates.

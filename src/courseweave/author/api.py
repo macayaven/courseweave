@@ -8,12 +8,16 @@ from datetime import date
 import json
 import os
 from typing import Literal
+from dataclasses import dataclass
+from uuid import uuid4
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
+from starlette.requests import ClientDisconnect
+from starlette.responses import Response
 
 from ..contracts.models import ClosedModel, Slug
 from .contracts import Sha256, Revision, SourceStatus
@@ -25,6 +29,8 @@ from .project import (
     ProjectError, checked_local_path, create_project, inspect_source,
     local_directory, open_project, read_sources, update_source,
 )
+from .assistant import AuthorAssistantError, ContextRequest, build_author_context, parse_author_reply, replay_fingerprint
+from .contracts import AuthorContext, AuthorReply
 
 
 class CreateProject(ClosedModel):
@@ -55,6 +61,137 @@ class ReviewedRevision(ClosedModel):
 class ApplyChange(ReviewedRevision):
     operation_id: Slug
     context_digest: Sha256
+
+
+class AuthorRun(ClosedModel):
+    context_id: Slug
+    action: Literal["chat", "draft", "review"] = "chat"
+
+
+class SaveDraft(ClosedModel):
+    pass
+
+
+@dataclass(frozen=True)
+class _Context:
+    id: str
+    context: AuthorContext
+
+
+@dataclass
+class _Draft:
+    history_key: tuple
+    context_id: str
+    context: AuthorContext
+    reply: AuthorReply
+    saved_change_id: str | None = None
+
+
+def _forget_author_context(app, key, *, history=True):
+    app.state.author_contexts.pop(key, None)
+    for draft_id, draft in tuple(app.state.author_drafts.items()):
+        if draft.history_key == key:
+            app.state.author_drafts.pop(draft_id, None)
+    if history:
+        app.state.guide_history.pop(key, None)
+        app.state.guide_attribution.pop(key, None)
+
+
+def current_author_context(app, key, context_id):
+    record = app.state.author_contexts.get(key)
+    if record is None or record.id != context_id:
+        raise AuthorAssistantError("Author scope changed or expired; preview the context again.")
+    context = record.context
+    try:
+        fresh = build_author_context(app.state.author_project, context.selection, context.role,
+            tuple(s.source_id for s in context.sources), provider_config=app.state.provider_config_factory())
+        if fresh.digest != context.digest:
+            raise AuthorAssistantError("Saved content or permitted sources changed; preview the context again.")
+    except ProjectError:
+        _forget_author_context(app, key)
+        raise
+    return context
+
+
+async def finish_author_turn(app, professor, key, text):
+    from .content import stage_change
+    context = current_author_context(app, key, professor.author_context_id)
+    if professor.request_action == "chat":
+        return None
+    reply = parse_author_reply(text, context)
+    if reply.change is not None:
+        try:
+            stage_change(app.state.author_project, context, reply.change, validate_only=True)
+        except ProjectError as exc:
+            raise AuthorAssistantError(f"Draft rejected: {exc} Use manual editing or request a new draft.") from None
+    draft_id = f"draft-{uuid4().hex}"
+    app.state.author_drafts[draft_id] = _Draft(key, professor.author_context_id, context, reply)
+    while len(app.state.author_drafts) > 128:
+        app.state.author_drafts.pop(next(iter(app.state.author_drafts)))
+    return {"draft_id": draft_id, "context_digest": context.digest, "reply": reply.model_dump(mode="json")}
+
+
+async def author_guide_response(app, request, run_input, session_id, request_text):
+    # Share the existing provider lifecycle and official AG-UI event writer.
+    from ..api import _error, _guide_events, _touch_history
+    from ..manifest import parse_manifest_data
+    from ..models import ResolvedContext
+    from ..professor import ProfessorService, ProfessorOutcome
+    from ..providers import ModelResult
+    from ..store import LearnerState
+    from ..teaching import TurnContext
+    from fastapi.responses import Response, StreamingResponse
+    from ag_ui.encoder import EventEncoder
+    import copy
+
+    if not run_input.thread_id or len(run_input.thread_id) > 160:
+        return _error(422, "validation_error", "A bounded conversation identifier is required.")
+    key = (session_id, "author", run_input.thread_id)
+    if key in app.state.guide_busy:
+        return _error(409, "conversation_busy", "Wait for the current Author response to finish.")
+    try:
+        props = AuthorRun.model_validate(run_input.forwarded_props)
+        context = current_author_context(app, key, props.context_id)
+    except ValidationError:
+        return _error(422, "validation_error", "Preview the selected Author context before sending.")
+    except ProjectError as exc:
+        return failure(409, str(exc))
+    selection = context.selection
+    snapshot = read_content(app.state.author_project, context.target_path, include_manifest=True)
+    manifest = parse_manifest_data(snapshot["manifest"], app.state.course_root)
+    resolved = ResolvedContext(module_id=selection.module_id, phase_id=selection.phase_id,
+        surface_id=None, reason="explicit_phase" if selection.phase_id else "empty_course")
+    config = app.state.provider_config_factory()
+    professor = ProfessorService(manifest, resolved, LearnerState(), "author", config,
+        model_factory=app.state.professor_model_factory, course_root=app.state.course_root,
+        source_etag='"' + context.manifest_sha256 + '"', request_action=props.action, author_context=context)
+    professor.author_context_id = props.context_id
+    professor.turn_context = TurnContext.capture(module_id=selection.module_id, phase_id=selection.phase_id,
+        surface_id=None, source_id="author-selection", manifest_etag=professor.source_etag,
+        state_revision=context.project_revision, consent=False, teacher_mode=context.role, policy=None,
+        lesson_scope_id=None, privacy_epoch=app.state.privacy_epoch, run_id=run_input.run_id,
+        evidence_dependency=replay_fingerprint(context), evidence_references=[s.text_sha256 or s.raw_sha256 for s in context.sources],
+        author={"context_id": props.context_id, "digest": context.digest, "selection": selection.model_dump(mode="json"),
+            "role": context.role, "source_count": len(context.sources), "omissions": list(context.omissions)})
+    replay = copy.deepcopy(app.state.guide_history.get(key, ()))
+    replay = professor.bounded_replay(request_text, replay)
+    if professor._input_chars(request_text, replay) > config.max_input_chars:
+        return _error(422, "input_limit", "The request exceeds the input budget; shorten it or select less context.")
+    try:
+        prepared = professor.prepare(request_text)
+    except Exception:
+        return _error(502, "provider_error", "The provider could not be configured.")
+    if isinstance(prepared, ProfessorOutcome):
+        return _error(409, "not_configured", "No chat provider is configured. Manual Author editing remains available.")
+    if await request.is_disconnected():
+        if isinstance(prepared, ModelResult) and prepared.adapter is not None:
+            await prepared.adapter.aclose()
+        return Response(status_code=204)
+    app.state.guide_busy.add(key)
+    _touch_history(app, key)
+    return StreamingResponse(_guide_events(app, professor, run_input.thread_id, run_input.run_id, request_text,
+        prepared, request_text, replay, key, None, session_id, "author", "author-selection", resolved),
+        media_type=EventEncoder().get_content_type())
 
 
 def failure(status: int, message: str) -> JSONResponse:
@@ -90,6 +227,9 @@ class ProjectDispatcher:
                                  state_dir=project.state_root / "transactions", author_project=project)
             child.state.provider_config_factory = self.owner.state.provider_config_factory
             child.state.professor_model_factory = self.owner.state.professor_model_factory
+            # One cookie identifies the local Author session across project tabs.
+            # Histories, previews and candidates remain separate in each child.
+            child.state.guide_sessions = self.owner.state.guide_sessions
             self.children[project.project_id] = child
         return await child(scope, receive, send)
 
@@ -97,6 +237,8 @@ class ProjectDispatcher:
 def install_routes(app, *, author_home: Path | None, author_project=None, factory):
     app.state.author_home = checked_local_path(author_home) if author_home is not None else None
     app.state.author_project = author_project
+    app.state.author_contexts = {}
+    app.state.author_drafts = {}
     app.state.author_projects_root = app.state.author_home / "projects" if app.state.author_home is not None else None
     if app.state.author_home is not None:
         with local_directory(app.state.author_projects_root, create=True):
@@ -106,6 +248,10 @@ def install_routes(app, *, author_home: Path | None, author_project=None, factor
     @app.exception_handler(ProjectError)
     async def project_error(_request: Request, exc: ProjectError):
         return failure(409, str(exc))
+
+    @app.exception_handler(ClientDisconnect)
+    async def cancelled_body(_request: Request, _exc: ClientDisconnect):
+        return Response(status_code=204)
 
     @app.get("/api/author/projects")
     def projects():
@@ -135,6 +281,57 @@ def install_routes(app, *, author_home: Path | None, author_project=None, factor
             if len(raw) > 1024 * 1024:
                 raise ProjectError("Request exceeds the 1 MiB limit.")
         return model.model_validate_json(bytes(raw))
+
+    @app.post("/api/author/assistant/context")
+    async def author_context(request: Request):
+        from ..api import _guide_session, _touch_history, _SESSION_COOKIE
+        if app.state.author_project is None:
+            return failure(403, "The Author assistant requires a private author project.")
+        try:
+            body = await read_body(request, ContextRequest)
+        except ValidationError:
+            return failure(422, "Choose a valid role, saved selection and permitted sources.")
+        session_id, new_session = _guide_session(app, request)
+        key = (session_id, "author", body.thread_id)
+        context = build_author_context(app.state.author_project, body.selection, body.role, body.source_ids,
+            provider_config=app.state.provider_config_factory())
+        previous = app.state.author_contexts.get(key)
+        if previous is not None and previous.context.digest == context.digest:
+            record = previous
+        else:
+            keep_history = previous is not None and replay_fingerprint(previous.context) == replay_fingerprint(context)
+            _forget_author_context(app, key, history=not keep_history)
+            record = _Context(f"context-{uuid4().hex}", context)
+            app.state.author_contexts[key] = record
+        _touch_history(app, key)
+        response = JSONResponse({"context_id": record.id, "context": context.model_dump(mode="json"),
+                                 "conversation_retained": bool(app.state.guide_history.get(key))})
+        if new_session:
+            response.set_cookie(_SESSION_COOKIE, session_id, httponly=True, samesite="lax")
+        return response
+
+    @app.post("/api/author/assistant/drafts/{draft_id}/save", status_code=201)
+    async def save_author_draft(draft_id: str, request: Request):
+        from ..api import _existing_session
+        from .content import stage_change
+        try:
+            await read_body(request, SaveDraft)
+        except ValidationError:
+            return failure(422, "Save only the server's reviewed draft.")
+        session_id = _existing_session(app, request)
+        draft = app.state.author_drafts.get(draft_id)
+        if draft is None or draft.history_key[0] != session_id:
+            return failure(409, "This draft expired or belongs to a different session; request a new draft.")
+        current_author_context(app, draft.history_key, draft.context_id)
+        if draft.reply.change is None:
+            return failure(409, "This reply has findings but no content change to save.")
+        if draft.saved_change_id:
+            change = read_change(app.state.author_project, draft.saved_change_id)
+        else:
+            # No await separates permission validation from this bounded save.
+            change = stage_change(app.state.author_project, draft.context, draft.reply.change)
+            draft.saved_change_id = change.change_id
+        return change.model_dump(mode="json", exclude={"after_bytes"})
 
     @app.post("/api/author/projects/inventory")
     async def inventory(request: Request):

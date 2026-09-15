@@ -39,8 +39,9 @@ export interface ContentClient {
 
 const cellText = (cell: NotebookCell) => typeof cell.source === "string" ? cell.source : cell.source.join("");
 
-export function ContentPanel({ client, disabled, onDirtyChange, onChanged }: {
+export function ContentPanel({ client, disabled, onDirtyChange, onChanged, openChangeId }: {
   client: ContentClient; disabled: boolean; onDirtyChange(dirty: boolean): void; onChanged(): void | Promise<void>;
+  openChangeId?: string | null;
 }) {
   const [files, setFiles] = useState<string[]>([]);
   const [path, setPath] = useState("");
@@ -60,6 +61,7 @@ export function ContentPanel({ client, disabled, onDirtyChange, onChanged }: {
   const [notice, setNotice] = useState("");
   const controllers = useRef(new Set<AbortController>());
   const operations = useRef(new Map<string, ContentApply>());
+  const openedChange = useRef<string | null>(null);
   const blocked = disabled || busy;
   const dirty = !!snapshot && (text !== (snapshot.text ?? "") || newCell !== "" || importPath !== ""
     || (!snapshot.exists && snapshot.kind === "notebook" && title !== "New notebook")
@@ -115,6 +117,14 @@ export function ContentPanel({ client, disabled, onDirtyChange, onChanged }: {
     const next = await client.getContent(target, signal);
     if (!signal.aborted) resetEditor(next);
   });
+  useEffect(() => {
+    if (!openChangeId || openedChange.current === openChangeId || blocked || dirty) return;
+    openedChange.current = openChangeId;
+    void run(async signal => {
+      const next = await client.getChange(openChangeId, signal);
+      if (!signal.aborted) { setReview(next); await refresh(signal); }
+    });
+  }, [openChangeId, blocked, dirty, client]);
   const stage = (action: ContentEdit["action"]) => void run(async (signal) => {
     if (!snapshot) return;
     const change = await client.stageContent({ path: snapshot.path, before_sha256: snapshot.sha256,

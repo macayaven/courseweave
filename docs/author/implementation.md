@@ -144,7 +144,7 @@ binary imports show byte counts and before/after hashes. Rejected and stale
 candidates cannot apply. Editing a candidate creates a new saved candidate.
 Unsaved edits in other cells remain in the tab.
 
-Manifest fragments compose into the selected course/module/phase/learning node,
+Manifest fragments compose into selected course metadata or a module/phase/learning node,
 then use the canonical schema-v2 validator and manifest writer. A selected
 module/phase and the course retain their IDs. Missing future assets can be a
 structurally valid draft; runnable/package checks remain separate. Content changes
@@ -188,3 +188,70 @@ TE-003/TE-010/TE-026 now have implementation evidence. Session role/context
 revocation is completed with the Task 5 assistant. V03 development checks do not
 satisfy the separate V07–V10 installed/export/preview gates. Normative rows, shared
 facts and traceability remain unchanged.
+
+## Task 5: one bounded Author assistant
+
+Private projects use the existing professor/provider lifecycle and AG-UI parser
+with six explicit role rubrics. The composer previews the server's saved course,
+selected module/activity or file, named notebook cells, approved sources explicitly
+permitted for this conversation, and omissions. Previewing reads local state;
+only Send/Request draft/Request review calls the configured model. The model
+receives no filesystem or search tools. Manual editing remains provider-free.
+
+The context contains a bounded outline and one editable unit. Course selection
+means course metadata, with modules retained on the server. Selecting a module
+allows reviewable changes to that module's activity structure; selecting an
+activity or its learning value permits a smaller replacement. A large unrelated
+course therefore does not require a full-manifest prompt. The canonical Learning
+schema supplies teaching-field definitions. Whole Markdown replacements require
+the full selected document to fit; truncated documents remain available for
+discussion/review. Notebook context includes only named cell sources and omits
+outputs, execution counts and other cells. No imported code executes.
+
+Context is limited to 24,000 characters (or a smaller provider allowance), source
+excerpts to 4,000 characters each, selected sources to 32, replies to 16,000
+characters and composer requests to 8,000 characters in the UI. The existing
+provider's total input, output-token and run-time limits still apply. An Author
+run permits one provider request and zero tool calls. Network research is a
+separate Task 6 operation and never enabled by changing roles.
+
+Explicit draft/review requests use the closed author-reply-v1 envelope. The
+service waits for successful complete output, checks exact source revisions and
+quote offsets, and validates proposed content through the ordinary content
+service without saving it. Invalid fields, unknown citations, truncation, provider
+failures, cancellation and stale context leave no draft or replayable turn. No
+automatic repair call occurs. A rejected reply remains editable in the current
+tab for manual recovery. A successful reply is also session-only until the
+author explicitly saves its content draft; Task 7 adds explicit finding reports.
+
+Role changes preserve otherwise valid replay and revoke old in-flight/unsaved
+candidates. Changed content or permitted sources revoke dependent replay. Each
+accepted context has a new opaque identity when its digest changes, so switching
+away and back cannot revive an old in-flight result. Project tabs share the same
+session cookie but retain separate context, histories and draft authority.
+Deliberately saved pending changes are independent durable review artifacts:
+they can be reopened after restart, with their stored source/project/file
+dependencies checked by the existing reviewed apply service. Saving never saves
+the conversation, and changing hats does not confer mutation authority.
+
+Development verification includes 269 focused Python cases before a live-found
+cancelled-preview error, followed by a focused 106-case run after adding its
+regression and handling disconnects. The Author frontend suite, new stream
+handoff cases, typecheck and build passed. Final consolidated counts are in the
+local receipt. Tests reuse the existing shared transport and provider lifecycle.
+
+The real configured text-only route completed the reviewed-edit journey: an
+explicitly saved correction was rejected by keyboard with unchanged course bytes;
+a new draft was inspected and applied through exact-diff review. The original
+import remained unchanged. Each successful run made one provider request. An
+earlier complete model response failed envelope validation and left no saved
+change; no automatic repair was attempted. Desktop diff and narrow-role controls
+were visually inspected by the assistant. The CLI/Jupyter/browser processes and
+bootstrap credential artifacts were cleaned up. This is development evidence,
+not all-six-role, research, fresh-archive, human visual or learning acceptance.
+
+After this vertical slice, the remaining planning forecast is 25–40 active
+engineering hours for Tasks 6–11 and export integration, excluding waits for
+external prerequisites. It is a forecast, not a timebox. Brave credential custody
+still requires the owner's location information; independent offline work can
+continue. Final acceptance still requires every gate and bounded review.

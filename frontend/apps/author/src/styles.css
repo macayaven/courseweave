@@ -285,3 +285,10 @@ pre {
 .content-panel textarea { font-family: ui-monospace, SFMono-Regular, monospace; }
 .content-panel summary { cursor: pointer; padding-block: 0.5rem; }
 .notebook-cell > p { color: #43576a; font-size: 0.9rem; }
+.author-assistant { min-width: 0; overflow-wrap: anywhere; }
+.author-assistant pre { overflow: auto; max-height: 24rem; white-space: pre; }
+.author-assistant .assistant-text { white-space: pre-wrap; }
+.author-assistant .assistant-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.author-assistant li { margin-block: 0.5rem; }
+.author-assistant blockquote { margin-inline: 0.5rem; padding-inline: 0.75rem; border-left: 3px solid #8a9cad; }
+.author-assistant footer, .author-assistant small { color: #43576a; }

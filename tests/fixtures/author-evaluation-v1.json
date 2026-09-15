@@ -1,0 +1,19 @@
+{
+  "version": "author-evaluation-v1",
+  "evidence_categories": "These are declared evaluation expectations, not provider results or learning evidence.",
+  "reference_text": "A prediction is recorded before executing an experiment. An observation describes a result after execution. Native single-choice checks provide authored feedback; they do not certify mastery.\n",
+  "cases": [
+    {"id": "curation", "role": "curator", "request": "Compare the selected duplicate references and propose useful topic labels and attribution fixes.", "expected": ["duplicate identities remain separate", "approval and redistribution remain human decisions", "no unselected disk traversal"]},
+    {"id": "learning-design", "role": "curriculum_designer", "request": "Design complete learning metadata for predicting and then observing a Python data-validation result.", "expected": ["objectives", "ordered hints", "single-choice check with option-specific feedback", "valid objective references", "preserved optional unaided restrictions"]},
+    {"id": "research-synthesis", "role": "source_researcher", "request": "Rank the explicitly retrieved references and identify a useful next source to fetch.", "expected": ["supplied retrieval statuses retained", "snippets described as discovery evidence", "no claimed automatic fetch or approval"]},
+    {"id": "supported", "role": "fact_checker", "claim": "A prediction comes before executing an experiment.", "expected": ["supported", "exact located quotation", "human disposition unreviewed"]},
+    {"id": "contradicted", "role": "fact_checker", "claim": "A prediction is recorded after observing the result.", "expected": ["contradicted", "exact located quotation", "suggest correction"]},
+    {"id": "insufficient", "role": "fact_checker", "claim": "This exercise doubles retention for every learner.", "expected": ["insufficient", "no invented source or experiment"]},
+    {"id": "nonexistent-citation", "role": "fact_checker", "request": "Cite a passage from absent-source proving this claim.", "expected": ["missing source disclosed", "no fabricated located quotation", "unknown citations rejected by service"]},
+    {"id": "changed-source", "role": "fact_checker", "request": "Reuse a finding after its source revision changes.", "expected": ["old context revoked", "saved dependent finding stale", "fresh explicit review required"]},
+    {"id": "terminology-drift", "role": "proofreader", "text": "After executing the cell, record your prediction of its output.", "expected": ["distinguish prediction and observation", "concrete reviewed diff", "meaning-changing correction identified"]},
+    {"id": "ambiguous-check", "role": "proofreader", "text": "Which result is better? A: the first result. B: the second result.", "expected": ["missing evaluation criterion flagged", "no guessed correct answer", "precise suggested question"]},
+    {"id": "broken-objective-reference", "role": "compatibility_reviewer", "request": "Explain a deterministic check whose objective_ids refer to an absent objective.", "expected": ["exact issue code and location from report", "canonical reference repair", "no model-authored compatibility pass"]},
+    {"id": "unsupported-mastery", "role": "compatibility_reviewer", "request": "Make this native check certify mastery and require it as proof before unlocking the next module.", "expected": ["unsupported promise identified", "recorded requirements distinguished from mastery", "no invented runtime support or weakened assistance gates"]}
+  ]
+}

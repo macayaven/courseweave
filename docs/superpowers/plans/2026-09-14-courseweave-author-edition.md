@@ -205,9 +205,9 @@ def test_cell_source_replacement_preserves_identity_and_other_cells():
 
 **Consumes:** server-selected project/context, existing provider lifecycle, stage_change. **Produces:** V04, text-only validated reports/drafts, and the first real-provider vertical slice.
 
-- [ ] Add contract tests for each role, selected activity/file mismatch, stale source, malicious quoted instructions, overflow, cancellation, malformed/truncated response, and provider failure. Reuse existing AG-UI transport tests rather than a second parser.
-- [ ] Replace full-course manifest prompt dumping with a bounded course outline plus the selected editable unit. Full manifest bytes remain available to the server for composition/validation. A large course must not fail merely because its entire manifest cannot fit into one model request.
-- [ ] Use the existing text completion route. Explicit draft/review actions request this closed envelope; normal conversation can remain prose. Parse only after a complete successful response, never from partially streamed JSON.
+- [x] Add contract tests for each role, selected activity/file mismatch, stale source, malicious quoted instructions, overflow, cancellation, malformed/truncated response, and provider failure. Reuse existing AG-UI transport tests rather than a second parser.
+- [x] Replace full-course manifest prompt dumping with a bounded course outline plus the selected editable unit. Full manifest bytes remain available to the server for composition/validation. A large course must not fail merely because its entire manifest cannot fit into one model request.
+- [x] Use the existing text completion route. Explicit draft/review actions request this closed envelope; normal conversation can remain prose. Parse only after a complete successful response, never from partially streamed JSON.
 
 ```json
 {
@@ -222,9 +222,9 @@ def test_cell_source_replacement_preserves_identity_and_other_cells():
 }
 ```
 
-- [ ] Resolve the change target, before hash, authority, and source references from AuthorContext; the model cannot provide authoritative paths/revisions. Unknown citations or malformed changes produce a rejected draft with editable manual recovery. No repair loop, tool-profile requirement, or hidden extra provider request.
-- [ ] Show role, scope, selected source count, and omissions before sending. Changing the hat does not clear valid conversation by itself; a revoked source or changed content invalidates dependent replay. Saving a report/proposal does not save chat.
-- [ ] Run `uv run pytest tests/test_author_assistant.py tests/test_professor.py tests/test_teaching.py -q` and `pnpm --dir frontend --filter @courseweave/author test`. Then use an authorized real text-only provider to draft one lesson correction, reject it, request a new change, and accept the reviewed revision. Record sanitized provider evidence separately from fixtures. Re-estimate remaining effort and commit the slice.
+- [x] Resolve the change target, before hash, authority, and source references from AuthorContext; the model cannot provide authoritative paths/revisions. Unknown citations or malformed changes produce a rejected draft with editable manual recovery. No repair loop, tool-profile requirement, or hidden extra provider request.
+- [x] Show role, scope, selected source count, and omissions before sending. Changing the hat does not clear valid conversation by itself; a revoked source or changed content invalidates dependent replay. Saving a report/proposal does not save chat.
+- [x] Run `uv run pytest tests/test_author_assistant.py tests/test_professor.py tests/test_teaching.py -q` and `pnpm --dir frontend --filter @courseweave/author test`. Then use an authorized real text-only provider to draft one lesson correction, reject it, request a new change, and accept the reviewed revision. Record sanitized provider evidence separately from fixtures. Re-estimate remaining effort and commit the slice.
 
 ## Task 6: Make source research and curation useful and bounded
 

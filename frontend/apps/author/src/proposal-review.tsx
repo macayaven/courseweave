@@ -17,6 +17,7 @@ export function ContentChangeReview({ review, disabled, onApply, onReject, onEdi
   const [acknowledged, setAcknowledged] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const restoreFocus = useRef(false);
+  useEffect(() => { heading.current?.focus(); }, [review.change_id]);
   useEffect(() => {
     setAcknowledged(false);
     if (restoreFocus.current) { heading.current?.focus(); restoreFocus.current = false; }

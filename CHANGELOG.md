@@ -28,6 +28,13 @@ releases.
   missing-versus-empty files and late write failures have explicit outcomes.
 - Added file review controls with keyboard rejection, preserved cell selection,
   editable candidate copies, conflict reload and narrow-window layout checks.
+- Added one Author conversation with six roles, explicit approved-source
+  permissions, bounded saved-content previews and visible omissions. Role
+  changes retain valid conversation; changed content or permissions revoke replay.
+- Added text-only JSON drafts and evidence validation on the existing provider
+  and AG-UI transport. Complete replies remain session-only until an explicit
+  Save draft; exact diff review still owns application. Invalid, interrupted and
+  stale replies have no durable effect and make no automatic repair request.
 - The complete Author Edition and its installed/live-provider acceptance are
   still in development; see [implementation notes](docs/author/implementation.md).
 

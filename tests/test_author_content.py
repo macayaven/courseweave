@@ -173,6 +173,7 @@ def test_manifest_composition_preserves_course_identity_and_runs_canonical_valid
     from courseweave.author.content import stage_change, apply_change, ContentError
     context = context_for(project, "courseweave.json")
     manifest = json.loads((project.course_root / "courseweave.json").read_text())
+    manifest.pop("modules")
     with pytest.raises(ContentError):
         stage_change(project, context, ManifestFragmentDraft(kind="manifest_fragment_replace", value={**manifest, "id": "another-course"}))
     with pytest.raises(ContentError):
@@ -418,6 +419,7 @@ def test_corrupt_external_manifest_remains_a_visible_journal_conflict(project):
     from courseweave.author import content
     context = context_for(project, "courseweave.json")
     manifest = json.loads((project.course_root / "courseweave.json").read_text())
+    manifest.pop("modules")
     change = content.stage_change(project, context, ManifestFragmentDraft(
         kind="manifest_fragment_replace", value={**manifest, "title": "Before interruption"}))
     def crash(phase):
@@ -470,8 +472,10 @@ def test_missing_asset_is_valid_draft_but_visible_readiness_failure(project):
     from test_author_api import manifest as fixture_manifest
     candidate = fixture_manifest()
     candidate["id"] = "course"
+    (project.course_root / "courseweave.json").write_text(json.dumps(candidate))
     candidate["modules"][0]["phases"][0]["surfaces"][0]["path"] = "future.md"
-    change = stage_change(project, context_for(project, "courseweave.json"),
-        ManifestFragmentDraft(kind="manifest_fragment_replace", value=candidate))
+    module = candidate["modules"][0]
+    change = stage_change(project, context_for(project, "courseweave.json", unit="module", module=module["id"]),
+        ManifestFragmentDraft(kind="manifest_fragment_replace", value=module))
     assert change.status == "pending"
     assert any(issue.code == "draft_not_runnable" for issue in change.issues)

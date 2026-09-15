@@ -3,6 +3,7 @@ import type { AuthorRuntime } from "./runtime";
 import type { CompatibilityReport } from "./compatibility";
 import type { Inventory, Project, ProjectList, ProjectRequest, SourceRecord, SourceDecision } from "./project-panel";
 import type { ContentApply, ContentChange, ContentClient, ContentEdit, ContentReview, ContentSnapshot } from "./content-panel";
+import type { AuthorAssistantClient, ContextPreview } from "./curriculum-thread";
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -133,6 +134,12 @@ export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | 
       signal,
     );
   return {
+    previewAuthorContext: (body: Parameters<AuthorAssistantClient["previewAuthorContext"]>[0], signal?: AbortSignal) => json<ContextPreview>("/api/author/assistant/context", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    saveAuthorDraft: (id: string, signal?: AbortSignal) => json<ContentChange>("/api/author/assistant/drafts/" + encodeURIComponent(id) + "/save", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }, signal),
     getContentFiles: (signal?: AbortSignal) => json<Awaited<ReturnType<ContentClient["getContentFiles"]>>>("/api/author/content/files", {}, signal),
     getContent: (path: string, signal?: AbortSignal) => json<ContentSnapshot>("/api/author/content?path=" + encodeURIComponent(path), {}, signal),
     getChanges: (offset = 0, signal?: AbortSignal) => json<{ changes: ContentChange[]; total: number }>("/api/author/changes?offset=" + offset, {}, signal),

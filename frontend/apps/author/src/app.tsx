@@ -32,11 +32,11 @@ import {
   type ValidationIssue,
 } from "./validation";
 import { useAuthorRuntime } from "./runtime";
-import { CurriculumThread } from "./curriculum-thread";
+import { CurriculumThread, AuthorAssistant } from "./curriculum-thread";
 import { ProposalReview } from "./proposal-review";
 import { CompatibilityPanel } from "./compatibility";
 import { ProjectPanel, SourceLibrary, type ProjectList } from "./project-panel";
-import { ContentPanel } from "./content-panel";
+import { ContentPanel, type ContentChange } from "./content-panel";
 
 type Client = ReturnType<typeof createAuthorClient>;
 type CheckState = {
@@ -259,6 +259,9 @@ function AuthorEditor({
   onCourseSaved,
   onDirtyChange,
   externalDirty = false,
+  privateProjectId,
+  authorEpoch = 0,
+  onAuthorSaved = () => undefined,
 }: {
   course: CourseResponse;
   client: Client;
@@ -269,6 +272,9 @@ function AuthorEditor({
   onCourseSaved(course: CourseResponse): void;
   onDirtyChange(dirty: boolean): void;
   externalDirty?: boolean;
+  privateProjectId?: string;
+  authorEpoch?: number;
+  onAuthorSaved?(change: ContentChange): void;
 }) {
   const [state, setState] = useState<AuthorDocumentState>(() =>
     documentState(course.manifest as AuthorManifest),
@@ -684,7 +690,16 @@ function AuthorEditor({
           </button>
         </section>
       ) : null}
-      <CurriculumThread
+      {privateProjectId ? <AuthorAssistant client={client} projectId={privateProjectId} courseId={state.draft.id}
+        selected={(() => {
+          const selected = state.selection;
+          if (!("moduleKey" in selected)) return undefined;
+          const module = state.draft.modules.find(item => item.clientKey === selected.moduleKey);
+          const phase = module && "phaseKey" in selected ? module.phases.find(item => item.clientKey === selected.phaseKey) : undefined;
+          return module ? { module_id: module.id, ...(phase ? { phase_id: phase.id } : {}) } : undefined;
+        })()}
+        clean={!dirty && !externalDirty && !proposalSavePending && !refreshBlocked && connected}
+        epoch={authorEpoch + connectionEpoch + courseAuthorityEpoch} onSaved={onAuthorSaved} /> : <CurriculumThread
         client={client}
         sourceId={sourceId}
         selection={(() => {
@@ -713,7 +728,7 @@ function AuthorEditor({
         onProposal={recordProposal}
         onRefresh={refreshAuthorData}
         onAuthorityUnknown={() => setAuthorityState("blocked")}
-      />
+      />}
       <ProposalReview
         proposals={proposals}
         savedRaw={baseline.raw}
@@ -766,6 +781,7 @@ export function AuthorApp() {
   const [sourcesDirty, setSourcesDirty] = useState(false);
   const [contentDirty, setContentDirty] = useState(false);
   const [sourcesEpoch, setSourcesEpoch] = useState(0);
+  const [openChangeId, setOpenChangeId] = useState<string | null>(null);
   const [courseAuthorityEpoch, setCourseAuthorityEpoch] = useState(-1);
   const retainedConnection = useRef(false);
   const client = useRef<Client | null>(null);
@@ -816,6 +832,7 @@ export function AuthorApp() {
   const selectProject = (id: string) => {
     if (dirty || sourcesDirty || contentDirty || id === projectId) return;
     setCourse(null); setLoad("loading"); setProjectId(id);
+    setOpenChangeId(null);
   };
   const projectPanel = projects?.enabled && client.current ? <ProjectPanel client={client.current}
     projects={projects.projects ?? []} unavailable={projects.unavailable ?? []} selected={projectId}
@@ -858,7 +875,7 @@ export function AuthorApp() {
     <AuthorShell
       state={
         connected
-          ? "Ready. Curriculum teacher provider unavailable."
+          ? projectId ? "Ready. Select saved content for the Author assistant." : "Ready. Curriculum teacher provider unavailable."
           : "Disconnected from CourseWeave. Your unsaved work remains in this tab."
       }
       provider="not_configured"
@@ -875,18 +892,22 @@ export function AuthorApp() {
         onCourseSaved={(next) => {
           setCourse(next);
           setCourseAuthorityEpoch(connectionEpoch.current);
+          setSourcesEpoch(value => value + 1);
         }}
         onDirtyChange={setDirty}
         externalDirty={contentDirty || sourcesDirty}
+        privateProjectId={projectId ?? undefined} authorEpoch={sourcesEpoch}
+        onAuthorSaved={change => setOpenChangeId(change.change_id)}
       />
       {projectId && <ContentPanel key={"content-" + projectId} client={client.current}
+        openChangeId={openChangeId}
         disabled={!connected || dirty || sourcesDirty} onDirtyChange={setContentDirty} onChanged={async () => {
           const originClient = client.current!;
           const next = await originClient.getCourse();
           if (client.current !== originClient) return;
           setCourse(next); setCourseAuthorityEpoch(connectionEpoch.current); setSourcesEpoch((current) => current + 1);
         }} />}
-      {projectId && <SourceLibrary key={"sources-" + projectId + ":" + sourcesEpoch} client={client.current} projectId={projectId} disabled={!connected || contentDirty} onDirtyChange={setSourcesDirty} />}
+      {projectId && <SourceLibrary key={"sources-" + projectId + ":" + sourcesEpoch} client={client.current} projectId={projectId} disabled={!connected || contentDirty} onDirtyChange={setSourcesDirty} onChanged={() => setSourcesEpoch(value => value + 1)} />}
       {!connected ? (
         <button type="button" onClick={runtime.retry}>
           Reconnect

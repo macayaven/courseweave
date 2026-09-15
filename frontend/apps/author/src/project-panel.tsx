@@ -126,7 +126,7 @@ function SourceCard({ source, duplicate, disabled, save, onDirtyChange }: { sour
   </article>;
 }
 
-export function SourceLibrary({ client, projectId, disabled, onDirtyChange }: { client: SourceClient; projectId: string; disabled: boolean; onDirtyChange?(dirty: boolean): void }) {
+export function SourceLibrary({ client, projectId, disabled, onDirtyChange, onChanged }: { client: SourceClient; projectId: string; disabled: boolean; onDirtyChange?(dirty: boolean): void; onChanged?(): void }) {
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [notice, setNotice] = useState("Loading source inventory…");
   const [busy, setBusy] = useState(false);
@@ -151,7 +151,7 @@ export function SourceLibrary({ client, projectId, disabled, onDirtyChange }: { 
     const controller = new AbortController(); active.current?.abort(); active.current = controller; setBusy(true);
     try {
       const updated = await client.updateSource(id, value, controller.signal);
-      if (!controller.signal.aborted) { setSources(current => current.map(s => s.source_id === id ? updated : s)); setNotice("Source decision saved."); }
+      if (!controller.signal.aborted) { setSources(current => current.map(s => s.source_id === id ? updated : s)); setNotice("Source decision saved."); onChanged?.(); }
     } catch (error) { if (!controller.signal.aborted) setNotice(message(error)); }
     finally { if (!controller.signal.aborted) setBusy(false); }
   }

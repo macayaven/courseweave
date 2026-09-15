@@ -347,3 +347,34 @@ The existing course lock protects the adjacent prepare/apply journal. Restart
 reconciles prepared operations by exact target hashes without overwriting a
 conflict. Reported failed operations do not become successful receipts on retry.
 Draft structural validity does not imply runnable assets or export readiness.
+
+## Private Author conversation (v0.3.0 candidate)
+
+- `POST /api/author/assistant/context`: closed `thread_id`, `selection`, `role`
+  and `source_ids`. The server resolves saved bytes and current approved source
+  revisions. Returns `context_id`, the bounded context and omissions, and whether
+  earlier conversation remains permitted for replay. This endpoint is local;
+  it makes no provider or search call.
+- `POST /api/author/guide`: the existing AG-UI POST stream. In a private project,
+  `forwardedProps` contains only `context_id` and `action` (`chat`, `draft`, or
+  `review`). Client history/tools remain inert. A current server preview in the
+  same session/project/thread is required. The accepted turn-context event adds
+  role, selection, permitted source count, context identity/digest and omissions.
+- A successful complete draft/review may emit `courseweave.author_reply` after
+  text completion, with `draft_id`, `context_digest` and a validated closed reply.
+  It is an ephemeral candidate, not an applied or saved change. RUN_ERROR,
+  cancellation, missing terminal events and mismatched contexts grant no save
+  authority. The shared parser accepts Author metadata only for the expected
+  Author context.
+- `POST /api/author/assistant/drafts/{draft_id}/save`: empty closed object.
+  Saves that session's current validated content draft once and returns the
+  ordinary pending change. Repeat saves return the same change ID. The exact diff
+  and explicit reviewed apply endpoints above own all course-file changes.
+
+Course metadata fragments exclude `modules`; the service preserves all modules
+while composing that selected unit. Module/activity fragments retain their
+selected identity. Reply findings remain model judgments; neither their prose
+nor their citations can set human dispositions or compatibility status.
+Conversation, previews and unsaved drafts follow existing session lifetime and
+bounded history cleanup. Up to 128 unsaved reply drafts are retained per project
+process. Saved changes retain their independent durable lifecycle.
