@@ -83,9 +83,11 @@ assemble_notebook(notebook: dict, replace_sources: dict[str, str]) -> dict
 apply_change(project: AuthorProject, change_id: str, expected_revision: int, request_id: str) -> ApplyReceipt
 build_author_context(project: AuthorProject, selection: AuthorSelection, role: AuthorRole, source_ids: tuple[str, ...]) -> AuthorContext
 parse_author_reply(text: str, context: AuthorContext) -> AuthorReply
-research_sources(project: AuthorProject, request: ResearchRequest, search: SearchClient, fetch: FetchClient) -> ResearchReport
+run_research(project: AuthorProject, request: ResearchRequest, *, search: SearchClient | None, fetcher: FetchClient | None, control: ResearchControl | None) -> ResearchReport
 check_package(project: AuthorProject, profile: StudentProfile) -> CompatibilityReport
-save_review(project: AuthorProject, report: ReviewReport, expected_revision: int) -> ReviewReport
+save_review(project: AuthorProject, context: AuthorContext, reply: AuthorReply) -> ReviewReport
+update_review(project: AuthorProject, report_id: str, claim_id: str, decision: FindingDecision) -> ReviewReport
+course_coverage(project: AuthorProject, *, offset: int, limit: int) -> dict
 export_course(project: AuthorProject, destination: Path, profile: StudentProfile) -> ExportReceipt
 start_preview(project: AuthorProject, receipt: ExportReceipt, runtime: StudentRuntime) -> PreviewHandle
 ```
@@ -255,8 +257,8 @@ assert not policy.permits("https://127.0.0.1/course/intro")
 
 **Consumes:** exact source/target revisions, shared validator output, AuthorReply. **Produces:** V06, saved review artifacts, and objective coverage.
 
-- [ ] Build a small deterministic evaluation corpus: supported statement, contradicted statement, insufficient source, nonexistent citation, changed source, ambiguous check, terminology drift, broken objective reference, and a requested unsupported mastery gate. Declare expected findings before running a provider.
-- [ ] Validate every evidence reference against source ID, raw/extracted text hashes, extractor version, and quoted span. Store this provenance check separately from the model's `supported`/`contradicted`/`insufficient`/`not_checked` judgment and the human's disposition. The server initializes human disposition to `unreviewed`; model output cannot set or change it. The following is a saved finding representation, not an allowed model authority field set.
+- [x] Build a small deterministic evaluation corpus: supported statement, contradicted statement, insufficient source, nonexistent citation, changed source, ambiguous check, terminology drift, broken objective reference, and a requested unsupported mastery gate. Declare expected findings before running a provider.
+- [x] Validate every evidence reference against source ID, raw/extracted text hashes, extractor version, and quoted span. Store this provenance check separately from the model's `supported`/`contradicted`/`insufficient`/`not_checked` judgment and the human's disposition. The server initializes human disposition to `unreviewed`; model output cannot set or change it. The following is a saved finding representation, not an allowed model authority field set.
 
 ```json
 {
@@ -268,9 +270,9 @@ assert not policy.permits("https://127.0.0.1/course/intro")
 }
 ```
 
-- [ ] Add a course coverage table mapping each required activity/objective to prompts, hints/checks, selected source support, and reviewed gaps. Existing courses without objective metadata remain importable; the UI reports missing guidance rather than silently inventing it or changing required progress.
-- [ ] Save, dismiss with reason, delete, and export review reports explicitly. Source/target changes mark dependent results stale. The compatibility role reads deterministic findings and only proposes repairs; it cannot author a pass flag.
-- [ ] Run `uv run pytest tests/test_author_quality.py tests/test_author_compatibility.py -q` and frontend review/coverage tests. Exercise fact checker, proofreader, and compatibility reviewer with a real provider using the bounded corpus. Human-review every live result; keep deviations visible and fix material defects. Commit the slice.
+- [x] Add a course coverage table mapping each required activity/objective to prompts, hints/checks, selected source support, and reviewed gaps. Existing courses without objective metadata remain importable; the UI reports missing guidance rather than silently inventing it or changing required progress.
+- [x] Save, dismiss with reason, delete, and export review reports explicitly. Source/target changes mark dependent results stale. The compatibility role reads deterministic findings and only proposes repairs; it cannot author a pass flag.
+- [x] Run `uv run pytest tests/test_author_quality.py tests/test_author_compatibility.py -q` and frontend review/coverage tests. Exercise fact checker, proofreader, and compatibility reviewer with a real provider using the bounded corpus. Human-review every live result; keep deviations visible and fix material defects. Commit the slice.
 
 ## Task 8: Produce complete course packages and generic student handoffs
 

@@ -134,7 +134,10 @@ export function createCourseWeaveIframe(serviceOrigin: string, mode: 'learn' | '
   Object.assign(iframe.style, {width:'100%',height:'100%',border:'0',display:'block'});
   iframe.title = mode === 'learn' ? 'CourseWeave guide' : 'CourseWeave author';
   iframe.src = `${serviceOrigin}/${mode}/`;
-  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+  // Author exports are deliberate downloads from the application UI. Course
+  // readers keep their existing sandbox and cannot inherit this capability.
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms' +
+    (mode === 'author' ? ' allow-downloads' : ''));
   iframe.referrerPolicy = 'origin';
   return iframe;
 }

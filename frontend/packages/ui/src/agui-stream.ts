@@ -51,7 +51,7 @@ export interface ProviderOutcomeMetadata {
   status: "ok";
   profile: string;
   capability_version: "capabilities-v1";
-  prompt_version: "course-assistant-v1" | "author-assistant-v1";
+  prompt_version: "course-assistant-v1" | "author-assistant-v1" | "author-assistant-v2";
   config_fingerprint: string;
   duration_ms: number;
   input_tokens: number;
@@ -169,7 +169,7 @@ export function isProviderOutcomeMetadata(
     value.status === "ok" &&
     typeof value.profile === "string" &&
     value.capability_version === "capabilities-v1" &&
-    ["course-assistant-v1", "author-assistant-v1"].includes(String(value.prompt_version)) &&
+    ["course-assistant-v1", "author-assistant-v1", "author-assistant-v2"].includes(String(value.prompt_version)) &&
     typeof value.config_fingerprint === "string" &&
     ["duration_ms", "input_tokens", "output_tokens", "requests"].every((key) =>
       nonnegative(value[key]),

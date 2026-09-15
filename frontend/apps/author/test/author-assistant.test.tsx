@@ -19,6 +19,7 @@ const clientFor = () => ({
   })),
   postGuide: vi.fn(),
   saveAuthorDraft: vi.fn(),
+  saveAuthorReview: vi.fn(),
 });
 
 it("shows six hats and exact context before sending, with explicit approved-source permission", async () => {
@@ -63,7 +64,7 @@ function completed(body: { threadId: string; runId: string }, terminal = true, w
     { type: "TEXT_MESSAGE_START", messageId: "assistant" },
     { type: "TEXT_MESSAGE_CONTENT", messageId: "assistant", delta: JSON.stringify(reply) },
     { type: "CUSTOM", name: "courseweave.provider_outcome", value: { version: "provider-evidence-v1", status: "ok",
-      profile: "text-only-v1", capability_version: "capabilities-v1", prompt_version: "author-assistant-v1",
+      profile: "text-only-v1", capability_version: "capabilities-v1", prompt_version: "author-assistant-v2",
       config_fingerprint: "a".repeat(64), duration_ms: 10, input_tokens: 10, output_tokens: 10, requests: 1 } },
     { type: "TEXT_MESSAGE_END", messageId: "assistant" },
     { type: "CUSTOM", name: "courseweave.author_reply", value: { draft_id: "draft-" + "a".repeat(32), context_digest: "a".repeat(64), reply } },
@@ -99,4 +100,20 @@ it.each([false, true])("rejects an incomplete or wrong-context stream without en
   expect(screen.queryByRole("button", { name: "Save draft for review" })).not.toBeInTheDocument();
   expect(screen.getByLabelText("Message to Author assistant")).toHaveValue("Keep the request");
   expect(client.saveAuthorDraft).not.toHaveBeenCalled();
+});
+
+it("saves a report separately while preserving a pending content draft", async () => {
+  const client = clientFor(), onReviewSaved = vi.fn();
+  client.postGuide.mockImplementation(async body => completed({ threadId: body.threadId, runId: body.runId }));
+  client.saveAuthorReview.mockResolvedValue({ report_id: "review-one" });
+  render(<AuthorAssistant client={client} projectId="project" courseId="course" clean onSaved={vi.fn()} onReviewSaved={onReviewSaved} />);
+  await screen.findByText("Unselected files are omitted.");
+  fireEvent.change(screen.getByLabelText("Message to Author assistant"), { target: { value: "Review this" } });
+  fireEvent.click(screen.getByRole("button", { name: "Request review" }));
+  await screen.findByText("A clearer prompt.");
+  expect(client.saveAuthorReview).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Save review report" }));
+  await waitFor(() => expect(onReviewSaved).toHaveBeenCalledWith("review-one"));
+  expect(client.saveAuthorDraft).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Save draft for review" })).toBeEnabled();
 });

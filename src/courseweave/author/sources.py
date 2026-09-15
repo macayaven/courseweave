@@ -28,7 +28,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from .contracts import OriginRule, ResearchPolicy, FetchResult, SearchResult, SourceRecord, SourceRevision, ResearchRequest, ResearchReport
+from .contracts import OriginRule, ResearchPolicy, FetchResult, SearchResult, SourceRecord, SourceProvenance, SourceRevision, ResearchRequest, ResearchReport
 from .project import ProjectError, atomic_bytes, atomic_json, read_private, read_sources, local_directory, MAX_FILES
 from ..store import CourseStore
 
@@ -643,6 +643,31 @@ def import_reference(project, source_path: Path) -> SourceRecord:
         return import_resource(project, source_path, intended_use="author_reference")
 
 
+def source_provenance(record: SourceRecord) -> SourceProvenance:
+    data = record.model_dump(include=set(SourceProvenance.model_fields))
+    if record.policy_decision == "local":
+        data.update(origin="local:" + Path(record.origin).name, final_url=None)
+    return SourceProvenance.model_validate(data)
+
+
+def verified_source_text(project, record: SourceRecord) -> str:
+    """Check both retained identities; caller owns any required course lock."""
+    raw = read_private(project.state_root, record.snapshot_path, max_bytes=8 * 1024 * 1024)
+    if sha256(raw).hexdigest() != record.raw_sha256:
+        raise SourceError("Source snapshot is corrupt or changed; restore a verified backup.")
+    if record.text_path:
+        data = read_private(project.state_root, record.text_path, max_bytes=MAX_FETCH_BYTES)
+        if sha256(data).hexdigest() != record.text_sha256:
+            raise SourceError("Source text is corrupt or changed; restore a verified backup.")
+        try:
+            return data.decode("utf-8")
+        except UnicodeError:
+            raise SourceError("Source text is corrupt; restore a verified backup.") from None
+    if record.extraction == "text":
+        raise SourceError("Source text is unavailable; restore a verified backup.")
+    return ""
+
+
 def source_excerpt(project, source_id: str, *, revision: int, start=0, limit=8000) -> dict:
     if type(start) is not int or start < 0 or type(limit) is not int or not 1 <= limit <= 8000:
         raise SourceError("Choose a nonnegative text offset and at most 8,000 characters.")
@@ -650,18 +675,7 @@ def source_excerpt(project, source_id: str, *, revision: int, start=0, limit=800
         record = next((record for record in read_sources(project) if record.source_id == source_id), None)
         if record is None or record.revision != revision:
             raise SourceError("Source revision changed or is unavailable; reload source decisions.")
-        raw = read_private(project.state_root, record.snapshot_path, max_bytes=8 * 1024 * 1024)
-        if sha256(raw).hexdigest() != record.raw_sha256:
-            raise SourceError("Source snapshot is corrupt or changed; restore a verified backup.")
-        text = ""
-        if record.text_path:
-            data = read_private(project.state_root, record.text_path, max_bytes=MAX_FETCH_BYTES)
-            if sha256(data).hexdigest() != record.text_sha256:
-                raise SourceError("Source text is corrupt or changed; restore a verified backup.")
-            try:
-                text = data.decode("utf-8")
-            except UnicodeError:
-                raise SourceError("Source text is corrupt; restore a verified backup.") from None
+        text = verified_source_text(project, record)
         if start > len(text):
             raise SourceError("Text offset exceeds this source revision.")
         excerpt = text[start:start + limit]

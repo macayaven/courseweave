@@ -5,6 +5,8 @@ import type { Inventory, Project, ProjectList, ProjectRequest, SourceRecord, Sou
 import type { ContentApply, ContentChange, ContentClient, ContentEdit, ContentReview, ContentSnapshot } from "./content-panel";
 import type { AuthorAssistantClient, ContextPreview } from "./curriculum-thread";
 import type { ResearchClient, ResearchRequest, ResearchReport, ResearchStatus, SourceText } from "./source-panel";
+import type { ReviewClient, ReviewDecision, ReviewReport } from "./review-panel";
+import type { CoverageReport } from "./coverage-panel";
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -135,6 +137,19 @@ export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | 
       signal,
     );
   return {
+    getReviews: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<ReviewClient["getReviews"]>>>("/api/author/reviews?offset=" + offset, {}, signal),
+    getReview: (id: string, signal?: AbortSignal) => json<ReviewReport>("/api/author/reviews/" + encodeURIComponent(id), {}, signal),
+    updateReviewFinding: (id: string, claimId: string, body: ReviewDecision, signal?: AbortSignal) => json<ReviewReport>(
+      `/api/author/reviews/${encodeURIComponent(id)}/findings/${encodeURIComponent(claimId)}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      }, signal),
+    deleteReview: async (id: string, reviewed_revision: number, signal?: AbortSignal): Promise<void> => {
+      await request("/api/author/reviews/" + encodeURIComponent(id), {
+        method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewed_revision }),
+      }, signal);
+    },
+    exportReview: (id: string, revision: number, signal?: AbortSignal) => request("/api/author/reviews/" + encodeURIComponent(id) + "/export?revision=" + revision, {}, signal).then(response => response.blob()),
+    getCoverage: (offset = 0, signal?: AbortSignal) => json<CoverageReport>("/api/author/coverage?offset=" + offset, {}, signal),
     getResearchStatus: (signal?: AbortSignal) => json<ResearchStatus>("/api/author/research", {}, signal),
     getResearchReports: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<ResearchClient["getResearchReports"]>>>("/api/author/research/reports?offset=" + offset, {}, signal),
     getResearchReport: (id: string, signal?: AbortSignal) => json<ResearchReport>("/api/author/research/reports/" + encodeURIComponent(id), {}, signal),
@@ -152,6 +167,9 @@ export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | 
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }, signal),
     saveAuthorDraft: (id: string, signal?: AbortSignal) => json<ContentChange>("/api/author/assistant/drafts/" + encodeURIComponent(id) + "/save", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }, signal),
+    saveAuthorReview: (id: string, signal?: AbortSignal) => json<ReviewReport>("/api/author/assistant/drafts/" + encodeURIComponent(id) + "/save-review", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
     }, signal),
     getContentFiles: (signal?: AbortSignal) => json<Awaited<ReturnType<ContentClient["getContentFiles"]>>>("/api/author/content/files", {}, signal),

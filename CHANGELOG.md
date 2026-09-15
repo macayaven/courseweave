@@ -46,6 +46,17 @@ releases.
 - Added paged research reports, source excerpts, offline/manual workflows and
   bounded waiting for the shared course lock during research. Imported material
   is never executed, and the Student assistant gains no network retrieval.
+- Added explicitly saved factual/editorial reviews with separate model judgments,
+  checked quotation provenance and human dispositions. Review revisions, stale
+  source/target detection, dismissal reasons, deletion and private JSON downloads
+  preserve author control independently of saved content changes and session chat.
+- Added course coverage with explicit author objective links, authored practice,
+  references and review gaps. Missing metadata remains guidance, and coverage
+  never changes progress or certifies mastery. The compatibility role receives
+  bounded canonical diagnostics with their unperformed checks.
+- Fixed review-panel loading that repeatedly disabled sibling panels in a real
+  Jupyter launch, recognized Author prompt metadata on the shared stream, and
+  enabled deliberate artifact downloads in the Author window's sandbox.
 - The complete Author Edition and its installed/live-provider acceptance are
   still in development; see [implementation notes](docs/author/implementation.md).
 

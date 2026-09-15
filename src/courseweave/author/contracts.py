@@ -221,6 +221,24 @@ class SourceRecord(ClosedModel):
     review_note: Annotated[str, Field(max_length=4000)] = ""
 
 
+class SourceProvenance(SourceRevision):
+    """Attribution safe for a permitted model context or explicit review export.
+
+    Local origins are represented by a filename, never an absolute machine path.
+    The full import origin and private snapshot paths remain in SourceRecord.
+    """
+    title: Annotated[str, Field(min_length=1, max_length=500)]
+    origin: Annotated[str, Field(min_length=1, max_length=4096)]
+    imported_at: datetime
+    retrieved_at: datetime | None = None
+    publication_date: date | None = None
+    final_url: Annotated[str, Field(max_length=4096)] | None = None
+    extraction: Literal["text", "unsupported", "unavailable"]
+    policy_decision: Literal["allowed", "denied", "local", "not_checked"]
+    status: SourceStatus
+    redistribution: Literal["undecided", "include", "exclude"]
+
+
 class SearchResult(ClosedModel):
     url: Annotated[str, Field(max_length=4096)]
     title: Annotated[str, Field(max_length=500)]
@@ -281,25 +299,67 @@ class AuthorReply(ClosedModel):
     findings: tuple[FindingDraft, ...] = Field(default=(), max_length=64)
     change: ChangeDraft | None = None
 
+    @field_validator("findings")
+    @classmethod
+    def unique_claims(cls, findings):
+        if len({finding.claim_id for finding in findings}) != len(findings):
+            raise ValueError("finding claim IDs must be unique")
+        return findings
+
 
 class SavedFinding(FindingDraft):
     human_disposition: HumanDisposition = "unreviewed"
     disposition_reason: Annotated[str, Field(max_length=4000)] = ""
     provenance: Literal["located", "mismatch", "missing", "not_checked"] = "not_checked"
+    objective_ids: tuple[Slug, ...] = Field(default=(), max_length=32)
+
+
+class CompatibilitySummary(ClosedModel):
+    scope: Literal["saved_course"]
+    student_profile: Literal["0.2.0", "0.3.0"]
+    manifest_sha256: Sha256
+    preliminary_checks_passed: bool
+    issues: tuple[ValidationIssue, ...] = Field(max_length=10000)
+    omitted_issues: Annotated[StrictInt, Field(ge=0)]
+    notice: Annotated[str, Field(max_length=1000)]
 
 
 class ReviewReport(ClosedModel):
+    version: Literal["author-review-v1"] = "author-review-v1"
     report_id: Slug
     project_id: Slug
     revision: Revision
     context_digest: Sha256
+    selection: AuthorSelection
+    project_revision: Revision
+    manifest_sha256: Sha256
+    prompt_version: Annotated[str, Field(min_length=1, max_length=80)]
+    context_budget: RequestBudget
+    compatibility: CompatibilitySummary
+    omissions: tuple[Annotated[str, Field(max_length=1000)], ...] = Field(default=(), max_length=128)
     target_path: LocalPath
     target_sha256: Sha256
+    target_exists: bool
+    target_fully_visible: bool
+    target_characters: Annotated[StrictInt, Field(ge=0)] | None = None
     role: AuthorRole
-    sources: tuple[SourceRevision, ...] = Field(default=(), max_length=32)
+    summary: Annotated[str, Field(min_length=1, max_length=16000)]
+    sources: tuple[SourceProvenance, ...] = Field(default=(), max_length=32)
     findings: tuple[SavedFinding, ...] = Field(max_length=64)
     status: Literal["current", "stale"]
+    stale_reasons: tuple[Annotated[str, Field(max_length=1000)], ...] = Field(default=(), max_length=64)
     saved_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode="after")
+    def consistent_identity(self):
+        if self.selection.project_id != self.project_id or self.selection.file_path != self.target_path:
+            raise ValueError("review target must match the saved selection")
+        if len({s.source_id for s in self.sources}) != len(self.sources):
+            raise ValueError("review sources must be unique")
+        if len({f.claim_id for f in self.findings}) != len(self.findings):
+            raise ValueError("finding claim IDs must be unique")
+        return self
 
 
 class StudentProfile(ClosedModel):

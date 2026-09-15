@@ -379,6 +379,41 @@ Conversation, previews and unsaved drafts follow existing session lifetime and
 bounded history cleanup. Up to 128 unsaved reply drafts are retained per project
 process. Saved changes retain their independent durable lifecycle.
 
+## Private Author review reports and coverage (v0.3.0 candidate)
+
+These authenticated, project-selected routes require a private Author project;
+ordinary Student launches return 403. The report is distinct from a pending
+content change and from session-only conversation.
+
+- `POST /api/author/assistant/drafts/{draft_id}/save-review`: empty closed object.
+  Saves a complete validated reply using its still-current server context. Human
+  dispositions start `unreviewed`; this does not save or apply a content change.
+  Repeated saves in the same session return the existing report. A deleted report
+  is not recreated by replaying that save.
+- `GET /api/author/reviews?offset=0`: at most twenty summaries and `next_offset`.
+  `GET /api/author/reviews/{report_id}` returns one closed `ReviewReport` with
+  current derived staleness and provenance checks, original model judgments,
+  human decisions, scope/budget/omissions and supplied canonical diagnostics.
+- `PUT /api/author/reviews/{report_id}/findings/{claim_id}`: closed `revision`,
+  `human_disposition`, `reason` and `objective_ids`. Dismissed/revised decisions
+  require a nonblank reason. Objective IDs must belong to the report's explicitly
+  selected activity. Stale accepted/revised decisions and revision conflicts fail;
+  model judgment and evidence are immutable through this route.
+- `DELETE /api/author/reviews/{report_id}`: closed `reviewed_revision`, returns 204.
+- `GET /api/author/reviews/{report_id}/export?revision=0`: revision-checked JSON
+  attachment with `Cache-Control: no-store`. The application requests a private
+  download only on the explicit user action. Local source origins use filenames.
+- `GET /api/author/coverage?offset=0`: at most twenty canonical activity rows with
+  authored objectives/practice, declared sources, explicit reviewed support and
+  gaps, plus report IDs not associated with a current activity. No progress state
+  is read or changed, and model claim IDs are not inferred as objective links.
+
+Reports are bounded to 200 per project and 512 KiB each. All mutations use the
+existing course lock and atomic private writes. Dependency changes mark reports
+stale without rewriting judgments or decisions. Located quotation provenance is
+independent of model entailment and human acceptance. See [review workflow and
+limits](../author/reviews.md).
+
 ## Private Author sources and research (v0.3.0 candidate)
 
 All routes below require an authenticated private project. Ordinary Student

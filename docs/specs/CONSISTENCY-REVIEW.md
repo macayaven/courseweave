@@ -63,6 +63,23 @@ approved private handoff. No runtime acceptance is inferred from either record.
 A cross-edition self-review confirmed that lifecycle wording and completed Task 1
 checkboxes change no normative requirement, shared fact, or traceability mapping.
 See the implementation notes for authority/evidence limits and open release gates.
+
+## Review and alignment implementation update
+
+Task 7 implements private saved review reports, explicit human dispositions and
+objective links, derived source/target staleness, and bounded canonical diagnostics
+for the shared assistant. TE-009/TE-010/TE-011 retain separate factual, editorial
+and deterministic authority; TE-016 review lifecycle and TE-017 coverage do not
+grant mastery or change student requirements. Source metadata in a report comes
+from the actual supplied context, with current provenance checked before saving.
+
+The plan's implemented research/review service names now match their consumers.
+Human decisions remain separate from model fields; selected-file association with
+an activity is explicit and validated. The Author app's iframe uses the existing
+shared constructor and permits deliberate artifact downloads. Student guide and
+reader sandboxes retain their previous capabilities. This self-review changes no
+normative requirement, shared fact, schema-v2 byte or traceability row. The final
+immutable-candidate independent review and installed gates remain open.
 Independent review remains required at the exact candidate boundary in Task 11.
 
 ## Reviewed content implementation update, 2026-09-15

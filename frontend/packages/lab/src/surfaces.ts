@@ -1,6 +1,7 @@
 import { Widget } from "@lumino/widgets";
 
 import { parseOpenSurfaceRequest } from "./protocol";
+import { createCourseWeaveIframe } from "./runtime";
 
 export type SurfaceType =
   | "html"
@@ -625,25 +626,17 @@ class ReaderWidget extends Widget {
   }
 }
 
-class IframeWidget extends Widget {
+class AuthorWidget extends Widget {
   readonly iframe: HTMLIFrameElement;
 
-  constructor(id: string, title: string, src: string) {
+  constructor(serviceOrigin: string) {
     const node = document.createElement("div");
-    const iframe = document.createElement("iframe");
-    Object.assign(iframe.style, {width:'100%',height:'100%',border:'0',display:'block'});
-    iframe.title = title;
-    iframe.src = src;
-    iframe.referrerPolicy = "origin";
-    iframe.setAttribute(
-      "sandbox",
-      "allow-scripts allow-same-origin allow-forms",
-    );
+    const iframe = createCourseWeaveIframe(serviceOrigin, "author");
     node.appendChild(iframe);
     super({ node });
     this.iframe = iframe;
-    this.id = id;
-    this.title.label = title;
+    this.id = "courseweave-author";
+    this.title.label = iframe.title;
     this.title.closable = true;
   }
 }
@@ -709,7 +702,7 @@ export class CourseSurfaceFactory {
   private course: CourseSnapshot | null = null;
   private reader: ReaderWidget | null = null;
   private dashboard: DashboardWidget | null = null;
-  private author: IframeWidget | null = null;
+  private author: AuthorWidget | null = null;
   private readonly terminals = new Map<string, Widget>();
   private readonly metadata = new WeakMap<object, SurfaceMetadata>();
   private readonly jupyterBaseUrl: string;
@@ -1064,11 +1057,7 @@ export class CourseSurfaceFactory {
 
   openAuthor(): Widget {
     if (this.author === null || this.author.isDisposed) {
-      this.author = new IframeWidget(
-        "courseweave-author",
-        "CourseWeave author",
-        `${this.options.serviceOrigin}/author/`,
-      );
+      this.author = new AuthorWidget(this.options.serviceOrigin);
       this.options.beforeAuthorAttach?.(this.author, this.author.iframe);
       this.options.shell.add(this.author, "main", { type: "CourseWeave" });
     }

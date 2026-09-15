@@ -330,6 +330,7 @@ describe('CourseSurfaceFactory', () => {
     expect(dashboard.id).toBe('courseweave-dashboard');
     expect(author.id).toBe('courseweave-author');
     expect((author.node.querySelector('iframe') as HTMLIFrameElement).src).toBe('https://courseweave.test/author/');
+    expect(author.node.querySelector('iframe')?.getAttribute('sandbox')?.split(' ')).toContain('allow-downloads');
     expect(shell.add).toHaveBeenCalledTimes(2);
 
     dashboard.dispose();

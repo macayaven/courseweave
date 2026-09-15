@@ -38,6 +38,8 @@ import { CompatibilityPanel } from "./compatibility";
 import { ProjectPanel, SourceLibrary, type ProjectList } from "./project-panel";
 import { SourcePanel } from "./source-panel";
 import { ContentPanel, type ContentChange } from "./content-panel";
+import { ReviewPanel } from "./review-panel";
+import { CoveragePanel } from "./coverage-panel";
 
 type Client = ReturnType<typeof createAuthorClient>;
 type CheckState = {
@@ -263,6 +265,7 @@ function AuthorEditor({
   privateProjectId,
   authorEpoch = 0,
   onAuthorSaved = () => undefined,
+  onReviewSaved,
 }: {
   course: CourseResponse;
   client: Client;
@@ -276,6 +279,7 @@ function AuthorEditor({
   privateProjectId?: string;
   authorEpoch?: number;
   onAuthorSaved?(change: ContentChange): void;
+  onReviewSaved?(id: string): void;
 }) {
   const [state, setState] = useState<AuthorDocumentState>(() =>
     documentState(course.manifest as AuthorManifest),
@@ -700,7 +704,7 @@ function AuthorEditor({
           return module ? { module_id: module.id, ...(phase ? { phase_id: phase.id } : {}) } : undefined;
         })()}
         clean={!dirty && !externalDirty && !proposalSavePending && !refreshBlocked && connected}
-        epoch={authorEpoch + connectionEpoch + courseAuthorityEpoch} onSaved={onAuthorSaved} /> : <CurriculumThread
+        epoch={authorEpoch + connectionEpoch + courseAuthorityEpoch} onSaved={onAuthorSaved} onReviewSaved={onReviewSaved} /> : <CurriculumThread
         client={client}
         sourceId={sourceId}
         selection={(() => {
@@ -782,6 +786,10 @@ export function AuthorApp() {
   const [sourcesDirty, setSourcesDirty] = useState(false);
   const [contentDirty, setContentDirty] = useState(false);
   const [researchBusy, setResearchBusy] = useState(false);
+  const [reviewDirty, setReviewDirty] = useState(false);
+  const [reviewEpoch, setReviewEpoch] = useState(0);
+  const [coverageEpoch, setCoverageEpoch] = useState(0);
+  const [openReportId, setOpenReportId] = useState<string | null>(null);
   const [sourcesEpoch, setSourcesEpoch] = useState(0);
   const [openChangeId, setOpenChangeId] = useState<string | null>(null);
   const [courseAuthorityEpoch, setCourseAuthorityEpoch] = useState(-1);
@@ -832,13 +840,14 @@ export function AuthorApp() {
     return () => controller.abort();
   }, [runtime.status, runtime.runtime, projectId]);
   const selectProject = (id: string) => {
-    if (dirty || sourcesDirty || contentDirty || researchBusy || id === projectId) return;
+    if (dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || id === projectId) return;
     setCourse(null); setLoad("loading"); setProjectId(id);
     setOpenChangeId(null);
+    setOpenReportId(null);
   };
   const projectPanel = projects?.enabled && client.current ? <ProjectPanel client={client.current}
     projects={projects.projects ?? []} unavailable={projects.unavailable ?? []} selected={projectId}
-    disabled={dirty || sourcesDirty || contentDirty || researchBusy || runtime.status !== "ready" || load !== "ready"} onSelect={selectProject} /> : null;
+    disabled={dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || runtime.status !== "ready" || load !== "ready"} onSelect={selectProject} /> : null;
   if (projects?.enabled && !projectId && load === "ready")
     return <AuthorShell state="Choose or create a private author project.">{projectPanel}</AuthorShell>;
   if (runtime.status === "connecting" && !course)
@@ -900,18 +909,31 @@ export function AuthorApp() {
         externalDirty={contentDirty || sourcesDirty || researchBusy}
         privateProjectId={projectId ?? undefined} authorEpoch={sourcesEpoch}
         onAuthorSaved={change => setOpenChangeId(change.change_id)}
+        onReviewSaved={id => { setOpenReportId(id); setReviewEpoch(value => value + 1); setCoverageEpoch(value => value + 1); }}
       />
       {projectId && <ContentPanel key={"content-" + projectId} client={client.current}
         openChangeId={openChangeId}
-        disabled={!connected || dirty || sourcesDirty || researchBusy} onDirtyChange={setContentDirty} onChanged={async () => {
+        disabled={!connected || dirty || sourcesDirty || researchBusy || reviewDirty} onDirtyChange={setContentDirty} onChanged={async () => {
           const originClient = client.current!;
           const next = await originClient.getCourse();
           if (client.current !== originClient) return;
           setCourse(next); setCourseAuthorityEpoch(connectionEpoch.current); setSourcesEpoch((current) => current + 1);
         }} />}
       {projectId && <SourcePanel key={"research-" + projectId} client={client.current}
-        disabled={!connected || dirty || sourcesDirty || contentDirty} onBusyChange={setResearchBusy} onChanged={() => setSourcesEpoch(value => value + 1)} />}
-      {projectId && <SourceLibrary key={"sources-" + projectId + ":" + sourcesEpoch} client={client.current} projectId={projectId} disabled={!connected || contentDirty || researchBusy} onDirtyChange={setSourcesDirty} onChanged={() => setSourcesEpoch(value => value + 1)} />}
+        disabled={!connected || dirty || sourcesDirty || contentDirty || reviewDirty} onBusyChange={setResearchBusy} onChanged={() => setSourcesEpoch(value => value + 1)} />}
+      {projectId && <SourceLibrary key={"sources-" + projectId + ":" + sourcesEpoch} client={client.current} projectId={projectId} disabled={!connected || contentDirty || researchBusy || reviewDirty} onDirtyChange={setSourcesDirty} onChanged={() => setSourcesEpoch(value => value + 1)} />}
+      {projectId && <ReviewPanel key={"reviews-" + projectId} client={client.current}
+        disabled={!connected || dirty || sourcesDirty || contentDirty || researchBusy}
+        epoch={sourcesEpoch + connectionEpoch.current} openReportId={openReportId} openEpoch={reviewEpoch} onDirtyChange={setReviewDirty}
+        onChanged={() => setCoverageEpoch(value => value + 1)} objectivesFor={selection =>
+          (course.manifest as AuthorManifest).modules.find(module => module.id === selection.module_id)?.phases
+            .find(phase => phase.id === selection.phase_id)?.learning?.objectives ?? []} />}
+      {projectId && <CoveragePanel key={"coverage-" + projectId} client={client.current}
+        disabled={!connected || dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty}
+        epoch={sourcesEpoch + coverageEpoch + connectionEpoch.current} onOpenReview={id => {
+          setOpenReportId(id); setReviewEpoch(value => value + 1);
+          document.querySelector('[aria-label="Saved review reports"]')?.scrollIntoView({ block: "start" });
+        }} />}
       {!connected ? (
         <button type="button" onClick={runtime.retry}>
           Reconnect

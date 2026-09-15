@@ -42,7 +42,7 @@ self-review; the bounded independent review remains required in Task 11.
 
 ## Remaining work
 
-Tasks 6–11, installed Author/Student journeys, actual public discovery, all six
+Task 6 live discovery and Tasks 7–11, installed Author/Student journeys, all six
 real-provider roles, failure/recovery, rendered UI and independent final review
 remain required. Source declarations and fixtures do not satisfy those gates.
 
@@ -301,8 +301,78 @@ These checks are separate from installed release acceptance. Live public fetch,
 source review and synthesis development observations are tracked in the local
 receipt; actual Brave discovery remains pending authorized credential access.
 
-Three-spec impact: TE-006/TE-007 research and TE-005/TE-008 source evidence now
+Three-spec impact: TE-006/TE-007 research and TE-004/TE-008 source curation now
 have implementation coverage. Student schema-v2 rules, progress, consent and
 provider scope remain unchanged. Author research grants no Student retrieval.
 Generic export exclusion, saved model findings/human dispositions, full recovery,
 exact installed gates and final independent review remain subsequent work.
+
+## Task 7: saved evidence reviews and explicit objective links
+
+The shared assistant context now includes bounded canonical compatibility
+diagnostics and source attribution/dates/extraction policy alongside exact raw
+and text identities. Visible omissions remain part of the saved report. Context
+budgeting accounts for JSON escaping and reserves space for selected evidence;
+truncated targets cannot authorize whole-file edits. The shared stream recognizes
+`author-assistant-v2` while retaining the existing Student and Author v1 metadata.
+
+An explicit Save review report stores a validated completed reply, separate from
+Save draft and session chat. Its sources come from the exact supplied context;
+reading or saving checks current source metadata as well as revisions and bytes.
+Model findings cannot set human dispositions, objective links or compatibility
+authority. Reports are private atomic JSON artifacts with revision-checked human
+decisions, deletion and export, bounded to 200 reports of 512 KiB per project.
+See [reviews.md](reviews.md) for the operating workflow and limits.
+
+Coverage consumes canonical activity/objective/hint/check metadata and explicit
+human objective links. Current supported, located and accepted/revised findings
+can appear as author-accepted evidence links. Unreviewed or stale findings remain
+gaps; missing objectives remain guidance. Activity-wide prompts and declared
+references are labeled separately. Neither coverage nor native checks grant
+mastery or change required progress.
+
+The deterministic corpus declares expected behavior for nine cases before live
+execution. Focused service/API tests cover quoted spans, source identity and
+metadata changes, disposition authority, stale targets, concurrent decisions,
+deleted-report replay, export privacy and objective mappings. UI checks cover
+explicit save/disposition/delete actions, revision conflicts, manual report
+selection and independent panel reads. Actual Jupyter development checks exposed
+a mutual loading/disabled loop and a blocked review download; focused regressions
+cover both. Only the Author app iframe gains deliberate download permission;
+Student guide and content-reader sandboxes retain their existing capabilities.
+
+Live results and remaining validation are recorded in the local implementation
+receipt. An initial real response used Markdown fences and an inexact quotation;
+the strict envelope rejected it without saving or automatically retrying. A
+manually revised author request produced a valid supported finding. Across the
+nine-case corpus, an earlier rejected attempt and a manual current-source
+follow-up, eleven explicit requests
+produced eight validated replies and three rejections. The rejected attempts
+remain in the local evidence. No automatic provider repair was made. One failed
+current-source run lacks its displayed wording in the capture; a separate
+current-source request was inspected and saved, with that capture gap disclosed.
+
+The inspected proofreader diff corrected prediction/observation timing through
+the ordinary explicit apply. Factual review declined invented citations and
+unsupported retention claims. Compatibility review retained actual issue codes
+and locations and rejected an unsupported mastery request. Model explanations
+still need review: one draft assumed unspecified code cells, one response only
+partly explained recorded requirements, and one overgeneralized revision/hash
+identity. Those statements acquired no deterministic or mutation authority.
+
+Development checks: 236 focused Python cases passed with one separately gated
+installed-profile skip; 163 Author and 79 Lab cases passed, as did frontend
+typecheck, rebuilt Author/bridge assets and twelve specification regression cases.
+Actual UI checks include private download, accepted objective links, source/target
+staleness, two-tab decision conflict with preserved notes, dismissal with a reason,
+keyboard deletion, restart and a bounded scrolling coverage table at 390 pixels.
+These are automated UI and Codex visual/evidence observations, not fresh archive,
+independent human or learning evidence. Full installed V06/V09 acceptance remains
+required.
+
+Three-spec impact: TE-009/TE-010/TE-011 reviews, TE-016 report decisions and
+TE-017 coverage consume the existing source and content authorities. Normative
+facts, schema-v2 bytes, progress, Student
+consent and the requirement-to-gate mapping are unchanged. Implemented service
+names/signatures in the plan now match the research and review services; there
+are no duplicate compatibility wrappers. Final independent review remains open.

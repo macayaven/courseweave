@@ -34,6 +34,7 @@ from .project import (
 from .assistant import AuthorAssistantError, ContextRequest, build_author_context, parse_author_reply, replay_fingerprint
 from .contracts import AuthorContext, AuthorReply, ResearchRequest
 from .sources import ResearchControl, import_reference, source_excerpt, run_research, list_research_reports, read_research_report
+from .quality import FindingDecision, course_coverage, delete_review, export_review, list_reviews, read_review, save_review, update_review
 
 
 class CreateProject(ClosedModel):
@@ -92,6 +93,7 @@ class _Draft:
     context: AuthorContext
     reply: AuthorReply
     saved_change_id: str | None = None
+    saved_report_id: str | None = None
 
 
 def _forget_author_context(app, key, *, history=True):
@@ -341,6 +343,77 @@ def install_routes(app, *, author_home: Path | None, author_project=None, factor
             change = stage_change(app.state.author_project, draft.context, draft.reply.change)
             draft.saved_change_id = change.change_id
         return change.model_dump(mode="json", exclude={"after_bytes"})
+
+    @app.post("/api/author/assistant/drafts/{draft_id}/save-review", status_code=201)
+    async def save_author_review(draft_id: str, request: Request):
+        from ..api import _existing_session
+        if app.state.author_project is None:
+            return failure(403, "Saved reviews require a private author project.")
+        try:
+            await read_body(request, SaveDraft)
+        except ValidationError:
+            return failure(422, "Save only the server's completed review reply.")
+        draft = app.state.author_drafts.get(draft_id)
+        if draft is None or draft.history_key[0] != _existing_session(app, request):
+            return failure(409, "This reply expired or belongs to another session; request a fresh review.")
+        current_author_context(app, draft.history_key, draft.context_id)
+        # Same session authority as Save draft; no await splits validation/save.
+        if draft.saved_report_id:
+            report = read_review(app.state.author_project, draft.saved_report_id)
+        else:
+            report = save_review(app.state.author_project, draft.context, draft.reply)
+            draft.saved_report_id = report.report_id
+        return report.model_dump(mode="json")
+
+    @app.get("/api/author/reviews")
+    def reviews(offset: int = Query(default=0, ge=0)):
+        if app.state.author_project is None:
+            return failure(403, "Saved reviews require a private author project.")
+        reports = list_reviews(app.state.author_project, offset=offset)
+        return {"reports": [report.model_dump(mode="json", include={"report_id", "role", "target_path", "status", "revision", "saved_at", "summary"}) for report in reports],
+            "next_offset": offset + len(reports) if len(reports) == 20 else None}
+
+    @app.get("/api/author/reviews/{report_id}")
+    def review(report_id: str):
+        if app.state.author_project is None:
+            return failure(403, "Saved reviews require a private author project.")
+        return read_review(app.state.author_project, report_id).model_dump(mode="json")
+
+    @app.put("/api/author/reviews/{report_id}/findings/{claim_id}")
+    async def review_decision(report_id: str, claim_id: str, request: Request):
+        if app.state.author_project is None:
+            return failure(403, "Review decisions require a private author project.")
+        try:
+            body = await read_body(request, FindingDecision)
+        except ValidationError:
+            return failure(422, "Choose a human disposition and reviewed revision; dismissing or revising requires a reason.")
+        report = await run_in_threadpool(update_review, app.state.author_project, report_id, claim_id, body)
+        return report.model_dump(mode="json")
+
+    @app.delete("/api/author/reviews/{report_id}", status_code=204)
+    async def remove_review(report_id: str, request: Request):
+        if app.state.author_project is None:
+            return failure(403, "Deleting reviews requires a private author project.")
+        try:
+            body = await read_body(request, ReviewedRevision)
+        except ValidationError:
+            return failure(422, "Review the saved report revision before deleting it.")
+        await run_in_threadpool(delete_review, app.state.author_project, report_id, body.reviewed_revision)
+        return Response(status_code=204)
+
+    @app.get("/api/author/reviews/{report_id}/export")
+    def download_review(report_id: str, revision: int = Query(ge=0)):
+        if app.state.author_project is None:
+            return failure(403, "Exporting reviews requires a private author project.")
+        raw = export_review(app.state.author_project, report_id, revision)
+        return Response(raw, media_type="application/json", headers={"Cache-Control": "no-store",
+            "Content-Disposition": f'attachment; filename="{report_id}.json"'})
+
+    @app.get("/api/author/coverage")
+    def coverage(offset: int = Query(default=0, ge=0)):
+        if app.state.author_project is None:
+            return failure(403, "Coverage requires a private author project.")
+        return course_coverage(app.state.author_project, offset=offset)
 
     @app.post("/api/author/projects/inventory")
     async def inventory(request: Request):

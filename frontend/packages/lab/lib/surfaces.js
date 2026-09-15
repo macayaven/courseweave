@@ -9,6 +9,7 @@ exports.registerCoursePalette = registerCoursePalette;
 exports.registerCourseCommands = registerCourseCommands;
 const widgets_1 = require("@lumino/widgets");
 const protocol_1 = require("./protocol");
+const runtime_1 = require("./runtime");
 function record(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -412,20 +413,15 @@ class ReaderWidget extends widgets_1.Widget {
         previous.replaceWith(iframe);
     }
 }
-class IframeWidget extends widgets_1.Widget {
-    constructor(id, title, src) {
+class AuthorWidget extends widgets_1.Widget {
+    constructor(serviceOrigin) {
         const node = document.createElement("div");
-        const iframe = document.createElement("iframe");
-        Object.assign(iframe.style, { width: '100%', height: '100%', border: '0', display: 'block' });
-        iframe.title = title;
-        iframe.src = src;
-        iframe.referrerPolicy = "origin";
-        iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
+        const iframe = (0, runtime_1.createCourseWeaveIframe)(serviceOrigin, "author");
         node.appendChild(iframe);
         super({ node });
         this.iframe = iframe;
-        this.id = id;
-        this.title.label = title;
+        this.id = "courseweave-author";
+        this.title.label = iframe.title;
         this.title.closable = true;
     }
 }
@@ -783,7 +779,7 @@ class CourseSurfaceFactory {
     }
     openAuthor() {
         if (this.author === null || this.author.isDisposed) {
-            this.author = new IframeWidget("courseweave-author", "CourseWeave author", `${this.options.serviceOrigin}/author/`);
+            this.author = new AuthorWidget(this.options.serviceOrigin);
             this.options.beforeAuthorAttach?.(this.author, this.author.iframe);
             this.options.shell.add(this.author, "main", { type: "CourseWeave" });
         }

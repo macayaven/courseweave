@@ -31,22 +31,25 @@ export interface AuthorAssistantClient {
   previewAuthorContext(body: { thread_id: string; selection: AssistantSelection; role: AuthorRole; source_ids: string[] }, signal?: AbortSignal): Promise<ContextPreview>;
   postGuide(body: unknown, signal?: AbortSignal): Promise<Response>;
   saveAuthorDraft(id: string, signal?: AbortSignal): Promise<ContentChange>;
+  saveAuthorReview(id: string, signal?: AbortSignal): Promise<{ report_id: string }>;
 }
 const hats: [AuthorRole, string][] = [["curator", "Data curator"], ["curriculum_designer", "Curriculum designer"],
   ["source_researcher", "Source researcher"], ["fact_checker", "Fact checker"],
   ["proofreader", "Proofreader"], ["compatibility_reviewer", "Compatibility reviewer"]];
 
 /** One conversation and permission preview for private Author projects. */
-export function AuthorAssistant({ client, projectId, courseId, selected, clean, epoch = 0, onSaved }: {
+export function AuthorAssistant({ client, projectId, courseId, selected, clean, epoch = 0, onSaved, onReviewSaved }: {
   client: AuthorAssistantClient; projectId: string; courseId: string;
   selected?: { module_id: string; phase_id?: string }; clean: boolean; epoch?: number;
   onSaved(change: ContentChange): void;
+  onReviewSaved?(id: string): void;
 }) {
   const [threadId] = useState(() => crypto.randomUUID());
   const [role, setRole] = useState<AuthorRole>("curriculum_designer");
   const [unit, setUnit] = useState<AssistantSelection["manifest_unit"] | "file">("course");
   const [files, setFiles] = useState<string[]>([]);
   const [file, setFile] = useState("");
+  const [associateActivity, setAssociateActivity] = useState(false);
   const [notebook, setNotebook] = useState<Notebook | undefined>();
   const [cells, setCells] = useState<string[]>([]);
   const [sources, setSources] = useState<{ source_id: string; title: string; status: string }[]>([]);
@@ -58,6 +61,8 @@ export function AuthorAssistant({ client, projectId, courseId, selected, clean, 
   const [notice, setNotice] = useState("");
   const [transcript, setTranscript] = useState<{ id: string; text: string; role: string; scope: string; state: string; reply?: AuthorReplyMetadata }[]>([]);
   const [draft, setDraft] = useState<AuthorReplyMetadata | null>(null);
+  const [savedReview, setSavedReview] = useState("");
+  const [savedChange, setSavedChange] = useState("");
   const [manualResponse, setManualResponse] = useState("");
   const active = useRef<AbortController | null>(null);
   const transcriptCount = useRef(0);
@@ -67,6 +72,9 @@ export function AuthorAssistant({ client, projectId, courseId, selected, clean, 
     manifest_unit: unit === "file" ? "course" : unit,
     ...(unit !== "file" && unit !== "course" && selected ? { module_id: selected.module_id } : {}),
     ...((unit === "phase" || unit === "learning") && selected?.phase_id ? { phase_id: selected.phase_id } : {}) };
+  if (unit === "file" && associateActivity && selected?.phase_id) {
+    chosen.module_id = selected.module_id; chosen.phase_id = selected.phase_id;
+  }
   const scopeKey = JSON.stringify(chosen);
   const sourceKey = JSON.stringify(sourceIds);
   const currentRequest = useRef("");
@@ -150,9 +158,22 @@ export function AuthorAssistant({ client, projectId, courseId, selected, clean, 
     const controller = new AbortController(); active.current = controller; setPending(true);
     try {
       const saved = await client.saveAuthorDraft(draft.draft_id, controller.signal);
-      if (!controller.signal.aborted) { setDraft(null); setNotice("Draft saved. Review its exact diff in Course files and pending changes."); onSaved(saved); }
+      if (!controller.signal.aborted) { setSavedChange(draft.draft_id); setNotice("Draft saved. Review its exact diff in Course files and pending changes."); onSaved(saved); }
     } catch (error) {
       if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "The draft could not be saved.");
+    } finally { if (active.current === controller) { active.current = null; setPending(false); } }
+  };
+  const saveReport = async () => {
+    if (!draft || !preview || draft.context_digest !== preview.context.digest || pending || !clean) return;
+    const controller = new AbortController(); active.current = controller; setPending(true);
+    try {
+      const saved = await client.saveAuthorReview(draft.draft_id, controller.signal);
+      if (!controller.signal.aborted) {
+        setSavedReview(draft.draft_id); setNotice("Review report saved. Your findings start unreviewed; open Saved review reports to record decisions.");
+        onReviewSaved?.(saved.report_id);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "The review could not be saved.");
     } finally { if (active.current === controller) { active.current = null; setPending(false); } }
   };
   const ready = clean && !!preview && !pending && !!composer.trim();
@@ -169,6 +190,8 @@ export function AuthorAssistant({ client, projectId, courseId, selected, clean, 
     </select></label>
     {unit === "file" && <><label>Assistant file<select value={file} onChange={event => setFile(event.target.value)}>
       <option value="">Choose a saved file</option>{files.map(path => <option key={path} value={path}>{path}</option>)}</select></label>
+      {selected?.phase_id && <label><input type="checkbox" aria-label="Associate file review with selected activity" checked={associateActivity}
+        onChange={event => setAssociateActivity(event.target.checked)} />Associate file review with selected activity ({selected.phase_id}); the file must belong to that activity.</label>}
       {notebook && <fieldset><legend>Permitted notebook cells</legend>{notebook.cells.map(cell => <label key={cell.id}>
         <input type="checkbox" checked={cells.includes(cell.id)} onChange={event => setCells(items => event.target.checked ? [...items, cell.id] : items.filter(id => id !== cell.id))} />
         {cell.id} ({cell.cell_type})</label>)}</fieldset>}</>}
@@ -200,7 +223,8 @@ export function AuthorAssistant({ client, projectId, courseId, selected, clean, 
     {manualResponse && <details open><summary>Response for manual editing</summary>
       <textarea aria-label="Rejected response for manual editing" value={manualResponse} onChange={event => setManualResponse(event.target.value)} />
       <p>Copy the useful text into the manual editor, then create a new reviewed change.</p></details>}
-    {draft?.reply.change && <Button disabled={!clean || pending || draft.context_digest !== preview?.context.digest} onClick={() => void save()}>Save draft for review</Button>}
+    {draft?.reply.change && <Button disabled={!clean || pending || savedChange === draft.draft_id || draft.context_digest !== preview?.context.digest} onClick={() => void save()}>Save draft for review</Button>}
+    {draft && <Button disabled={!clean || pending || savedReview === draft.draft_id || draft.context_digest !== preview?.context.digest} onClick={() => void saveReport()}>Save review report</Button>}
     <label>Message to Author assistant<textarea aria-label="Message to Author assistant" maxLength={8000} value={composer}
       onChange={event => setComposer(event.target.value)} /></label>
     <div className="assistant-actions">
