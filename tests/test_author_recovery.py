@@ -249,7 +249,13 @@ raise SystemExit(supervisor.run())
         owner.kill();owner.wait(timeout=5)
         deadline=time.monotonic()+8
         while alive(child) and time.monotonic()<deadline: time.sleep(.1)
-        assert not alive(child), 'Jupyter outlived the killed Author and retained the course lock.'
+        if alive(child):
+            process = subprocess.run(['/bin/ps','-p',str(child),'-o','pid=,ppid=,stat='],
+                capture_output=True,text=True,timeout=5).stdout.strip()
+            status = Path(f'/proc/{child}/status')
+            signals = [line for line in status.read_text().splitlines()
+                if line.startswith(('State:', 'PPid:', 'SigPnd:', 'ShdPnd:', 'SigBlk:', 'SigIgn:', 'SigCgt:'))] if status.exists() else []
+            pytest.fail(f'Jupyter outlived the killed Author; process={process}; signals={signals}')
         lock=CourseLock(course,runtime_root=runtime).acquire();lock.release()
         assert witness.poll() is None
     finally:

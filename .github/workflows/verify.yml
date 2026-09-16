@@ -40,6 +40,8 @@ jobs:
         run: |
           uv sync --frozen
           pnpm --dir frontend install --frozen-lockfile
+      - name: Check isolated crash recovery
+        run: uv run --frozen pytest tests/test_author_recovery.py::test_author_process_crash_releases_real_jupyter_and_course_lock -q
       - name: Test contracts and runtime behavior
         run: uv run --frozen pytest
       - name: Check three-spec consistency
