@@ -582,6 +582,7 @@ describe("Author Save and stale recovery", () => {
     fireEvent.change(screen.getByLabelText("Path"), {
       target: { value: "current.md" },
     });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save course" }));
     await screen.findByText("Keep my draft after review");
     fireEvent.click(
@@ -595,6 +596,7 @@ describe("Author Save and stale recovery", () => {
     expect(screen.getByLabelText("Path")).toHaveValue("current.md");
     expect(screen.getByText("Unsaved local draft.")).toBeInTheDocument();
     expect(app.putCourse).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save course" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save course" }));
     await waitFor(() => expect(app.putCourse).toHaveBeenCalledTimes(2));
     expect(app.putCourse.mock.calls[1]?.[1]).toBe('"reviewed"');
