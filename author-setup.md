@@ -1,9 +1,24 @@
 # Author Edition setup
 
-Use the separate **CourseWeave Author Edition v0.3.0** candidate folder. Open
-**Start Author.command** on macOS. The included README covers the complete
-authoring, preview, distribution and recovery workflow. This is a local candidate;
-its [acceptance status](docs/pilot/author-edition-acceptance.md) lists remaining gates.
+Download the Author bundle and `SHA256SUMS` from the
+[v0.3.0 release page](https://github.com/macayaven/courseweave/releases/tag/v0.3.0).
+The release page records whether public-download verification is complete.
+The included README covers authoring, preview, distribution and recovery; the
+[acceptance record](docs/pilot/author-edition-acceptance.md) states tested limits.
+
+From a nonsynced local download folder:
+
+```sh
+curl -fLO https://github.com/macayaven/courseweave/releases/download/v0.3.0/courseweave-author-0.3.0-macos.tar.gz
+curl -fLO https://github.com/macayaven/courseweave/releases/download/v0.3.0/SHA256SUMS
+shasum -a 256 --check SHA256SUMS --ignore-missing | grep -F 'courseweave-author-0.3.0-macos.tar.gz: OK'
+tar -xzf courseweave-author-0.3.0-macos.tar.gz
+cd "CourseWeave Author Edition v0.3.0"
+./"Start Author.command" --no-provider
+```
+
+Continue only when the checksum command prints the named bundle followed by `OK`.
+You can also open **Start Author.command** in the extracted folder on macOS.
 
 Keep the folder and chosen Author home on nonsynced local storage. Install
 [uv](https://docs.astral.sh/uv/getting-started/installation/) if requested. First setup

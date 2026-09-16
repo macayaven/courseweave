@@ -213,3 +213,16 @@ approval/distribution decisions. Shared, Author and Student specifications now
 state that distinction without changing schema-v2 or adding a provider. The exact
 installed candidate, live discovery/fetch, backup exclusion and independent review
 remain required before final acceptance.
+
+## Final local acceptance — 2026-09-16
+
+Candidate 8 closes V00–V10 within the documented local macOS scope. The final
+review preserves all 68 requirement IDs, 11 gate IDs and the canonical schema.
+Shared authority, Student consent/progress boundaries and private Author state
+remain consistent across all three specifications. Brave result retention is
+transient; saved request/outcome records and independently fetched source
+provenance are distinct. No Student retrieval or model mutation authority was
+added. Bounded independent review closed the source revocation, restore editing,
+layout and late research-history defects after affected installed checks.
+See [acceptance](../pilot/author-edition-acceptance.md) for provenance and limits.
+Earlier pending-gate statements above describe their dated development stage.

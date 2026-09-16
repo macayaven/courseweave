@@ -1,14 +1,58 @@
 # Releasing CourseWeave
 
-## Author v0.3.0 candidate in progress
+## Author v0.3.0 locally accepted candidate
 
-The Author candidate now carries v0.3.0 application/frontend metadata. It is not
-published or accepted as a complete release. Follow the approved
+The Author candidate has completed V00–V10 within the scope and limitations in
+the [local acceptance record](pilot/author-edition-acceptance.md). Its frozen
+application commit is `546a28c4d6c408c773ba1e1cc55885048b6c805c`; subsequent
+documentation commits record acceptance without changing those artifacts.
+The [release page](https://github.com/macayaven/courseweave/releases/tag/v0.3.0)
+records publication status and public-download acceptance. Follow the approved
 [Author implementation/acceptance plan](superpowers/plans/2026-09-14-courseweave-author-edition.md)
 for the full paired release; [Course delivery](author/delivery.md) documents the
 generic handoff and explicit runtime input descriptor. Preserve the released
 v0.2.0 inputs and all student homes. Build/review new artifacts in separate local
-directories. Publication remains a later explicit owner decision.
+directories. Publication requires owner authorization; the v0.3.0 release was
+authorized separately on 2026-09-16. Use a prerelease until public-download
+acceptance passes, then promote those unchanged assets.
+
+### v0.3.0 public release gates
+
+1. Merge the reviewed Author branch through a pull request after all hosted
+   checks pass. Require the same workflow on the resulting `main` commit.
+2. Run the clean-archive frontend determinism proof and build fresh wheel, sdist,
+   Author archive and generic Student archive from that exact clean commit.
+   Compare installed runtime members with the accepted Candidate 8 and rerun
+   affected checks. Keep the released 0.2.0 wheel unchanged.
+3. Use the reviewed Agent Harness Path `course.tar` identified in the acceptance
+   record. A Student build receipt names `platform_commit`, `course_commit`,
+   `wheel`, `wheel_sha256`, one `source_archives` entry, `runtime_constraints`
+   and `runtime_constraints_sha256`. Run `scripts/build_student_release.py`
+   with `--receipt` and a new `--output` directory named
+   `CourseWeave Student v0.3.0`. Archive that exact directory as
+   `agent-harness-path-courseweave-0.3.0-macos.tar.gz`. The application is 0.3.0;
+   the embedded course retains its independent version 0.2.0.
+4. For a new course export, use a clean public checkout of course commit
+   `c90aa1d84d3b1b1c21a5d263de03c4cb198f55c6` and
+   `scripts/prepare_author_course_acceptance.py --source COURSE --destination NEW
+   --student-inputs AUTHOR/student-inputs.json` with the installed Author Python.
+   This preserves the faithful draft and applies the disclosed one-fragment repair
+   through reviewed Author services. New export bytes require new recorded hashes
+   and affected installed acceptance; do not substitute them silently.
+5. Publish an annotated `v0.3.0` tag and a GitHub prerelease containing the wheel,
+   sdist, both macOS archives and `SHA256SUMS`. Never move an existing tag. Keep
+   artifact bytes unchanged through public-download acceptance.
+6. Fetch all five assets through public download URLs. Follow the repository's
+   Student and Author setup instructions in fresh nonsynced homes. Verify checksums,
+   version, extension, provider-off setup, course use, restart, record export/reset
+   and cleanup. Repeat the complete Student verifier on the downloaded bundle.
+   Publish a portable summary without private paths or logs in the release notes.
+7. Promote the verified unchanged release to latest. Preserve v0.2.0 and existing
+   study homes; changed builds use a new home, with explicit migration only.
+
+GitHub Actions supplies the source gate; local macOS installed checks supply
+platform evidence. Neither category substitutes for the other. Credentials for
+optional providers remain local and are never GitHub workflow or release inputs.
 
 ### Build the separate Author candidate
 

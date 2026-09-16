@@ -1,6 +1,6 @@
 # CourseWeave Teacher Edition specification
 
-**Product name:** CourseWeave Author Edition · **Bundle:** `author-edition-0.3.0-review-1` · **Date:** 2026-09-14 · **Status:** Approved; implementation in progress. Required release gates remain open.
+**Product name:** CourseWeave Author Edition · **Bundle:** `author-edition-0.3.0-review-1` · **Date:** 2026-09-14 · **Status:** Approved; local V00–V10 acceptance complete on 2026-09-16. Public release status is recorded separately.
 
 This specification extends [CourseWeave](COURSEWEAVE.md) and produces courses for the [Student Edition](COURSEWEAVE-STUDENT-EDITION.md). Shared definitions and the machine-readable fact block live in CourseWeave. “Teacher” here is the human course creator; the software's collaborator is the Author assistant.
 
@@ -79,7 +79,7 @@ No arbitrary executable file type is writable by an assistant proposal. Markdown
 
 ## Research and evidence policy
 
-The selected discovery connector is **Brave Search API**, configured separately with an author-owned key. It uses a normal server-side HTTP API, not a browser session or model-native tool. This is the sole new optional search integration; it does not require a managed CourseWeave service. Official [API documentation](https://api-dashboard.search.brave.com/app/documentation/web-search) was checked for planning on 2026-09-14. Account access and a live acceptance run remain implementation prerequisites, not established facts.
+The selected discovery connector is **Brave Search API**, configured separately with an author-owned key. It uses a normal server-side HTTP API, not a browser session or model-native tool. This is the sole new optional search integration; it does not require a managed CourseWeave service. Official [API documentation](https://api-dashboard.search.brave.com/app/documentation/web-search) was checked for planning on 2026-09-14. The authorized live discovery/fetch gate passed on 2026-09-16; the [acceptance record](../pilot/author-edition-acceptance.md) binds that observation to the tested candidate.
 
 The default is network off. The author explicitly enables a research run with its query and policy visible. A run allows at most two queries, ten search results held in memory in total, five source fetches, three redirects per fetch, and sixty seconds elapsed. A single fetch allows ten seconds and two MiB of decompressed HTML/plain-text content; extracted text retained for model context is bounded by the model route's existing request budget. A cancellation stops subsequent work. No automatic retries or background refresh occur.
 

@@ -4,11 +4,19 @@ This file records user-visible CourseWeave changes. Version headings identify
 frozen contents; publication dates and status are recorded on the linked GitHub
 releases.
 
-## Unreleased
+## [0.3.0](https://github.com/macayaven/courseweave/releases/tag/v0.3.0)
 
 - Kept Brave discovery results transient and excluded their URLs, titles and snippets from saved research reports and backups. Retained explicit direct-source fetch provenance and clarified separate account and publisher rights.
 
-### Author Edition v0.3.0 work in progress
+### Author Edition
+
+- Completed local installed acceptance with actual Brave discovery, direct source
+  fetch, six real-provider roles, both Student versions, full Agent Harness Path
+  coverage and bounded independent review. See the [acceptance record](docs/pilot/author-edition-acceptance.md)
+  for exact provenance, reused checks and observed model/platform limitations.
+- Kept live search selections visible during sibling-panel refresh and cancelled
+  older report reads before a new search, so a late saved-report response cannot
+  replace the current results.
 
 - Fixed two defects found by independent candidate review: revoked sources now
   leave the assistant's permitted selection, and recovery disables editing until
@@ -95,8 +103,9 @@ releases.
 - Fixed review-panel loading that repeatedly disabled sibling panels in a real
   Jupyter launch, recognized Author prompt metadata on the shared stream, and
   enabled deliberate artifact downloads in the Author window's sandbox.
-- The complete Author Edition and its installed/live-provider acceptance are
-  still in development; see [implementation notes](docs/author/implementation.md).
+- Recorded failed/rejected provider replies separately from successful checks;
+  assistant suggestions still require explicit review and application. See
+  [implementation notes](docs/author/implementation.md).
 
 ## [0.2.0](https://github.com/macayaven/courseweave/releases/tag/v0.2.0)
 

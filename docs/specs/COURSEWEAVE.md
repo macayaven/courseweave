@@ -1,8 +1,8 @@
 # CourseWeave specification
 
-**Bundle:** `author-edition-0.3.0-review-1` · **Date:** 2026-09-14 · **Status:** Approved; implementation in progress. Required release gates remain open.
+**Bundle:** `author-edition-0.3.0-review-1` · **Date:** 2026-09-14 · **Status:** Approved; local V00–V10 acceptance complete on 2026-09-16. Public release status is recorded separately.
 
-This is the shared specification for [Teacher Edition](COURSEWEAVE-TEACHER-EDITION.md) and [Student Edition](COURSEWEAVE-STUDENT-EDITION.md). Read the three together. The [specification index](README.md) records approval, ownership, and consistency checks. New requirements describe the planned release, not work already delivered.
+This is the shared specification for [Teacher Edition](COURSEWEAVE-TEACHER-EDITION.md) and [Student Edition](COURSEWEAVE-STUDENT-EDITION.md). Read the three together. The [specification index](README.md) records approval, ownership, and consistency checks. Implementation evidence and its limits are recorded in [local acceptance](../pilot/author-edition-acceptance.md).
 
 ## Purpose and scope
 

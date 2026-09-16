@@ -4,7 +4,7 @@
 
 | Version | Status |
 | --- | --- |
-| 0.3.0 Author candidate | Local acceptance in progress; not a public distribution |
+| 0.3.0 Author and Student | Locally accepted; publication status and supported artifacts are in the v0.3.0 release record |
 | 0.2.0 Student | Released schema-v2 application; current fixes are developed on the candidate branch |
 | 0.1.x | Historical public release; incompatible with schema-v2 courses |
 

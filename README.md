@@ -12,18 +12,20 @@ two optional notebook-free protocols.
 
 ## Release status
 
-Student v0.2.0 is released. The
-[v0.2.0 release page](https://github.com/macayaven/courseweave/releases/tag/v0.2.0)
-provides the macOS bundle, checksums, publication date and public-download evidence.
+Use the [v0.3.0 release page](https://github.com/macayaven/courseweave/releases/tag/v0.3.0)
+for the Student and Author macOS bundles, checksums and current publication status.
+A **Pre-release** label means public-download verification is still in progress.
+The previous [Student v0.2.0 release](https://github.com/macayaven/courseweave/releases/tag/v0.2.0)
+remains available for rollback.
 The v0.1.0 wheel supports schema v1 and cannot load the current schema-v2 course.
 
-Author Edition v0.3.0 is a local candidate undergoing installed acceptance. It adds
+Author Edition v0.3.0 has completed local installed acceptance. It adds
 private projects, six assistant roles, explicit source research, reviewed content
 changes, real Student preview, generic course delivery and backup/restore. Its
 separate **Start Author.command** bundle includes both Student versions and
 reproducible source/runtime inputs. See [Author setup](author-setup.md) and the
-[acceptance status](docs/pilot/author-edition-acceptance.md). This candidate has not
-been published or accepted as a complete release.
+[acceptance status](docs/pilot/author-edition-acceptance.md). Acceptance covers the documented single-user macOS scope. The release page
+records the separate public-download verification and publication date.
 
 The [native course route](https://github.com/macayaven/agent-harness-path#quickstart)
 continues to work independently. Historical local evidence remains bound to its
@@ -40,11 +42,11 @@ API key.
 In Terminal, change to a nonsynced download folder and run:
 
 ```sh
-curl -fLO https://github.com/macayaven/courseweave/releases/download/v0.2.0/agent-harness-path-courseweave-0.2.0-macos.tar.gz
-curl -fLO https://github.com/macayaven/courseweave/releases/download/v0.2.0/SHA256SUMS
-shasum -a 256 --check SHA256SUMS --ignore-missing | grep -F 'agent-harness-path-courseweave-0.2.0-macos.tar.gz: OK'
-tar -xzf agent-harness-path-courseweave-0.2.0-macos.tar.gz
-cd "CourseWeave Student Pilot v0.2.0"
+curl -fLO https://github.com/macayaven/courseweave/releases/download/v0.3.0/agent-harness-path-courseweave-0.3.0-macos.tar.gz
+curl -fLO https://github.com/macayaven/courseweave/releases/download/v0.3.0/SHA256SUMS
+shasum -a 256 --check SHA256SUMS --ignore-missing | grep -F 'agent-harness-path-courseweave-0.3.0-macos.tar.gz: OK'
+tar -xzf agent-harness-path-courseweave-0.3.0-macos.tar.gz
+cd "CourseWeave Student v0.3.0"
 ./"Start Course.command" --no-provider
 ```
 

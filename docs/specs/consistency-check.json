@@ -11,15 +11,15 @@
   },
   "verification_gates": 11,
   "implementation_tasks": 11,
-  "local_links_checked": 32,
+  "local_links_checked": 37,
   "errors": [],
   "files": {
-    "docs/specs/COURSEWEAVE.md": "c5a9de7eb53c23770a97ebdf971c4efb959b2311b2e1a2db0e7930efd453ec3b",
-    "docs/specs/COURSEWEAVE-TEACHER-EDITION.md": "0e398277a340cc7eb36067f6deddaf9d4151136ecc37ac6d18f574cc561b92bf",
-    "docs/specs/COURSEWEAVE-STUDENT-EDITION.md": "700e5468d5d77dc269ce94c8ebcd6dfa96ac1dfb357af910db6a4640211c842c",
-    "docs/specs/README.md": "1923f65756ff62fa0c469205e97cbda749a6f45198d9c3a29ad9c15d5e686f8b",
-    "docs/specs/CONSISTENCY-REVIEW.md": "03dcaa322bc4553fe5e48a4b1a1ac1a9c6e0993b3cd4decfa9452b211bfd2f62",
-    "docs/superpowers/plans/2026-09-14-courseweave-author-edition.md": "8edf80658e5bafcbb35be1851935335c65bda66d0029388e930173a5c719881d",
+    "docs/specs/COURSEWEAVE.md": "84d7a8c4c3db85299c465431d2789e7a0320b4711515ff2be3d919b4e0235fed",
+    "docs/specs/COURSEWEAVE-TEACHER-EDITION.md": "ea3f68d303c8dcaa946076efe5cc8201ae8dbdcb6d776f9529e1a870ed6ed4fe",
+    "docs/specs/COURSEWEAVE-STUDENT-EDITION.md": "99b4724dae3e99ca3fcb802121b245f6d583ce480185529fba72a6efe7c873fe",
+    "docs/specs/README.md": "2289235a440d97f16392a49449c9cc92e950c564110ddb4eb272ed98139956d3",
+    "docs/specs/CONSISTENCY-REVIEW.md": "48101c716e61b1794cef652763d212380b2ed4fa1b539ee5c477cacd76e6fbed",
+    "docs/superpowers/plans/2026-09-14-courseweave-author-edition.md": "2358c8a0462acbee3efaa07cdc164ee48b61b3b24d8128da3e205a0cc22d26e9",
     "docs/superpowers/specs/2026-09-14-chatgpt-courseweave-feasibility.md": "7f9b4810b9ec1b28714c5fb512e54788fa82052695ffafcae6467b9eecf361ed"
   }
 }

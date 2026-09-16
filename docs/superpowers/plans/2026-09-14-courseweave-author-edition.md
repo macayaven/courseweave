@@ -250,7 +250,7 @@ assert not policy.permits("https://127.0.0.1/course/intro")
 - [x] Implement bounded public HTTPS text retrieval with DNS-validated connection pinning and TLS hostname verification. Deny private/reserved addresses at every connection and redirect; do not trust a precheck followed by unrestricted DNS resolution. A narrow standard-library HTTPS transport is adequate; no browser automation or cookie store is involved.
 - [x] Enforce the exact TE research limits. Make search query content and source fetch policy visible, honor cancellation, and never automatically approve a discovered source. Preserve fetch failures as evidence rather than replacing them with model summaries.
 - [x] Implement local text/HTML/Markdown extraction with source offsets and hashes, source review decisions, explicit inclusion in learner-facing material, and revoked/stale resource handling. Complex PDFs/images/video are attachment metadata or author-supplied text extracts, not claimed understanding.
-- [ ] Run `uv run pytest tests/test_author_sources.py tests/test_author_assistant.py -q`. Perform one small real discovery run and one real allowed-source fetch using authorized credentials; record actual returned URLs and statuses. Confirm a denied origin causes zero transport calls. Commit the slice.
+- [x] Run `uv run pytest tests/test_author_sources.py tests/test_author_assistant.py -q`. Perform one small real discovery run and one real allowed-source fetch using authorized credentials. Inspect returned discovery URLs transiently; retain request/outcome and independent direct-fetch provenance without storing the provider result set. This retention clarification follows the provider terms checked for the final candidate. Confirm a denied origin causes zero transport calls. Commit the slice.
 
 ## Task 7: Add evidence-linked fact review, proofreading, and alignment
 
@@ -355,17 +355,19 @@ Task 9 evidence note: installed preview checks cover both Student versions, all 
 
 - [x] Align application metadata to the approved next version, package all reproducible source/runtime inputs, and build a fresh Author bundle with **Start Author.command** and a complete README. Correct dated release-status guidance as part of this candidate's documentation; preserve historical changelog entries.
 - [x] Run the shared Python suite on 3.11/3.12, frontend typecheck/build/unit tests, and relevant installed/browser checks. Reuse established commands and fixtures. Repeat broad checks only after material changes or failures.
-- [ ] Install the actual built archive into separate fresh test homes. Complete the full author journey on a new two-module Python data-validation course: approved instructor/reference material, one notebook, native checks, and an optional unaided protocol. Use all six roles with the real text-only route and real configured source discovery. Save/restart/export/restore. Do not create real-world completion claims.
+- [x] Install the actual built archive into separate fresh test homes. Complete the full author journey on a new two-module Python data-validation course: approved instructor/reference material, one notebook, native checks, and an optional unaided protocol. Use all six roles with the real text-only route and real configured source discovery. Save/restart/export/restore. Do not create real-world completion claims.
 - [x] Import and export the exact Agent Harness Path baseline unchanged. Verify all fourteen rendered lessons and navigation, all twelve notebooks executed in test copies without unhandled errors, all native checks, S13/S14 interactions and restrictions, assistant scope, saved records/notebooks, restart, export/reset, and cleanup. Reuse prior evidence only for unchanged boundaries, with exact provenance and a rationale; changed package/context/reader behavior gets new installed evidence.
 - [x] Open generated course handoffs in separately installed Student v0.2.0 and candidate Student v0.3.0. Verify fresh setup and course-specific homes using the new generic launcher. Preserve all old packages and the user's original study workspace byte-for-byte.
 - [x] Obtain a bounded independent review of the immutable diff, all three specs, compatibility matrix, release receipt, and representative UI evidence. Review authority is evaluation, not auto-approval. Resolve material findings; record unresolved nonblocking limitations. Do not request public publication until the exact candidate and its evidence are reviewable.
 - [x] Record the final support scope and per-module/per-role coverage. No completion declaration while a required installed, real-provider, research, recovery, or compatibility gate is missing. The owner receives clickable launchers, READMEs, and concise verified results.
 
-Task 11 remains incomplete only because the full new-course gate includes actual
-authorized Brave discovery. Candidate 5's installed Author journey, both Student
-versions, six real model roles, recovery, per-role/per-module evidence and bounded
-review follow-up are recorded. The missing search credential location has already
-been requested; no public publication or complete acceptance is claimed.
+Task 11 is locally complete on 2026-09-16. Candidate 8's installed Author journey
+includes actual authorized Brave discovery, separate public-page fetch, transient
+result reopening and backup/restore checks, both Student previews and cleanup.
+Six-role and full-course evidence is reused only for byte-identical boundaries,
+with exact comparisons, per-role/per-module limits and bounded independent review.
+The [acceptance record](../../pilot/author-edition-acceptance.md) identifies the
+frozen artifacts. No public publication is claimed or authorized here.
 
 Task 11 course preservation qualification: the faithful selected-file baseline is retained unchanged as a draft because of its pre-existing invalid native Markdown fragment. Both complete Student runs use a separate reviewed copy with only that fragment corrected; the original and every other included byte remain intact. Native Jupyter opens that local target in its text editor; rendered heading scrolling is not established for that link. All 108 local HTML links per Student version, including lesson fragments, were exercised separately. See the acceptance record.
 

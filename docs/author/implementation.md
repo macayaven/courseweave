@@ -40,13 +40,15 @@ research does not grant student retrieval. Neither objective coverage nor test
 records prove mastery or real-world protocol completion. This is an implementation
 self-review; the bounded independent review remains required in Task 11.
 
-## Remaining work
+## Final local status — 2026-09-16
 
-Task 6 actual Brave discovery remains open. Task 11's local candidate, installed
-checks and independent review follow-up are recorded; final acceptance remains
-dependent on that actual search check. Both full-course
-Student runs, the paired new-course journey, all six real-provider roles and
-failure/recovery have observations with the limitations recorded below.
+Tasks 1–11 and V00–V10 are complete for the local Candidate 8 described in the
+[acceptance record](../pilot/author-edition-acceptance.md). Actual authorized Brave
+discovery, direct-source fetch, transient-result reopening/backup behavior and
+the final installed journey passed. Six real-provider roles and both full-course
+Student runs retain exact provenance for unchanged boundaries. The sections
+below record development history; their earlier pending gates are superseded by
+the closeout at the end of this document. Publication remains a separate decision.
 
 ## Task 2: released Student compatibility profile
 
@@ -589,3 +591,26 @@ candidate identity and remaining limits are in the acceptance record. Actual
 Brave discovery is still required; the existing credential-location request is
 unanswered. No further independent implementation work is known to block this
 local candidate.
+
+## Final local closeout — 2026-09-16
+
+Candidate 8 freezes application commit `546a28c4d6c408c773ba1e1cc55885048b6c805c`.
+Authorized Brave web search returned real results; explicit selection, separate
+public-page fetch, saved-report reopening and backup/restore passed. Provider
+result URLs/titles/snippets are transient and excluded from durable reports.
+The HTTP response is non-cacheable; source-fetch provenance is retained separately.
+
+The live check exposed passive refresh losing transient results. Independent
+review also reproduced an older saved-report read overwriting newer results.
+Focused regressions failed before their fixes and passed afterward; all 178
+Author tests, typecheck and build passed. Candidate 8's exact installed journey
+passed both Student previews, revocation recovery, restore locking and restart,
+with no owned process survivors or selected credential found in 83,529 scanned
+files. Source researcher returned a useful saved message-only synthesis. The
+previous invalid-citation reply remains a rejected observation, not a success.
+
+Candidate 6's affected Python checks (102 on 3.11, 95 on 3.12) apply unchanged
+to Candidate 8. Prior six-role and full-course checks retain exact unchanged-byte
+provenance. Independent Candidate 8 review found no remaining actionable defect
+in its bounded scope. Public release and download verification follow the
+[release runbook](../RELEASING.md); local acceptance alone does not prove them.

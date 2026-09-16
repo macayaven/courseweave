@@ -1,8 +1,8 @@
 # CourseWeave Student Edition specification
 
-**Bundle:** `author-edition-0.3.0-review-1` · **Date:** 2026-09-14 · **Status:** Approved compatibility specification; author implementation is in progress; new release gates remain open. Baseline behavior is already implemented where identified below.
+**Bundle:** `author-edition-0.3.0-review-1` · **Date:** 2026-09-14 · **Status:** Approved compatibility specification; paired local V00–V10 acceptance complete on 2026-09-16. Public release status is recorded separately.
 
-This specification describes the student behavior the planned [Teacher Edition](COURSEWEAVE-TEACHER-EDITION.md) must target. [CourseWeave](COURSEWEAVE.md) owns shared definitions, fact values, invariants, and version distinctions. The author release does not replace the student's current installation or expand the student's assistant permissions.
+This specification describes the student behavior [Teacher Edition](COURSEWEAVE-TEACHER-EDITION.md) must target. [CourseWeave](COURSEWEAVE.md) owns shared definitions, fact values, invariants, and version distinctions. The author release does not replace the student's current installation or expand the student's assistant permissions.
 
 ## Student outcome and baseline
 

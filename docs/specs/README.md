@@ -1,8 +1,8 @@
 # CourseWeave specification set
 
-**Bundle:** `author-edition-0.3.0-review-1` · **Date:** 2026-09-14 · **Status:** Approved; implementation in progress. Required release gates remain open.
+**Bundle:** `author-edition-0.3.0-review-1` · **Date:** 2026-09-14 · **Status:** Approved; local V00–V10 acceptance complete on 2026-09-16. Public release status is recorded separately.
 
-These are the three continuing product specifications. They describe shared rules, the planned Author Edition, and its student compatibility target. Approval establishes intended behavior; it does not claim that the author release has been implemented.
+These are the three continuing product specifications. They describe shared rules, Author Edition, and its student compatibility target. Approval establishes intended behavior; [local acceptance](../pilot/author-edition-acceptance.md) records the implemented candidate and its observed limits.
 
 | Read | Document | Owns |
 | --- | --- | --- |
