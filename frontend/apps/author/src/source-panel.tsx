@@ -103,6 +103,7 @@ export function SourcePanel({ client, disabled, onBusyChange, onChanged }: {
   const locked = disabled || busy !== null;
   async function run(kind: "discover" | "fetch") {
     if (locked || !network || !policy || (kind === "discover" ? !queryValid || !configuration?.brave_configured : !urlsValid)) return;
+    reads.current?.abort();
     const controller = new AbortController(); active.current?.abort(); active.current = controller;
     setBusy("research"); setNotice("Research is running. Each request is bounded; you can cancel subsequent work.");
     try {

@@ -119,3 +119,22 @@ it("reopens a saved report without network research and displays bounded source 
   expect(api.getSourceText).toHaveBeenCalledWith("source-one", 0, 0, expect.any(AbortSignal));
   expect(screen.getByText(/Characters 0–20 of 20/)).toBeInTheDocument();
 });
+
+it("keeps new discovery when a late automatic history read finishes", async () => {
+  const api = client();
+  const old = { ...report, report_id: "research-old", results: [] };
+  let finishRead!: (value: ResearchReport) => void;
+  api.getResearchReports.mockResolvedValue({reports:[{report_id:old.report_id,status:old.status,started_at:old.started_at,finished_at:old.finished_at}],next_offset:null});
+  api.getResearchReport.mockImplementation(() => new Promise(resolve => { finishRead = resolve; }));
+  render(<SourcePanel client={api} disabled={false} onBusyChange={vi.fn()} onChanged={vi.fn()} />);
+  await screen.findByText(/Brave discovery: configured/);
+  await waitFor(() => expect(api.getResearchReport).toHaveBeenCalledOnce());
+  fireEvent.change(screen.getByLabelText("Search queries"), {target:{value:"Python validation"}});
+  fireEvent.change(screen.getByLabelText("Research policy"), {target:{value:"public_web"}});
+  fireEvent.click(screen.getByLabelText("Enable network for this research run"));
+  fireEvent.click(screen.getByRole("button", {name:"Discover sources"}));
+  fireEvent.click(await screen.findByLabelText("Select Python docs"));
+  expect(screen.getByLabelText("Select Python docs")).toBeChecked();
+  await act(async () => { finishRead(old); });
+  expect(screen.queryByLabelText("Select Python docs")).not.toBeNull();
+});
