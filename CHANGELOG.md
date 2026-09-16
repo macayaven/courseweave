@@ -10,6 +10,9 @@ releases.
 
 ### Author Edition
 
+- Disabled automatic discovery of machine-wide language servers in the controlled
+  Jupyter launch. A blocked background probe could otherwise keep Jupyter alive
+  after the owning CourseWeave process stopped. Notebook kernels remain available.
 - Completed local installed acceptance with actual Brave discovery, direct source
   fetch, six real-provider roles, both Student versions, full Agent Harness Path
   coverage and bounded independent review. See the [acceptance record](docs/pilot/author-edition-acceptance.md)

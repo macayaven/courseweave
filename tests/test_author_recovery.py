@@ -216,34 +216,15 @@ def test_author_process_crash_releases_real_jupyter_and_course_lock(tmp_path):
     course=tmp_path/'author-course';course.mkdir()
     runtime=tmp_path/'owned-runtime';runtime.mkdir(mode=0o700)
     marker=tmp_path/'ready.json'
-    probe=tmp_path/'jupyter_probe.py'
-    probe.write_text('''
-import faulthandler,json,os,runpy,signal,sys,time
-from pathlib import Path
-import courseweave.jupyter_runtime as runtime
-events=Path(__file__).with_suffix('.events')
-trace=Path(__file__).with_suffix('.stack').open('w')
-faulthandler.register(signal.SIGUSR2,file=trace)
-def log(event):
-    with events.open('a') as f:
-        f.write(json.dumps({'event':event,'pid':os.getpid(),'ppid':os.getppid()})+'\\n')
-original=runtime.PeriodicCallback
-class Probe(original):
-    def __init__(self,callback,*args,**kwargs):
-        def call():
-            log('callback')
-            return callback()
-        log('created')
-        super().__init__(call,*args,**kwargs)
-    def start(self):
-        log('started')
-        return super().start()
-runtime.PeriodicCallback=Probe
-sys.argv=['jupyterlab',*sys.argv[1:]]
-runpy.run_module('jupyterlab',run_name='__main__')
-''')
+    probe_marker=tmp_path/'unrequested-language-server-probe'
+    probe_bin=tmp_path/'probe-bin';probe_bin.mkdir()
+    # Installed tools on PATH must not be probed by this controlled course runtime.
+    for name in ('julia', 'Rscript'):
+        probe=probe_bin/name
+        probe.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nPath({str(probe_marker)!r}).write_text("invoked")\n')
+        probe.chmod(0o755)
     script='''
-import json,os,subprocess,sys
+import json,os,sys
 from pathlib import Path
 from courseweave.launch import LaunchSupervisor
 def ready(url):
@@ -252,15 +233,14 @@ def ready(url):
     with os.fdopen(fd,'w') as stream:
         json.dump({'jupyter_pid':supervisor._jupyter_process.pid,'runtime':supervisor._temporary_directory.name},stream)
     return True
-def process(argv,**kwargs):
-    return subprocess.Popen([argv[0],sys.argv[3],*argv[3:]],**kwargs)
-supervisor=LaunchSupervisor(Path(sys.argv[1]),port=0,mode='author',browser_opener=ready,readiness_timeout=30,process_factory=process)
+supervisor=LaunchSupervisor(Path(sys.argv[1]),port=0,mode='author',browser_opener=ready,readiness_timeout=30)
 raise SystemExit(supervisor.run())
 '''
     # The supervisor prefers XDG_RUNTIME_DIR over TMPDIR for its course lock.
     # Both processes must address the same owned lock directory on Linux too.
-    owner=subprocess.Popen([sys.executable,'-c',script,str(course),str(marker),str(probe)],start_new_session=True,
-        env=dict(os.environ,TMPDIR=str(runtime),XDG_RUNTIME_DIR=str(runtime)),
+    owner=subprocess.Popen([sys.executable,'-c',script,str(course),str(marker)],start_new_session=True,
+        env=dict(os.environ,TMPDIR=str(runtime),XDG_RUNTIME_DIR=str(runtime),
+            PATH=str(probe_bin)+os.pathsep+os.environ["PATH"]),
         stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     witness=subprocess.Popen([sys.executable,'-c','import time;time.sleep(90)'])
     child=None
@@ -283,11 +263,9 @@ raise SystemExit(supervisor.run())
             status = Path(f'/proc/{child}/status')
             signals = [line for line in status.read_text().splitlines()
                 if line.startswith(('State:', 'PPid:', 'SigPnd:', 'ShdPnd:', 'SigBlk:', 'SigIgn:', 'SigCgt:'))] if status.exists() else []
-            os.kill(child,signal.SIGUSR2);time.sleep(.1)
-            events=probe.with_suffix('.events').read_text() if probe.with_suffix('.events').exists() else 'no callback events'
-            stack=probe.with_suffix('.stack').read_text() if probe.with_suffix('.stack').exists() else 'no stack'
-            pytest.fail(f'Jupyter outlived the killed Author; process={process}; signals={signals}; events={events}; stack={stack}')
+            pytest.fail(f'Jupyter outlived the killed Author; process={process}; signals={signals}')
         lock=CourseLock(course,runtime_root=runtime).acquire();lock.release()
+        assert not probe_marker.exists(), 'Jupyter probed unrelated machine language servers.'
         assert witness.poll() is None
     finally:
         if owner.poll() is None: owner.terminate()

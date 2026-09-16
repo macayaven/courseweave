@@ -623,6 +623,9 @@ class LaunchSupervisor:
             "--ServerApp.use_redirect_file=False",
             "--ServerApp.jpserver_extensions=courseweave.jupyter_runtime=True",
             "--ServerApp.reraise_server_extension_failures=True",
+            # Host language-server discovery can leave an unbounded probe running
+            # during shutdown. Course notebooks use the selected kernel directly.
+            "--LanguageServerManager.autodetect=False",
             *kernel_args,
         ]
 
