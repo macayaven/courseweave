@@ -101,7 +101,7 @@ const UNIX_HANDOFF_PATH_LIMIT_BYTES = 103;
 const LONGEST_HANDOFF_PATH_SUFFIX = join(
     `courseweave-acceptance-${'x'.repeat(6)}`,
     `session-${'x'.repeat(6)}`,
-    'bootstrap.sock',
+    'b.sock',
 );
 
 export function validateUnixHandoffPath(testRoot) {
@@ -181,6 +181,13 @@ export function studyHomeForRelease(osHome, release, platform = process.platform
     const version = release?.course_version;
     if (typeof version !== 'string' || version.length > 64 || !SAFE_VERSION.test(version))
         throw new Error('The release has a missing or unsafe course version.');
+    if (release?.format_version === 2) {
+        const id = release.course_id, hash = release.files?.course?.sha256;
+        if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(id) || typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash))
+            throw new Error('The generic release course identity is missing or unsafe.');
+        const name = `${id.toLowerCase()}-v${version}-${hash.slice(0, 16)}`;
+        return join(osHome, platform === 'darwin' ? 'Library/Application Support/CourseWeave' : '.local/share/courseweave', name);
+    }
     if (platform === 'darwin')
         return join(osHome, `Library/Application Support/CourseWeave/Agent Harness Path v${version}`);
     return join(osHome, `.local/share/courseweave/agent-harness-path-v${version}`);

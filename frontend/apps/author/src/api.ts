@@ -1,5 +1,15 @@
 import { authenticatedHeaders } from "@courseweave/ui";
 import type { AuthorRuntime } from "./runtime";
+import type { CompatibilityReport } from "./compatibility";
+import type { Inventory, Project, ProjectList, ProjectRequest, SourceRecord, SourceDecision } from "./project-panel";
+import type { ContentApply, ContentChange, ContentClient, ContentEdit, ContentReview, ContentSnapshot } from "./content-panel";
+import type { AuthorAssistantClient, ContextPreview } from "./curriculum-thread";
+import type { ResearchClient, ResearchRequest, ResearchReport, ResearchStatus, SourceText } from "./source-panel";
+import type { ReviewClient, ReviewDecision, ReviewReport } from "./review-panel";
+import type { CoverageReport } from "./coverage-panel";
+import type { DeliveryClient, DeliveryInventory, CourseExportRequest, CourseExportReceipt, StudentBundleReceipt } from "./delivery-panel";
+import type { StudentPreviewClient, StudentPreviewRecord } from './preview';
+import type { RecoveryClient, BackupCategory, BackupInventory, RestoreInventory, RecoveryStatus } from './recovery-panel';
 
 export interface AuthorActivitySelection {
   module_id: string;
@@ -79,7 +89,7 @@ function safeEnvelope(value: unknown, capabilityToken: string): ErrorEnvelope {
     : fallback;
 }
 
-export function createAuthorClient(runtime: AuthorRuntime) {
+export function createAuthorClient(runtime: AuthorRuntime, projectId?: string | null) {
   const serviceOrigin = new URL(runtime.serviceOrigin).origin;
   const capabilityToken = runtime.capabilityToken;
   const request = async (
@@ -87,10 +97,12 @@ export function createAuthorClient(runtime: AuthorRuntime) {
     init: RequestInit = {},
     signal?: AbortSignal,
   ): Promise<Response> => {
+    const headers = authenticatedHeaders(capabilityToken, init.headers);
+    if (projectId) headers.set("X-CourseWeave-Project", projectId);
     const response = await fetch(`${serviceOrigin}${path}`, {
       ...init,
       signal,
-      headers: authenticatedHeaders(capabilityToken, init.headers),
+      headers,
       credentials: "include",
       cache: "no-store",
     });
@@ -128,6 +140,101 @@ export function createAuthorClient(runtime: AuthorRuntime) {
       signal,
     );
   return {
+    getPreviews: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<StudentPreviewClient['getPreviews']>>>('/api/author/previews?offset='+offset,{},signal),
+    startPreview: (body: Parameters<StudentPreviewClient['startPreview']>[0],signal?: AbortSignal) => json<StudentPreviewRecord>('/api/author/previews',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),
+    },signal),
+    openPreview: (id: string,signal?: AbortSignal) => json<{opened:boolean}>(`/api/author/previews/${encodeURIComponent(id)}/open`,{method:'POST'},signal),
+    stopPreview: (id: string,signal?: AbortSignal) => json<StudentPreviewRecord>(`/api/author/previews/${encodeURIComponent(id)}/stop`,{method:'POST'},signal),
+    savePreviewObservations: (id: string,body: Parameters<StudentPreviewClient['savePreviewObservations']>[1],signal?: AbortSignal) => json<StudentPreviewRecord>(`/api/author/previews/${encodeURIComponent(id)}/observations`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),
+    },signal),
+    previewFiles: (id: string,action:'keep'|'discard',revision:number,signal?:AbortSignal) => json<StudentPreviewRecord>(`/api/author/previews/${encodeURIComponent(id)}/${action}`,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision,confirm:true}),
+    },signal),
+    inspectDelivery: (signal?: AbortSignal) => json<DeliveryInventory>("/api/author/delivery", {}, signal),
+    buildStudentBundle: (body: Parameters<DeliveryClient["buildStudentBundle"]>[0], signal?: AbortSignal) => json<StudentBundleReceipt>("/api/author/student-bundles", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    getExports: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<DeliveryClient["getExports"]>>>("/api/author/exports?offset=" + offset, {}, signal),
+    exportCourse: (body: CourseExportRequest, signal?: AbortSignal) => json<CourseExportReceipt>("/api/author/exports", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    getReviews: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<ReviewClient["getReviews"]>>>("/api/author/reviews?offset=" + offset, {}, signal),
+    getReview: (id: string, signal?: AbortSignal) => json<ReviewReport>("/api/author/reviews/" + encodeURIComponent(id), {}, signal),
+    updateReviewFinding: (id: string, claimId: string, body: ReviewDecision, signal?: AbortSignal) => json<ReviewReport>(
+      `/api/author/reviews/${encodeURIComponent(id)}/findings/${encodeURIComponent(claimId)}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      }, signal),
+    deleteReview: async (id: string, reviewed_revision: number, signal?: AbortSignal): Promise<void> => {
+      await request("/api/author/reviews/" + encodeURIComponent(id), {
+        method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewed_revision }),
+      }, signal);
+    },
+    exportReview: (id: string, revision: number, signal?: AbortSignal) => request("/api/author/reviews/" + encodeURIComponent(id) + "/export?revision=" + revision, {}, signal).then(response => response.blob()),
+    getCoverage: (offset = 0, signal?: AbortSignal) => json<CoverageReport>("/api/author/coverage?offset=" + offset, {}, signal),
+    getResearchStatus: (signal?: AbortSignal) => json<ResearchStatus>("/api/author/research", {}, signal),
+    getResearchReports: (offset = 0, signal?: AbortSignal) => json<Awaited<ReturnType<ResearchClient["getResearchReports"]>>>("/api/author/research/reports?offset=" + offset, {}, signal),
+    getResearchReport: (id: string, signal?: AbortSignal) => json<ResearchReport>("/api/author/research/reports/" + encodeURIComponent(id), {}, signal),
+    runResearch: (body: ResearchRequest, signal?: AbortSignal) => json<ResearchReport>("/api/author/research", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    cancelResearch: (signal?: AbortSignal) => json("/api/author/research/cancel", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }, signal),
+    importReference: (path: string, signal?: AbortSignal) => json<SourceRecord>("/api/author/sources/import", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }),
+    }, signal),
+    getSourceText: (id: string, revision: number, start = 0, signal?: AbortSignal) => json<SourceText>("/api/author/sources/" + encodeURIComponent(id) + "/text?revision=" + revision + "&start=" + start, {}, signal),
+    previewAuthorContext: (body: Parameters<AuthorAssistantClient["previewAuthorContext"]>[0], signal?: AbortSignal) => json<ContextPreview>("/api/author/assistant/context", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    saveAuthorDraft: (id: string, signal?: AbortSignal) => json<ContentChange>("/api/author/assistant/drafts/" + encodeURIComponent(id) + "/save", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }, signal),
+    saveAuthorReview: (id: string, signal?: AbortSignal) => json<ReviewReport>("/api/author/assistant/drafts/" + encodeURIComponent(id) + "/save-review", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    }, signal),
+    getContentFiles: (signal?: AbortSignal) => json<Awaited<ReturnType<ContentClient["getContentFiles"]>>>("/api/author/content/files", {}, signal),
+    getContent: (path: string, signal?: AbortSignal) => json<ContentSnapshot>("/api/author/content?path=" + encodeURIComponent(path), {}, signal),
+    getChanges: (offset = 0, signal?: AbortSignal) => json<{ changes: ContentChange[]; total: number }>("/api/author/changes?offset=" + offset, {}, signal),
+    stageContent: (body: ContentEdit, signal?: AbortSignal) => json<ContentChange>("/api/author/changes", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    getChange: (id: string, signal?: AbortSignal) => json<ContentReview>("/api/author/changes/" + encodeURIComponent(id), {}, signal),
+    applyChange: (id: string, body: ContentApply, signal?: AbortSignal) => json("/api/author/changes/" + encodeURIComponent(id) + "/apply", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    rejectChange: (id: string, reviewed_revision: number, signal?: AbortSignal) => json<ContentChange>("/api/author/changes/" + encodeURIComponent(id) + "/reject", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewed_revision }),
+    }, signal),
+    getProjects: (signal?: AbortSignal) => json<ProjectList>("/api/author/projects", {}, signal),
+    inspectBackup: (categories: BackupCategory[], signal?: AbortSignal) => json<BackupInventory>('/api/author/backups/inspect', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({categories}),
+    }, signal),
+    createBackup: (body: Parameters<RecoveryClient['createBackup']>[0], signal?: AbortSignal) => json<Awaited<ReturnType<RecoveryClient['createBackup']>>>('/api/author/backups', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    }, signal),
+    inspectRestore: (archive: string, signal?: AbortSignal) => json<RestoreInventory>('/api/author/projects/restore/inspect', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({archive}),
+    }, signal),
+    restoreBackup: (body: Parameters<RecoveryClient['restoreBackup']>[0], signal?: AbortSignal) => json<Project>('/api/author/projects/restore', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    }, signal),
+    getRecovery: (signal?: AbortSignal) => json<RecoveryStatus>('/api/author/recovery', {}, signal),
+    discardExportStaging: (exportId: string, signal?: AbortSignal) => json('/api/author/recovery/exports/' + encodeURIComponent(exportId) + '/discard', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({confirm: true}),
+    }, signal),
+    inspectSource: (source_root: string, signal?: AbortSignal) => json<Inventory>("/api/author/projects/inventory", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source_root }),
+    }, signal),
+    createProject: (body: ProjectRequest, signal?: AbortSignal) => json<Project>("/api/author/projects", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
+    getSources: (signal?: AbortSignal) => json<{ sources: SourceRecord[] }>("/api/author/sources", {}, signal),
+    updateSource: (id: string, body: SourceDecision, signal?: AbortSignal) => json<SourceRecord>(`/api/author/sources/${encodeURIComponent(id)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, signal),
     async getCourse(signal?: AbortSignal): Promise<CourseResponse> {
       const response = await request("/api/course", { method: "GET" }, signal);
       const raw = await response.text();
@@ -177,6 +284,11 @@ export function createAuthorClient(runtime: AuthorRuntime) {
         },
         signal,
       ),
+    checkCompatibility: (manifest: unknown, student_version: "0.2.0" | "0.3.0", signal?: AbortSignal) =>
+      json<CompatibilityReport>("/api/author/compatibility", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ manifest, student_version }),
+      }, signal),
     async confirmActivity(
       selection: AuthorActivityConfirmation,
       signal?: AbortSignal,

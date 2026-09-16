@@ -1,0 +1,257 @@
+{
+  "schema_version": 2,
+  "id": "record-validation-preview",
+  "title": "Record validation practice",
+  "description": "Two-module installed Author-to-Student practice fixture.",
+  "entry_module_id": "validate",
+  "policies": {
+    "content_sharing": "explicit_only",
+    "allowed_share_kinds": [
+      "selection",
+      "cell",
+      "output"
+    ],
+    "max_shared_chars": 8192,
+    "allowed_proposal_types": [],
+    "durable_mutation": "proposal_or_direct_student_action",
+    "terminal_execution": "student_only",
+    "conversation_memory": "session_only",
+    "workspace_write_globs": []
+  },
+  "modules": [
+    {
+      "id": "validate",
+      "title": "Validate a record",
+      "description": "Required practice with declared field rules.",
+      "phases": [
+        {
+          "id": "practice",
+          "title": "Predict and validate",
+          "progress": "required",
+          "experience": {
+            "type": "builtin",
+            "id": "practice"
+          },
+          "surfaces": [
+            {
+              "id": "lesson",
+              "type": "markdown",
+              "purpose": "primary",
+              "path": "lessons/validate.md",
+              "label": "Validation lesson"
+            },
+            {
+              "id": "rules",
+              "type": "html",
+              "purpose": "reference",
+              "path": "lessons/rules.html",
+              "fragment": "field-rules",
+              "label": "Field rules"
+            },
+            {
+              "id": "code",
+              "type": "source",
+              "purpose": "supporting",
+              "path": "source/validate.py",
+              "label": "Validation source"
+            },
+            {
+              "id": "notebook",
+              "type": "notebook",
+              "purpose": "supporting",
+              "path": "notebooks/practice.ipynb",
+              "selector": {
+                "type": "whole_notebook"
+              },
+              "label": "Validation notebook"
+            },
+            {
+              "id": "video",
+              "type": "video",
+              "purpose": "reference",
+              "src": "https://video.example.test/reader-fixture.mp4",
+              "label": "Reader test video"
+            },
+            {
+              "id": "terminal",
+              "type": "terminal",
+              "purpose": "supporting",
+              "cwd": ".",
+              "command": [
+                "python",
+                "source/validate.py"
+              ],
+              "label": "Terminal validation instructions"
+            },
+            {
+              "id": "reference",
+              "type": "external",
+              "purpose": "reference",
+              "url": "https://docs.python.org/3/library/json.html",
+              "label": "Python JSON reference"
+            }
+          ],
+          "learning": {
+            "objectives": [
+              {
+                "id": "field-rules",
+                "text": "Predict validation from required-field and type constraints, and distinguish validation from factual truth."
+              }
+            ],
+            "overview": "Predict, run, inspect and explain.",
+            "hints": [
+              {
+                "id": "check-required",
+                "text": "Check whether every required field is present before checking each type.",
+                "objective_ids": [
+                  "field-rules"
+                ]
+              }
+            ],
+            "sources": [
+              {
+                "id": "python-json",
+                "label": "Python JSON documentation",
+                "url": "https://docs.python.org/3/library/json.html"
+              }
+            ],
+            "checks": [
+              {
+                "id": "schema-vs-truth",
+                "type": "single_choice",
+                "prompt": "A record passes this schema. What does that establish?",
+                "objective_ids": [
+                  "field-rules"
+                ],
+                "options": [
+                  {
+                    "id": "constraints",
+                    "text": "The record satisfies the declared field constraints.",
+                    "feedback": "Yes. The field rules pass; factual accuracy is a separate question."
+                  },
+                  {
+                    "id": "truth",
+                    "text": "The name and age are factually correct.",
+                    "feedback": "A schema cannot establish whether the values are true."
+                  }
+                ],
+                "correct_option_id": "constraints"
+              }
+            ]
+          },
+          "teacher": {
+            "access": {
+              "mode": "available",
+              "requires": []
+            },
+            "guidance": {
+              "style": {
+                "type": "builtin",
+                "id": "explanatory"
+              },
+              "hint_level": "gentle"
+            },
+            "sharing": {
+              "allow": [
+                "selection",
+                "cell",
+                "output"
+              ]
+            },
+            "proposals": {
+              "allow": []
+            }
+          },
+          "completion": {
+            "requirements": [
+              {
+                "id": "prediction",
+                "type": "learner_record",
+                "record_kind": "text",
+                "prompt": "Before running: predict which records pass and give the deciding field rule."
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "independent",
+      "title": "Optional independent review",
+      "description": "An optional unaided protocol.",
+      "phases": [
+        {
+          "id": "unaided",
+          "title": "Unaided record review",
+          "progress": "optional",
+          "experience": {
+            "type": "builtin",
+            "id": "practice"
+          },
+          "surfaces": [
+            {
+              "id": "protocol",
+              "type": "markdown",
+              "purpose": "primary",
+              "path": "lessons/unaided.md",
+              "label": "Unaided protocol"
+            }
+          ],
+          "learning": {
+            "objectives": [
+              {
+                "id": "field-rules",
+                "text": "Predict validation from required-field and type constraints, and distinguish validation from factual truth."
+              }
+            ],
+            "overview": "Optional independent practice with fictional data.",
+            "hints": [],
+            "sources": [
+              {
+                "id": "python-json",
+                "label": "Python JSON documentation",
+                "url": "https://docs.python.org/3/library/json.html"
+              }
+            ],
+            "checks": []
+          },
+          "teacher": {
+            "access": {
+              "mode": "disabled",
+              "requires": []
+            },
+            "guidance": {
+              "style": {
+                "type": "builtin",
+                "id": "explanatory"
+              },
+              "hint_level": "gentle"
+            },
+            "sharing": {
+              "allow": []
+            },
+            "proposals": {
+              "allow": []
+            }
+          },
+          "completion": {
+            "requirements": [
+              {
+                "id": "reflection",
+                "type": "learner_record",
+                "record_kind": "text",
+                "prompt": "Describe only the independent practice you actually performed."
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "runtime": {
+    "type": "jupyter",
+    "kernel": {
+      "type": "python_uv_project"
+    }
+  }
+}

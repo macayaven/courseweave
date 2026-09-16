@@ -68,7 +68,7 @@ async function api(s, path) {
     return r.json();
 }
 async function launch({ home = study, defaultHome = false, synthetic = false, noProvider = false, providerEnvironment } = {}) {
-    const dir = await mkdtemp(join(owned, 'session-')), socket = join(dir, 'bootstrap.sock');
+    const dir = await mkdtemp(join(owned, 'session-')), socket = join(dir, 'b.sock');
     let ok, bad;
     const secret = new Promise((a, b) => { ok = a; bad = b; });
     void secret.catch(() => { });
@@ -333,8 +333,25 @@ async function optional(s, m, mr) {
             await openSurface(s, m, p, x);
             if (x.type === 'video')
                 expect(await s.page.locator('iframe[title="CourseWeave reader"]').getAttribute('src')).toBe(x.src);
-            if (x.type === 'markdown')
+            if (x.type === 'markdown') {
                 await expect(s.page.locator('.jp-RenderedMarkdown:visible')).toBeVisible({ timeout: 30000 });
+                if (releaseMetadata.format_version === 2 && x.path === 'labs/s01_loop.md') {
+                    const link = s.page.locator('.jp-RenderedMarkdown:visible').getByRole('link', { name: 'labs/README.md', exact: true });
+                    const target = new URL(await link.getAttribute('href'), s.page.url());
+                    report.reviewed_link_destination = { path: target.pathname, fragment: decodeURIComponent(target.hash) };
+                    expect(target.pathname).toMatch(/\/labs\/README\.md$/);
+                    expect(decodeURIComponent(target.hash)).toBe('#Wire-contract-(so---replay-matches)');
+                    await link.click();
+                    await expect.poll(async () => (await s.page.locator('.jp-RenderedMarkdown:visible,.jp-FileEditor:visible').allTextContents()).join('\n')).toContain('Wire contract');
+                    const heading = s.page.locator('.jp-RenderedMarkdown:visible').getByRole('heading', { name: 'Wire contract (so --replay matches)', exact: true });
+                    const rendered = await heading.isVisible();
+                    if (rendered) await expect(heading).toBeInViewport();
+                    else await expect(s.page.locator('.jp-FileEditor:visible')).toContainText('Wire contract');
+                    mr.reviewed_markdown_link = { source: x.path, target: 'labs/README.md#Wire-contract-%28so---replay-matches%29', clicked: true,
+                        opened_as: rendered ? 'rendered Markdown at heading' : 'native Jupyter text editor; heading scrolling not established' };
+                    await s.page.screenshot({ path: join(evidence, 's01-reviewed-markdown-link.png') });
+                }
+            }
             if (x.type === 'source')
                 await expect(s.page.locator('.jp-MainAreaWidget:visible .cm-content')).toBeVisible({ timeout: 30000 });
             if (x.type === 'terminal') {
@@ -558,7 +575,7 @@ try {
         report.continuous_thread = { transcript_articles: await s.guide.locator('.cw-transcript article').count(), provider_requests: fake.requests.length, distinct_thread_ids: threadCount };
         report.synthetic_provider_requests = fake.requests.length;
         const kernel = await inspectInstalledNotebookKernel(s.page, 'notebooks/s12_judge_calibration_toy.ipynb');
-        expect(kernel.secret_presence).toEqual({ OPENAI_API_KEY: false, ANTHROPIC_API_KEY: false, AGENT_KB_LITELLM_KEY: false, COURSEWEAVE_CAPABILITY_TOKEN: false, JUPYTER_TOKEN: false });
+        expect(kernel.secret_presence).toEqual({ OPENAI_API_KEY: false, ANTHROPIC_API_KEY: false, BRAVE_SEARCH_API_KEY: false, AGENT_KB_LITELLM_KEY: false, COURSEWEAVE_CAPABILITY_TOKEN: false, JUPYTER_TOKEN: false });
         expect(kernel.executable).toContain('/kernel/bin/python');
         report.kernel = kernel;
         for (const [mi, pi] of [['s13', 'audit'], ['s14', 'acceptance'], ['s14', 'pilot']]) {

@@ -809,6 +809,7 @@ def test_public_cli_retains_unconfirmed_child_runtime_and_lock_after_supervisor_
 def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "synthetic-author-search-key")
     supervisor, state = _supervisor_fixture(tmp_path, monkeypatch)
     before = sorted(path.relative_to(state["course"]) for path in state["course"].rglob("*"))
 
@@ -849,6 +850,8 @@ def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_ch
     assert child_env["COURSEWEAVE_RUNTIME_ID"] == "owned-runtime-id"
     assert child_env["COURSEWEAVE_LAUNCH_MODE"] == "author"
     assert "COURSEWEAVE_UNTRUSTED_PARENT_VALUE" not in child_env
+    assert "BRAVE_SEARCH_API_KEY" not in child_env
+    assert "synthetic-author-search-key" not in str(argv) + str(child_env)
     assert not Path(child_env["JUPYTER_RUNTIME_DIR"]).parent.exists()
     assert state["jupyter_calls"] == [
         (
@@ -874,6 +877,29 @@ def test_supervisor_hands_off_fd_retries_readiness_and_uses_fixed_secret_safe_ch
     supervisor._cleanup()
     assert state["listener"].close_calls == 1
     assert state["lock"].release_calls == 1
+
+
+def test_author_home_launch_isolated_from_course_sources(tmp_path, monkeypatch):
+    calls = []
+    class FakeSupervisor:
+        def __init__(self, course_root, **options):
+            calls.append((course_root, options))
+        def run(self):
+            return 0
+    monkeypatch.setattr("courseweave.cli.LaunchSupervisor", FakeSupervisor)
+    home = tmp_path / "private-home"
+    result = CliRunner().invoke(app, ["author", "--home", str(home), "--port", "43124"])
+    assert result.exit_code == 0, result.output
+    root, options = calls[0]
+    assert root == home / ".launcher"
+    assert root.is_dir()
+    assert options["author_home"] == home
+    assert options["mode"] == "author"
+    assert options["state_dir"].is_relative_to(home)
+    assert not (root / "courseweave.json").exists()
+    mixed = CliRunner().invoke(app, ["author", "--home", str(home), "--course-root", str(tmp_path)])
+    assert mixed.exit_code != 0
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("command,mode", [("launch", "learn"), ("author", "author")])

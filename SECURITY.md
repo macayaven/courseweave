@@ -4,14 +4,14 @@
 
 | Version | Status |
 | --- | --- |
-| Unreleased schema-v2 candidate | Receives current fixes; not a public distribution |
+| 0.3.0 Author and Student | Locally accepted; publication status and supported artifacts are in the v0.3.0 release record |
+| 0.2.0 Student | Released schema-v2 application; current fixes are developed on the candidate branch |
 | 0.1.x | Historical public release; incompatible with schema-v2 courses |
 
-Release support will be updated when a distinct schema-v2 artifact is published.
+The release record identifies the exact distributed artifact and supported scope.
 
 ## Reporting a vulnerability
 
-GitHub private vulnerability reporting is currently disabled for this repository.
 Email the maintainer at [macayaven@gmail.com](mailto:macayaven@gmail.com) with a
 clear subject such as `CourseWeave security report`. Do not include credentials,
 real learner records, private course material, or raw provider transcripts.
@@ -35,6 +35,13 @@ CourseWeave binds its service to loopback, uses a per-launch capability token,
 keeps provider credentials out of the course kernel, constrains declared reader
 paths, and applies revision/idempotency checks to durable state and proposals.
 Provider use is optional and must be configured explicitly.
+
+Author source discovery/fetch is explicitly selected, bounded and network-off by
+default. Source approval does not grant redistribution rights. Model replies have
+no direct mutation authority: saved changes require review and revision checks.
+Author backups exclude credential custody, chat and Student work; restores create
+a new project with stale drafts/reports. Explicitly authored or imported content
+can itself contain private information, so inspect selected files before sharing.
 
 The accepted local pilot does not establish general production hardening or
 external compliance. Notebook transport was observed on loopback TCP with

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -22,7 +23,8 @@ import {
 import { ImportExport } from "./import-export";
 import { Inspector } from "./inspector";
 import { Outline } from "./outline";
-import { AuthorPreview } from "./preview";
+import { AuthorPreview, StudentPreview } from "./preview";
+import { RecoveryPanel } from './recovery-panel';
 import { useBeforeUnload } from "./reconnect";
 import { SaveConflict, type SavedCourse } from "./save-conflict";
 import {
@@ -31,8 +33,15 @@ import {
   type ValidationIssue,
 } from "./validation";
 import { useAuthorRuntime } from "./runtime";
-import { CurriculumThread } from "./curriculum-thread";
+import { CurriculumThread, AuthorAssistant } from "./curriculum-thread";
 import { ProposalReview } from "./proposal-review";
+import { CompatibilityPanel } from "./compatibility";
+import { ProjectPanel, SourceLibrary, type ProjectList } from "./project-panel";
+import { SourcePanel } from "./source-panel";
+import { ContentPanel, type ContentChange } from "./content-panel";
+import { ReviewPanel } from "./review-panel";
+import { CoveragePanel } from "./coverage-panel";
+import { DeliveryPanel } from "./delivery-panel";
 
 type Client = ReturnType<typeof createAuthorClient>;
 type CheckState = {
@@ -253,6 +262,12 @@ function AuthorEditor({
   courseAuthorityEpoch,
   sourceId,
   onCourseSaved,
+  onDirtyChange,
+  externalDirty = false,
+  privateProjectId,
+  authorEpoch = 0,
+  onAuthorSaved = () => undefined,
+  onReviewSaved,
 }: {
   course: CourseResponse;
   client: Client;
@@ -261,6 +276,12 @@ function AuthorEditor({
   courseAuthorityEpoch: number;
   sourceId: string;
   onCourseSaved(course: CourseResponse): void;
+  onDirtyChange(dirty: boolean): void;
+  externalDirty?: boolean;
+  privateProjectId?: string;
+  authorEpoch?: number;
+  onAuthorSaved?(change: ContentChange): void;
+  onReviewSaved?(id: string): void;
 }) {
   const [state, setState] = useState<AuthorDocumentState>(() =>
     documentState(course.manifest as AuthorManifest),
@@ -302,6 +323,7 @@ function AuthorEditor({
   const currentState = useRef(state);
   currentState.current = state;
   const dirty = isDraftDirty(state.draft, state.saved);
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
   useBeforeUnload(dirty);
   useEffect(() => {
     checks.current.structural?.abort();
@@ -624,6 +646,8 @@ function AuthorEditor({
           linkVersion={state.selection}
         />
       </section>
+      <CompatibilityPanel manifest={projectDraft(state.draft)} check={client.checkCompatibility}
+        disabled={!connected} epoch={epoch} onFocusIssues={focusIssues} />
       <AuthorPreview
         phase={phase}
         structural={structural}
@@ -673,7 +697,16 @@ function AuthorEditor({
           </button>
         </section>
       ) : null}
-      <CurriculumThread
+      {privateProjectId ? <AuthorAssistant client={client} projectId={privateProjectId} courseId={state.draft.id}
+        selected={(() => {
+          const selected = state.selection;
+          if (!("moduleKey" in selected)) return undefined;
+          const module = state.draft.modules.find(item => item.clientKey === selected.moduleKey);
+          const phase = module && "phaseKey" in selected ? module.phases.find(item => item.clientKey === selected.phaseKey) : undefined;
+          return module ? { module_id: module.id, ...(phase ? { phase_id: phase.id } : {}) } : undefined;
+        })()}
+        clean={!dirty && !externalDirty && !proposalSavePending && !refreshBlocked && connected}
+        epoch={authorEpoch + connectionEpoch + courseAuthorityEpoch} onSaved={onAuthorSaved} onReviewSaved={onReviewSaved} /> : <CurriculumThread
         client={client}
         sourceId={sourceId}
         selection={(() => {
@@ -695,14 +728,14 @@ function AuthorEditor({
               }
             : null;
         })()}
-        clean={!dirty && !proposalSavePending && !refreshBlocked}
+        clean={!dirty && !externalDirty && !proposalSavePending && !refreshBlocked}
         recovery={!connected}
         authorityBlocked={refreshBlocked}
         onProvider={setProvider}
         onProposal={recordProposal}
         onRefresh={refreshAuthorData}
         onAuthorityUnknown={() => setAuthorityState("blocked")}
-      />
+      />}
       <ProposalReview
         proposals={proposals}
         savedRaw={baseline.raw}
@@ -717,7 +750,7 @@ function AuthorEditor({
           rejectProposal: (id, body, signal) =>
             client.rejectProposal(id, body, signal) as Promise<Proposal>,
         }}
-        clean={!dirty}
+        clean={!dirty && !externalDirty}
         recovery={!connected}
         authorityBlocked={refreshBlocked}
         savePending={proposalSavePending}
@@ -749,12 +782,28 @@ export function AuthorApp() {
     "loading",
   );
   const [course, setCourse] = useState<CourseResponse | null>(null);
+  const [projects, setProjects] = useState<ProjectList | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [sourcesDirty, setSourcesDirty] = useState(false);
+  const [contentDirty, setContentDirty] = useState(false);
+  const [researchBusy, setResearchBusy] = useState(false);
+  const [reviewDirty, setReviewDirty] = useState(false);
+  const [previewDirty, setPreviewDirty] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [reviewEpoch, setReviewEpoch] = useState(0);
+  const [coverageEpoch, setCoverageEpoch] = useState(0);
+  const [openReportId, setOpenReportId] = useState<string | null>(null);
+  const [sourcesEpoch, setSourcesEpoch] = useState(0);
+  const [openChangeId, setOpenChangeId] = useState<string | null>(null);
   const [courseAuthorityEpoch, setCourseAuthorityEpoch] = useState(-1);
   const retainedConnection = useRef(false);
   const client = useRef<Client | null>(null);
+  const currentClient = useMemo(() => runtime.status === "ready"
+    ? createAuthorClient(runtime.runtime, projectId) : null, [runtime.status, runtime.runtime, projectId]);
   const identity =
     runtime.status === "ready"
-      ? `${runtime.runtime.serviceOrigin}\u0000${runtime.runtime.capabilityToken}\u0000${runtime.runtime.sourceId}`
+      ? `${runtime.runtime.serviceOrigin}\u0000${runtime.runtime.capabilityToken}\u0000${runtime.runtime.sourceId}\u0000${projectId ?? ""}`
       : runtime.status;
   const previousIdentity = useRef(identity);
   const connectionEpoch = useRef(0);
@@ -762,8 +811,7 @@ export function AuthorApp() {
     previousIdentity.current = identity;
     connectionEpoch.current += 1;
   }
-  if (runtime.status === "ready")
-    client.current = createAuthorClient(runtime.runtime);
+  if (currentClient) client.current = currentClient;
   useEffect(() => {
     if (runtime.status !== "ready") {
       if (course) setLoad("disconnected");
@@ -772,11 +820,20 @@ export function AuthorApp() {
     retainedConnection.current = course !== null;
     const controller = new AbortController();
     setLoad("loading");
-    void client
-      .current!.getCourse(controller.signal)
-      .then((next) => {
+    // The course read also serves the legacy single-course launch. The home
+    // response determines whether a project must be selected before editing.
+    const courseRequest = client.current!.getCourse(controller.signal);
+    const projectsRequest = client.current!.getProjects(controller.signal);
+    void Promise.allSettled([courseRequest, projectsRequest])
+      .then(([courseResult, projectResult]) => {
         if (!controller.signal.aborted) {
-          setCourse(next);
+          if (projectResult.status !== "fulfilled") { setLoad("disconnected"); return; }
+          setProjects(projectResult.value);
+          if (projectResult.value.enabled && !projectId) {
+            setCourse(null); setLoad("ready"); return;
+          }
+          if (courseResult.status !== "fulfilled") { setLoad("disconnected"); return; }
+          setCourse(courseResult.value);
           setCourseAuthorityEpoch(connectionEpoch.current);
           setLoad("ready");
         }
@@ -785,7 +842,23 @@ export function AuthorApp() {
         if (!controller.signal.aborted) setLoad("disconnected");
       });
     return () => controller.abort();
-  }, [runtime.status, runtime.runtime]);
+  }, [runtime.status, runtime.runtime, projectId]);
+  const selectProject = (id: string) => {
+    if (dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || previewDirty || recoveryBusy || id === projectId) return;
+    setCourse(null); setLoad("loading"); setProjectId(id);
+    setOpenChangeId(null);
+    setOpenReportId(null);
+  };
+  const projectLocked = dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty || previewDirty || runtime.status !== 'ready' || load !== 'ready';
+  const projectPanel = projects?.enabled && client.current ? <><ProjectPanel client={client.current}
+    projects={projects.projects ?? []} unavailable={projects.unavailable ?? []} selected={projectId}
+    disabled={projectLocked || recoveryBusy} onSelect={selectProject} />
+    <RecoveryPanel key={'recovery-' + projectId} client={client.current} projectId={projectId} disabled={projectLocked}
+      onBusyChange={setRecoveryBusy} onRestore={id => {
+        setCourse(null); setLoad('loading'); setProjectId(id); setOpenChangeId(null); setOpenReportId(null);
+      }} /></> : null;
+  if (projects?.enabled && !projectId && load === "ready")
+    return <AuthorShell state="Choose or create a private author project.">{projectPanel}</AuthorShell>;
   if (runtime.status === "connecting" && !course)
     return (
       <>
@@ -822,12 +895,15 @@ export function AuthorApp() {
     <AuthorShell
       state={
         connected
-          ? "Ready. Curriculum teacher provider unavailable."
+          ? projectId ? "Ready. Select saved content for the Author assistant." : "Ready. Curriculum teacher provider unavailable."
           : "Disconnected from CourseWeave. Your unsaved work remains in this tab."
       }
       provider="not_configured"
     >
+      {projectPanel}
+      <fieldset className="author-recovery-lock" disabled={recoveryBusy} inert={recoveryBusy} aria-busy={recoveryBusy}>
       <AuthorEditor
+        key={`editor-${projectId ?? "single-course"}`}
         course={course}
         client={client.current}
         connected={connected}
@@ -837,8 +913,43 @@ export function AuthorApp() {
         onCourseSaved={(next) => {
           setCourse(next);
           setCourseAuthorityEpoch(connectionEpoch.current);
+          setSourcesEpoch(value => value + 1);
         }}
+        onDirtyChange={setDirty}
+        externalDirty={contentDirty || sourcesDirty || researchBusy}
+        privateProjectId={projectId ?? undefined} authorEpoch={sourcesEpoch}
+        onAuthorSaved={change => setOpenChangeId(change.change_id)}
+        onReviewSaved={id => { setOpenReportId(id); setReviewEpoch(value => value + 1); setCoverageEpoch(value => value + 1); }}
       />
+      {projectId && <ContentPanel key={"content-" + projectId} client={client.current}
+        openChangeId={openChangeId}
+        disabled={!connected || dirty || sourcesDirty || researchBusy || reviewDirty} onDirtyChange={setContentDirty} onChanged={async () => {
+          const originClient = client.current!;
+          const next = await originClient.getCourse();
+          if (client.current !== originClient) return;
+          setCourse(next); setCourseAuthorityEpoch(connectionEpoch.current); setSourcesEpoch((current) => current + 1);
+        }} />}
+      {projectId && <SourcePanel key={"research-" + projectId} client={client.current}
+        disabled={!connected || dirty || sourcesDirty || contentDirty || reviewDirty} onBusyChange={setResearchBusy} onChanged={() => setSourcesEpoch(value => value + 1)} />}
+      {projectId && <SourceLibrary key={"sources-" + projectId + ":" + sourcesEpoch} client={client.current} projectId={projectId} disabled={!connected || contentDirty || researchBusy || reviewDirty} onDirtyChange={setSourcesDirty} onChanged={() => setSourcesEpoch(value => value + 1)} />}
+      {projectId && <ReviewPanel key={"reviews-" + projectId} client={client.current}
+        disabled={!connected || dirty || sourcesDirty || contentDirty || researchBusy}
+        epoch={sourcesEpoch + connectionEpoch.current} openReportId={openReportId} openEpoch={reviewEpoch} onDirtyChange={setReviewDirty}
+        onChanged={() => setCoverageEpoch(value => value + 1)} objectivesFor={selection =>
+          (course.manifest as AuthorManifest).modules.find(module => module.id === selection.module_id)?.phases
+            .find(phase => phase.id === selection.phase_id)?.learning?.objectives ?? []} />}
+      {projectId && <CoveragePanel key={"coverage-" + projectId} client={client.current}
+        disabled={!connected || dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty}
+        epoch={sourcesEpoch + coverageEpoch + connectionEpoch.current} onOpenReview={id => {
+          setOpenReportId(id); setReviewEpoch(value => value + 1);
+          document.querySelector('[aria-label="Saved review reports"]')?.scrollIntoView({ block: "start" });
+        }} />}
+      {projectId && <DeliveryPanel key={"delivery-" + projectId} client={client.current}
+        disabled={!connected || dirty || sourcesDirty || contentDirty || researchBusy || reviewDirty}
+        epoch={sourcesEpoch + connectionEpoch.current} />}
+      {projectId && <StudentPreview key={"student-preview-" + projectId} client={client.current}
+        disabled={!connected} onDirtyChange={setPreviewDirty} />}
+      </fieldset>
       {!connected ? (
         <button type="button" onClick={runtime.retry}>
           Reconnect

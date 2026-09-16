@@ -4,7 +4,111 @@ This file records user-visible CourseWeave changes. Version headings identify
 frozen contents; publication dates and status are recorded on the linked GitHub
 releases.
 
-## Unreleased
+## [0.3.0](https://github.com/macayaven/courseweave/releases/tag/v0.3.0)
+
+- Kept Brave discovery results transient and excluded their URLs, titles and snippets from saved research reports and backups. Retained explicit direct-source fetch provenance and clarified separate account and publisher rights.
+
+### Author Edition
+
+- Disabled automatic discovery of machine-wide language servers in the controlled
+  Jupyter launch. A blocked background probe could otherwise keep Jupyter alive
+  after the owning CourseWeave process stopped. Notebook kernels remain available.
+- Completed local installed acceptance with actual Brave discovery, direct source
+  fetch, six real-provider roles, both Student versions, full Agent Harness Path
+  coverage and bounded independent review. See the [acceptance record](docs/pilot/author-edition-acceptance.md)
+  for exact provenance, reused checks and observed model/platform limitations.
+- Kept live search selections visible during sibling-panel refresh and cancelled
+  older report reads before a new search, so a late saved-report response cannot
+  replace the current results.
+
+- Fixed two defects found by independent candidate review: revoked sources now
+  leave the assistant's permitted selection, and recovery disables editing until
+  completion so switching to a restored project cannot discard a new draft.
+- Added a separate portable Author bundle with Start Author.command, complete
+  setup/recovery README, both Student wheels and reproducible source/runtime
+  inputs. First setup creates isolated application/kernel environments; damaged
+  artifacts and unrelated work folders are rejected before setup writes.
+- Kept model and Brave search credentials off by default in the Author launcher,
+  with explicit hidden prompts or selected process-environment input for one launch.
+- Fixed the historical pilot entry point to import the shared launcher helpers
+  directly after the standalone Student resource moved into the application package.
+- Added inspected private backups and restore into a new project. Saved source
+  decisions and review dispositions survive; recovered drafts and reports need
+  fresh review. Complete inventories and hashes reject partial or incompatible
+  archives before creating the restored project.
+- Added export journals and explicit staging cleanup, recorded preview process
+  identities, and interrupted-discard recovery. A crashed Author now causes its
+  owned Jupyter child to stop and release the course lock.
+- Added actual installed Student practice from saved exports, with separate
+  notebooks/state, explicit provider opt-in, owned start/open/stop controls and
+  revision-checked observations and keep/discard decisions.
+- Fixed local video playback in candidate Student's scripts-disabled reader.
+  Author now reports the observed released v0.2.0 local-video limitation and
+  prevents a candidate profile from bypassing paired-handoff requirements.
+- Added reviewed course archives with linked-asset/fragment validation, explicit
+  source redistribution, reproducible file inventories and notebook output
+  clearing confined to the exported copy. Existing destinations and stale export
+  reviews fail without replacement; incomplete drafts remain labeled.
+- Added generic macOS Student bundles from verified runtime inputs, with distinct
+  study homes for each course/version/package and frozen course dependency setup
+  in an isolated kernel. Markdown-only courses require no Python project.
+- Set candidate application/frontend metadata to v0.3.0. Released Student v0.2.0
+  remains the compatibility baseline; existing delivered folders are unchanged.
+
+- Added the approved three-spec bundle and executable consistency audit with
+  traceability and regression coverage.
+- Added closed author-only contract types that separate untrusted drafts from
+  server-selected targets, deterministic compatibility, and human decisions.
+- Added a preliminary Student compatibility report using the existing validators,
+  explicit unchecked scope, and canonical-schema inspector choices.
+- Added private Author homes with new/imported projects, bounded file inventory,
+  source snapshots and explicit approval, intended-use and redistribution decisions.
+  Project requests retain their selected root across tabs. Source changes use the
+  shared course lock and reviewed revisions. Import leaves original files intact.
+- Added project switching and source review controls, with unsaved-work protection,
+  readable selection controls and a collapsed sidebar on Author launch.
+- Added reviewed Markdown, named notebook-cell edits, new notebook scaffolds and
+  cells, and explicit imported asset replacements. Pending diffs survive restart;
+  original imports and student notebooks retain their bytes.
+- Added hash/revision-checked one-file apply, immutable replay receipts and crash
+  reconciliation under the existing course lock. External edits, source revocation,
+  missing-versus-empty files and late write failures have explicit outcomes.
+- Added file review controls with keyboard rejection, preserved cell selection,
+  editable candidate copies, conflict reload and narrow-window layout checks.
+- Added one Author conversation with six roles, explicit approved-source
+  permissions, bounded saved-content previews and visible omissions. Role
+  changes retain valid conversation; changed content or permissions revoke replay.
+- Added text-only JSON drafts and evidence validation on the existing provider
+  and AG-UI transport. Complete replies remain session-only until an explicit
+  Save draft; exact diff review still owns application. Invalid, interrupted and
+  stale replies have no durable effect and make no automatic repair request.
+- Clarified exact-quotation instructions after installed live replies supplied
+  incorrect character offsets. Citation validation still rejects mismatched spans.
+- Added explicit, bounded Author source research with an optional separate Brave
+  Search credential, public HTTPS connection pinning, verified TLS, allow/deny
+  rules, cancellation and durable discovery/fetch outcomes. Network stays off
+  until each reviewed run; discovered URLs require a separate fetch action.
+- Added private local-reference import, static HTML/text/Markdown extraction,
+  original/extracted hashes and character offsets. Login, blocked, JavaScript-only
+  and unsupported content have explicit outcomes. Changed source bytes require
+  a new review; source approval never grants redistribution automatically.
+- Added paged research reports, source excerpts, offline/manual workflows and
+  bounded waiting for the shared course lock during research. Imported material
+  is never executed, and the Student assistant gains no network retrieval.
+- Added explicitly saved factual/editorial reviews with separate model judgments,
+  checked quotation provenance and human dispositions. Review revisions, stale
+  source/target detection, dismissal reasons, deletion and private JSON downloads
+  preserve author control independently of saved content changes and session chat.
+- Added course coverage with explicit author objective links, authored practice,
+  references and review gaps. Missing metadata remains guidance, and coverage
+  never changes progress or certifies mastery. The compatibility role receives
+  bounded canonical diagnostics with their unperformed checks.
+- Fixed review-panel loading that repeatedly disabled sibling panels in a real
+  Jupyter launch, recognized Author prompt metadata on the shared stream, and
+  enabled deliberate artifact downloads in the Author window's sandbox.
+- Recorded failed/rejected provider replies separately from successful checks;
+  assistant suggestions still require explicit review and application. See
+  [implementation notes](docs/author/implementation.md).
 
 ## [0.2.0](https://github.com/macayaven/courseweave/releases/tag/v0.2.0)
 

@@ -19,7 +19,7 @@ import {
 const localRoot = process.env.COURSEWEAVE_TEST_ROOT ?? (process.platform === 'darwin' ? '/tmp' : tmpdir());
 
 async function fixture() {
-    const root = await realpath(await mkdtemp(join(localRoot, 'cwv-')));
+    const root = await realpath(await mkdtemp(join(localRoot, 'cv-')));
     const release = join(root, 'release');
     const evidence = join(root, 'evidence');
     const testRoot = join(root, 'scratch');
@@ -182,6 +182,15 @@ test('release, evidence, and disposable-root overlaps are rejected before eviden
         );
         await assert.rejects(readFile(candidate.evidence), /ENOENT/);
     }
+});
+
+test('generic bundle identity selects the actual course-specific default home', () => {
+    const release = { format_version: 2, course_id: 'agent-harness-path', course_version: '0.2.0',
+        files: { course: { sha256: 'a'.repeat(64) } } };
+    assert.equal(studyHomeForRelease('/safe/os-home', release, 'darwin'),
+        '/safe/os-home/Library/Application Support/CourseWeave/agent-harness-path-v0.2.0-aaaaaaaaaaaaaaaa');
+    assert.throws(() => studyHomeForRelease('/safe/os-home', { ...release, course_id: '../escape' }, 'darwin'), /identity/);
+    assert.throws(() => studyHomeForRelease('/safe/os-home', { ...release, files: {} }, 'darwin'), /identity/);
 });
 
 test('release course_version selects the tested macOS default study home', () => {

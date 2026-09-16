@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def student():
-    path = ROOT / 'scripts/student_pilot.py'
+    path = ROOT / 'src/courseweave/student_launcher.py'
     assert path.is_file(), 'The student release has no standalone setup/start entry point'
     spec = importlib.util.spec_from_file_location('student_pilot', path)
     module = importlib.util.module_from_spec(spec)
@@ -47,7 +47,9 @@ def release(tmp_path, members=None):
     for key, name in [('wheel', 'courseweave.whl'), ('course', 'course.tar.gz'), ('constraints', 'requirements.txt')]:
         files[key] = {'path': name, 'sha256': hashlib.sha256((root / name).read_bytes()).hexdigest()}
     (root / 'release.json').write_text(json.dumps({
-        'format_version': 1,
+        'format_version': 2,
+        'course_id': 'agent-harness-path',
+        'notebook_runtime': False,
         'platform_commit': 'fixture',
         'course_commit': 'fixture',
         'course_version': '0.2.0',
@@ -171,7 +173,7 @@ def test_builder_records_course_version_and_licenses_in_eight_file_bundle(tmp_pa
     package = builder()
     metadata = {
         'pyproject.toml': '[project]\nname = "agent-harness-path"\nversion = "0.2.0"\n',
-        'courseweave.json': '{"schema_version": 2}',
+        'courseweave.json': '{"schema_version": 2, "id": "agent-harness-path"}',
         'LICENSE': 'fixture course license\n',
     }
     receipt_path = receipt(tmp_path, metadata)
@@ -195,10 +197,10 @@ def test_builder_records_course_version_and_licenses_in_eight_file_bundle(tmp_pa
 
 
 @pytest.mark.parametrize('metadata, expected', [
-    ({'courseweave.json': '{"schema_version": 2}', 'LICENSE': 'course'}, 'pyproject.toml'),
-    ({'pyproject.toml': '[project]\nname = "agent-harness-path"\n', 'courseweave.json': '{}', 'LICENSE': 'course'}, 'version'),
-    ({'pyproject.toml': '[project]\nversion = "../escape"\n', 'courseweave.json': '{}', 'LICENSE': 'course'}, 'version'),
-    ({'pyproject.toml': '[project\nversion = "0.2.0"\n', 'courseweave.json': '{}', 'LICENSE': 'course'}, 'pyproject.toml'),
+    ({'courseweave.json': '{"schema_version": 2, "id": "practice"}', 'LICENSE': 'course'}, 'pyproject.toml'),
+    ({'pyproject.toml': '[project]\nname = "practice"\n', 'courseweave.json': '{"schema_version": 2, "id": "practice"}', 'LICENSE': 'course'}, 'version'),
+    ({'pyproject.toml': '[project]\nversion = "../escape"\n', 'courseweave.json': '{"schema_version": 2, "id": "practice"}', 'LICENSE': 'course'}, 'version'),
+    ({'pyproject.toml': '[project\nversion = "0.2.0"\n', 'courseweave.json': '{"schema_version": 2, "id": "practice"}', 'LICENSE': 'course'}, 'pyproject.toml'),
     ({'pyproject.toml': '[project]\nversion = "0.2.0"\n', 'courseweave.json': '{}'}, 'LICENSE'),
 ])
 def test_builder_rejects_missing_or_malformed_course_metadata(tmp_path, metadata, expected):
@@ -430,8 +432,9 @@ def test_full_course_default_leaves_previous_student_workspace_untouched(tmp_pat
     existing_full_course = previous.with_name('Student Pilot S01-S14')
     existing_full_course.mkdir()
     (existing_full_course / 'saved-work').write_text('my earlier full-course work')
-    expected = previous.with_name('Agent Harness Path v0.2.0')
-    assert pilot.default_home('0.2.0') == expected
+    digest = pilot.load_release(root)['files']['course']['sha256']
+    expected = previous.with_name('agent-harness-path-v0.2.0-' + digest[:16])
+    assert pilot.default_home('agent-harness-path', '0.2.0', digest) == expected
     assert pilot.main(['check', '--no-provider'], root=root) == 2
     assert str(expected) in capsys.readouterr().out
     assert not expected.exists()
@@ -443,7 +446,7 @@ def test_linux_default_uses_versioned_xdg_data_home(tmp_path, monkeypatch):
     pilot = student()
     monkeypatch.setattr(pilot.sys, 'platform', 'linux')
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'xdg data'))
-    assert pilot.default_home('0.2.0') == tmp_path / 'xdg data/courseweave/agent-harness-path-v0.2.0'
+    assert pilot.default_home('agent-harness-path', '0.2.0', 'a' * 64) == tmp_path / 'xdg data/courseweave/agent-harness-path-v0.2.0-aaaaaaaaaaaaaaaa'
 
 
 @pytest.mark.parametrize('xdg_data_home', ['', 'relative/data'])
@@ -452,7 +455,7 @@ def test_linux_default_ignores_empty_or_relative_xdg_data_home(tmp_path, monkeyp
     monkeypatch.setattr(pilot.sys, 'platform', 'linux')
     monkeypatch.setattr(pilot.Path, 'home', lambda: tmp_path)
     monkeypatch.setenv('XDG_DATA_HOME', xdg_data_home)
-    assert pilot.default_home('0.2.0') == tmp_path / '.local/share/courseweave/agent-harness-path-v0.2.0'
+    assert pilot.default_home('agent-harness-path', '0.2.0', 'a' * 64) == tmp_path / '.local/share/courseweave/agent-harness-path-v0.2.0-aaaaaaaaaaaaaaaa'
 
 
 @pytest.mark.parametrize('location', [
@@ -525,7 +528,7 @@ def test_redirected_release_runtime_identity_is_rejected_without_following_it(tm
     home = tmp_path / 'study'
     runtimes = home / 'runtimes'
     runtimes.mkdir(parents=True)
-    identity = data['files']['wheel']['sha256'][:16] + '-' + data['files']['constraints']['sha256'][:16]
+    identity = '-'.join(data['files'][kind]['sha256'][:16] for kind in ('wheel', 'constraints', 'course'))
     outside = tmp_path / 'outside runtime'
     outside.mkdir()
     (runtimes / identity).symlink_to(outside, target_is_directory=True)
@@ -542,7 +545,7 @@ def test_redirected_runtime_container_or_marker_is_rejected_without_writes(tmp_p
     root = release(tmp_path)
     data = pilot.load_release(root)
     home = tmp_path / 'study'
-    identity = data['files']['wheel']['sha256'][:16] + '-' + data['files']['constraints']['sha256'][:16]
+    identity = '-'.join(data['files'][kind]['sha256'][:16] for kind in ('wheel', 'constraints', 'course'))
     runtime = home / 'runtimes' / identity
     runtime.mkdir(parents=True)
     link = runtime / redirect
@@ -568,7 +571,7 @@ def test_runtime_paths_allow_uv_python_symlinks_inside_real_containers(tmp_path)
     root = release(tmp_path)
     data = pilot.load_release(root)
     home = tmp_path / 'study'
-    identity = data['files']['wheel']['sha256'][:16] + '-' + data['files']['constraints']['sha256'][:16]
+    identity = '-'.join(data['files'][kind]['sha256'][:16] for kind in ('wheel', 'constraints', 'course'))
     runtime = home / 'runtimes' / identity
     for environment in ('platform', 'kernel'):
         bin_dir = runtime / environment / 'bin'

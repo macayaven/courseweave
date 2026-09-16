@@ -263,3 +263,293 @@ query, percent encoding, whitespace, or controls. The surface `path` remains
 the sole filesystem source; the fragment is presentation metadata and never
 changes progress or teacher authority. Frontends append it as the section
 target when opening the authored HTML.
+
+## Author Edition v0.3.0 contract foundation
+
+The approved [three-spec bundle](../specs/README.md) adds author-only Python
+contracts in `courseweave.author.contracts`. They are separate from schema-v2
+student manifests and from this API's existing runtime authority. Draft reply
+types cannot carry target paths/revisions, human dispositions or deterministic
+compatibility flags. Implemented compatibility, project and content routes are
+described below. Source research, model review and delivery remain subsequent
+implementation tasks.
+See [implementation status](../author/implementation.md) for verified scope.
+
+`POST /api/author/compatibility` accepts `{ "manifest": ...,
+"student_version": "0.2.0" }` (the version defaults to `0.2.0`; candidate
+`0.3.0` is also supported). The read-only report contains the named profile,
+manifest digest, structural/asset/link/profile issues, unperformed checks and
+a server-derived `passed` flag. Draft reports have no stable inventory hash.
+A passing preliminary report does not certify a course export or installed
+execution. Unknown request fields, oversized bodies and unsupported profiles
+are rejected. No code execution, source fetch or state write occurs.
+
+
+## Author private projects (v0.3.0 candidate)
+
+A launch with `author --home` enables the authenticated project hub:
+
+- `GET /api/author/projects`: list completed projects and unavailable/incomplete IDs.
+- `POST /api/author/projects/inventory`: inspect an explicit `source_root`, returning bounded ordinary files, omissions and a root/content digest.
+- `POST /api/author/projects`: create a new `project_id` with `selected_paths`; imports additionally require `source_root` and the reviewed `expected_inventory`. Existing destinations are rejected.
+- `GET /api/author/sources`: read the selected project's source decisions.
+- `PUT /api/author/sources/{source_id}`: save a human decision with its reviewed `revision`, title, optional publication date, review status, intended use, redistribution and review note. Extra authority fields are rejected; stale decisions return a conflict.
+
+The browser sends `X-CourseWeave-Project: <project_id>` on project requests.
+Authentication runs before project resolution. Each selected project uses the
+existing application, manifest validator, store and context registry with its
+own immutable root; selecting another project cannot retarget old tabs. Hub
+routes remain global to that Author home. Other unselected mutations fail closed.
+Ordinary Student or single-course launches report `{"enabled": false}` for the
+hub and reject private project creation/source curation. Project requests and
+source decisions accept at most 1 MiB of JSON. No model chooses a local root,
+approves a source, sets redistribution or obtains filesystem write authority.
+
+## Reviewed author content (v0.3.0 candidate)
+
+These routes require an authenticated private Author project. Ordinary Student
+and legacy single-course launches cannot use them.
+
+- `GET /api/author/content/files`: bounded course-file inventory.
+- `GET /api/author/content?path=...`: a selected Markdown/notebook/asset snapshot,
+  its exact SHA-256, existence, project revision and manifest hash. Initial
+  manifest Save is required before lesson editing.
+- `POST /api/author/changes`: stage a direct human edit. The closed request has
+  `path`, `before_sha256`, `before_exists`, `project_revision`, `manifest_sha256`
+  and a discriminated `action`. Supported actions are `markdown_replace` (`text`),
+  `notebook_cells` (`replace_sources` keyed by existing IDs), `notebook_scaffold`
+  (`title`), `notebook_add_cell` (`cell_type`, `source`), or `import_replace`
+  (`source_path`, an explicit absolute local file). Returns a saved pending
+  change without writing the course file.
+- `GET /api/author/changes?offset=0`: up to 20 change summaries plus `total`;
+  candidate bytes are not loaded for the list.
+- `GET /api/author/changes/{change_id}`: the saved status/revision, before/after
+  hashes, exact diff, and editable Markdown/notebook candidate when applicable.
+- `POST /api/author/changes/{change_id}/apply`: accepts `reviewed_revision`,
+  `context_digest` and `operation_id`. A successful retry with the same operation
+  returns the immutable original receipt. A changed request under that ID, stale
+  target/context/revision, rejected candidate or failed prior operation conflicts.
+- `POST /api/author/changes/{change_id}/reject`: accepts `reviewed_revision`;
+  records rejection without a course-file write.
+
+Only the service constructs assistant targets from AuthorContext and validates
+closed ChangeDraft data. The manual route is a direct authenticated author action,
+not a tool granted to a model. Manifest fragment candidates use the existing
+canonical manifest composition/validation/save path.
+
+Candidate snapshots/backups are at most 8 MiB per file, individual draft texts
+at most 64,000 characters, and request JSON at most 1 MiB. Notebook validation
+does not execute cells. Imported replacements remain separate candidate sources
+with undecided redistribution. Private paths, symlinks and special files are
+rejected. A file's absence is part of its reviewed identity.
+
+The existing course lock protects the adjacent prepare/apply journal. Restart
+reconciles prepared operations by exact target hashes without overwriting a
+conflict. Reported failed operations do not become successful receipts on retry.
+Draft structural validity does not imply runnable assets or export readiness.
+
+## Private Author conversation (v0.3.0 candidate)
+
+- `POST /api/author/assistant/context`: closed `thread_id`, `selection`, `role`
+  and `source_ids`. The server resolves saved bytes and current approved source
+  revisions. Returns `context_id`, the bounded context and omissions, and whether
+  earlier conversation remains permitted for replay. This endpoint is local;
+  it makes no provider or search call.
+- `POST /api/author/guide`: the existing AG-UI POST stream. In a private project,
+  `forwardedProps` contains only `context_id` and `action` (`chat`, `draft`, or
+  `review`). Client history/tools remain inert. A current server preview in the
+  same session/project/thread is required. The accepted turn-context event adds
+  role, selection, permitted source count, context identity/digest and omissions.
+- A successful complete draft/review may emit `courseweave.author_reply` after
+  text completion, with `draft_id`, `context_digest` and a validated closed reply.
+  It is an ephemeral candidate, not an applied or saved change. RUN_ERROR,
+  cancellation, missing terminal events and mismatched contexts grant no save
+  authority. The shared parser accepts Author metadata only for the expected
+  Author context.
+- `POST /api/author/assistant/drafts/{draft_id}/save`: empty closed object.
+  Saves that session's current validated content draft once and returns the
+  ordinary pending change. Repeat saves return the same change ID. The exact diff
+  and explicit reviewed apply endpoints above own all course-file changes.
+
+Course metadata fragments exclude `modules`; the service preserves all modules
+while composing that selected unit. Module/activity fragments retain their
+selected identity. Reply findings remain model judgments; neither their prose
+nor their citations can set human dispositions or compatibility status.
+Conversation, previews and unsaved drafts follow existing session lifetime and
+bounded history cleanup. Up to 128 unsaved reply drafts are retained per project
+process. Saved changes retain their independent durable lifecycle.
+
+## Private Author review reports and coverage (v0.3.0 candidate)
+
+These authenticated, project-selected routes require a private Author project;
+ordinary Student launches return 403. The report is distinct from a pending
+content change and from session-only conversation.
+
+- `POST /api/author/assistant/drafts/{draft_id}/save-review`: empty closed object.
+  Saves a complete validated reply using its still-current server context. Human
+  dispositions start `unreviewed`; this does not save or apply a content change.
+  Repeated saves in the same session return the existing report. A deleted report
+  is not recreated by replaying that save.
+- `GET /api/author/reviews?offset=0`: at most twenty summaries and `next_offset`.
+  `GET /api/author/reviews/{report_id}` returns one closed `ReviewReport` with
+  current derived staleness and provenance checks, original model judgments,
+  human decisions, scope/budget/omissions and supplied canonical diagnostics.
+- `PUT /api/author/reviews/{report_id}/findings/{claim_id}`: closed `revision`,
+  `human_disposition`, `reason` and `objective_ids`. Dismissed/revised decisions
+  require a nonblank reason. Objective IDs must belong to the report's explicitly
+  selected activity. Stale accepted/revised decisions and revision conflicts fail;
+  model judgment and evidence are immutable through this route.
+- `DELETE /api/author/reviews/{report_id}`: closed `reviewed_revision`, returns 204.
+- `GET /api/author/reviews/{report_id}/export?revision=0`: revision-checked JSON
+  attachment with `Cache-Control: no-store`. The application requests a private
+  download only on the explicit user action. Local source origins use filenames.
+- `GET /api/author/coverage?offset=0`: at most twenty canonical activity rows with
+  authored objectives/practice, declared sources, explicit reviewed support and
+  gaps, plus report IDs not associated with a current activity. No progress state
+  is read or changed, and model claim IDs are not inferred as objective links.
+
+Reports are bounded to 200 per project and 512 KiB each. All mutations use the
+existing course lock and atomic private writes. Dependency changes mark reports
+stale without rewriting judgments or decisions. Located quotation provenance is
+independent of model entailment and human acceptance. See [review workflow and
+limits](../author/reviews.md).
+
+## Private Author delivery (v0.3.0 candidate)
+
+These authenticated routes require a selected private Author project; ordinary
+Student launches have no private export authority.
+
+- `GET /api/author/delivery`: saved course inventory, default linked closure,
+  source distribution exclusions, project revision, inventory/source-decision
+  hashes, preliminary compatibility and configured Student runtime versions.
+- `POST /api/author/exports`: explicit `project_revision`, `inventory_sha256`,
+  `source_decisions_sha256`, `course_version`, `kind` (`draft` or
+  `student_handoff`), `selected_paths` and new `.tar` `destination`. The service
+  copies reviewed bytes, clears only exported notebook outputs, checks the stable
+  snapshot and exclusively publishes a new archive. Response201 is an exact
+  ExportReceipt; stale selections/existing destinations fail409.
+- `GET /api/author/exports?offset=0`: twenty saved immutable export receipts per
+  page. These identify historical snapshots, not the current working course.
+- `POST /api/author/student-bundles`: saved `export_id`, configured
+  `student_version` (`0.2.0` or `0.3.0`) and a new folder `destination`. Drafts and
+  changed/missing artifact hashes fail before completion. Runtime paths/hashes
+  come from the explicit backend `--student-inputs` descriptor, never the browser.
+
+Metadata for package review and setup is described in [Course delivery](../author/delivery.md).
+No export action runs course code, fetches sources, approves evidence or changes
+Student rules. Source-file associations survive source-title edits, refresh and
+rejected replacement imports; only an actually applied replacement changes the
+file's import association.
+
+## Private installed Student previews (v0.3.0 candidate)
+
+These routes use the same capability and `X-CourseWeave-Project` guard. One
+preview may prepare or run per Author home; its files are outside every project.
+
+- `GET /api/author/previews?offset=0`: twenty private saved records per page.
+- `POST /api/author/previews`: closed `export_id`, configured `student_version`
+  and optional strict boolean `share_provider` (default false). Response202
+  records preparation; it does not certify successful learner actions.
+- `POST /api/author/previews/{id}/open`: explicitly opens the ready Student
+  browser through the supervisor's opener. Bootstrap credentials stay in memory.
+- `POST /api/author/previews/{id}/stop`: stops that owned process and retains files.
+- `POST /api/author/previews/{id}/observations`: exact record `revision`, supported
+  `surfaces`, declared `actions` and notes up to 8,000 characters. Saves the
+  `author_reported` category; it grants no deterministic compatibility authority.
+- `POST /api/author/previews/{id}/keep` or `/discard`: exact record `revision`
+  and strict `confirm: true`. Discard requires a stopped preview and matching
+  ownership marker, deletes only that preview folder, and retains its record.
+
+Records contain package identity, installed Student version, process status,
+owned folder and author observations. They contain no provider or browser token.
+See [Student practice preview](../author/preview.md) for the user workflow and
+the separately observed v0.2.0 local-video rendering limitation.
+
+## Private Author sources and research (v0.3.0 candidate)
+
+All routes below require an authenticated private project. Ordinary Student
+launches cannot use them. Model tools cannot call these mutation routes.
+
+- `POST /api/author/sources/import`: closed `{ "path": "/local/reference.md" }`.
+  Snapshots one nonsynced ordinary file, up to 8 MiB, as a private reference.
+  It does not copy into the working course, approve the source or execute code.
+- `GET /api/author/sources/{source_id}/text?revision=0&start=0&limit=8000`:
+  verifies the source revision and both snapshot hashes, then returns a bounded
+  text excerpt with start/end offsets, total characters, metadata and omissions.
+- `GET /api/author/research`: local configuration and active-run state, explicit
+  network-off default, fixed limits and author account responsibility. No key
+  values, search or fetch calls are returned or performed.
+- `POST /api/author/research`: a closed `ResearchRequest` requires
+  `network_enabled: true`, `policy`, up to two `queries` and up to five `urls`.
+  At least one query or URL is required. Policy is `allow_only` with at least one
+  allowed rule, or `public_web`, plus optional deny rules. Each rule has an exact
+  HTTPS `origin` and optional absolute `path_prefix`. Deny takes precedence.
+  The browser presents separate discovery/fetch actions to avoid reissuing a
+  query when the author chooses a result. No discovered result is auto-fetched.
+- The research POST returns the actual saved `ResearchReport` with its ID, UTC
+  start/finish times, original request, at most ten discovery results, at most
+  five fetch outcomes, source revision references and notices. Result policy
+  decisions and retrieval/publication dates are separate. Raw bodies are absent;
+  supported or unsupported retrieved source bytes stay in private snapshots.
+  A rejected, unavailable or cancelled result is never replaced with a summary.
+- `POST /api/author/research/cancel`: empty closed object. Cancels the active run
+  for this project; another project's run cannot be cancelled through its header.
+  HTTP 202 means cancellation requested, not completed. Read the terminal report
+  for the observed outcome. Browser disconnection also signals cancellation.
+- `GET /api/author/research/reports?offset=0`: up to twenty saved summaries and
+  `next_offset`; `GET /api/author/research/reports/{report_id}` reads one report.
+  Unknown-response recovery uses this read path, never an automatic retry.
+
+One active run is allowed per Author home. Network work is bounded to sixty
+seconds per run, ten seconds/three redirects/two MiB decompressed content per
+fetch. Research checks cancellation/deadline while waiting for the shared course
+lock. Immutable terminal reports require only atomic publication and cannot be
+held behind an unrelated course edit. Up to 500 reports and 10,000 current source
+identities are supported per project; reaching a limit never prunes old evidence.
+
+Brave uses only `BRAVE_SEARCH_API_KEY`, supplied to the Author backend. The
+fetcher never uses browser cookies, student credentials or model keys. Invalid
+URLs and denied origins cause no source transport calls; redirects repeat policy
+and destination checks. See [Author research setup and limits](../author/research.md).
+
+## Private Author backup and recovery (v0.3.0 candidate)
+
+These closed requests use the existing capability authentication, 1 MiB request
+bound and project header. The two `projects/restore` routes belong to the Author
+home and are available before a project is selected. Ordinary Student launches
+cannot back up or restore Author projects.
+
+- `POST /api/author/backups/inspect`: `{categories: []}` with optional `changes`,
+  `reviews`, `research` selections. Returns the full hash inventory, byte count,
+  exclusions and `inventory_sha256`. Applied changes needed for provenance are
+  core backup artifacts regardless of the optional draft selection.
+- `POST /api/author/backups`: the same categories plus a new local `.tar`
+  `destination` and reviewed `inventory_sha256`; 201 returns destination,
+  `archive_sha256`, file count and categories. Changed content/decisions return
+  409 before publishing an archive. An existing destination is not replaced.
+- `POST /api/author/projects/restore/inspect`: `{archive: "/local/backup.tar"}`.
+  Verifies the complete supported archive and returns its SHA-256, original
+  project ID, selected artifact categories and counts.
+- `POST /api/author/projects/restore`: `archive`, reviewed `archive_sha256` and a
+  new `project_id`. Returns the created project with 201. Partial, incompatible
+  or changed inputs and existing destinations return 409. A restored project has
+  a new revision, stale pending drafts/reviews, retained source decisions and
+  dispositions, and no replayed operations or restored process handles.
+- `GET /api/author/recovery`: reconciles exact export hashes/receipts and reports
+  interrupted/conflicting attempts and any retained owned staging directories.
+- `POST /api/author/recovery/exports/{export_id}/discard`: `{confirm: true}`
+  explicitly removes only that attempt’s marked staging directory. The final
+  exported archive is never deleted by this route.
+
+Author backup version 1 is an uncompressed tar with an exact, closed inventory,
+up to 40,000 files and 2 GiB. Restore checks artifact identities, dependencies,
+hashes, local paths, file types and collisions before creating a new destination.
+Its final `project.json` is the completion marker. See
+[backup and recovery](../author/recovery.md) for included artifacts and limitations.
+
+Preview records now include the owned process start stamp. Listing after a
+restart marks an interrupted preview explicitly; Stop checks PID, start time,
+dedicated process group and preview identity before signalling a surviving child.
+Discard records its intent before deletion and reconciles a completed deletion
+after restart. Candidate Jupyter watches its OS parent and shuts down normally
+when its owning supervisor is lost.

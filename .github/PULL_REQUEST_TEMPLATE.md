@@ -10,6 +10,7 @@ provider, accessibility, course, or human checks were not run.
 ## Contract and release impact
 
 - [ ] Canonical schema/state ownership remains explicit.
+- [ ] Shared, Teacher/Author, and Student specification impacts were reviewed together; affected requirements and verification mappings were updated.
 - [ ] Consent, revisions, idempotency, privacy, recovery, and failure behavior were reviewed where relevant.
 - [ ] Generated frontend/JupyterLab outputs match their sources where relevant.
 - [ ] Migration, compatibility, versioning, and changelog/release notes were updated where relevant.

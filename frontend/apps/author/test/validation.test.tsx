@@ -36,6 +36,7 @@ vi.mock("../src/api", async () => {
   return {
     AuthorApiError,
     createAuthorClient: () => ({
+      getProjects: vi.fn().mockResolvedValue({ enabled: false }),
       getCourse: appMocks.getCourse,
       validateCourse: appMocks.validateCourse,
       putCourse: vi.fn(),

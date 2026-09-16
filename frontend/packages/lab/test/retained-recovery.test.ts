@@ -45,9 +45,9 @@ vi.mock("../src/runtime", () => ({
     start() {}
     dispose() {}
   },
-  createCourseWeaveIframe: () => {
+  createCourseWeaveIframe: (_origin: string, mode: string) => {
     const iframe = document.createElement("iframe");
-    iframe.title = "CourseWeave guide";
+    iframe.title = mode === "author" ? "CourseWeave author" : "CourseWeave guide";
     return iframe;
   },
 }));
@@ -190,7 +190,7 @@ it("opens Author after actual dock restoration instead of losing its newly added
   let finishRestoration!: () => void;
   const restored = new Promise<void>(resolve => { finishRestoration = resolve; });
   const commands = new Map<string, any>();
-  const shell = { currentWidget:null, currentChanged:new Signal(), add(widget:Widget) { dock.addWidget(widget); }, activateById:vi.fn() };
+  const shell = { currentWidget:null, currentChanged:new Signal(), add(widget:Widget) { dock.addWidget(widget); }, activateById:vi.fn(), collapseLeft:vi.fn() };
   const tracker = {currentWidget:null,currentChanged:new Signal(),activeCell:null,activeCellChanged:new Signal()};
   await plugin.activate({restored,commands:{addCommand:(id:string,options:any)=>commands.set(id,options)}} as any,shell as any,{addItem:vi.fn()} as any,{} as any,tracker as any,tracker as any,tracker as any,null);
   // Jupyter startup must finish so its layout restoration can complete.
@@ -199,6 +199,7 @@ it("opens Author after actual dock restoration instead of losing its newly added
   dock.restoreLayout({main:null});
   finishRestoration();
   await vi.waitFor(() => expect([...dock.widgets()].map(widget => widget.id)).toEqual(["courseweave-author"]));
+  await vi.waitFor(() => expect(shell.collapseLeft).toHaveBeenCalledOnce());
   expect(dock.node.querySelector('iframe')).not.toBeNull();
   commands.get("courseweave:open-author").execute();
   await Promise.resolve();

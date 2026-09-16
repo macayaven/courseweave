@@ -249,6 +249,14 @@ describe('RuntimeBroker', () => {
     window.removeEventListener('error', errorEvent);
   });
 
+  it('allows explicit Author artifact downloads without granting that capability to course readers', () => {
+    const author = createCourseWeaveIframe('https://courseweave.test', 'author');
+    const student = createCourseWeaveIframe('https://courseweave.test', 'learn');
+    expect(author.getAttribute('sandbox')?.split(' ')).toContain('allow-downloads');
+    expect(student.getAttribute('sandbox')?.split(' ')).not.toContain('allow-downloads');
+    expect(author.getAttribute('sandbox')?.split(' ')).not.toContain('allow-popups');
+  });
+
   it('creates an origin-referrer sandboxed guide iframe without a URL token', () => {
     const iframe = createCourseWeaveIframe('https://courseweave.test', 'learn');
     expect(iframe.src).toBe('https://courseweave.test/learn/');

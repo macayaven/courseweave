@@ -332,8 +332,12 @@ const plugin = {
         // Do not await restoration inside activation: startup must finish first.
         // The factory/retained guide reuse existing panels if a command opened one.
         void Promise.resolve(app.restored).then(() => {
-            if (launchMode === "author")
+            if (launchMode === "author") {
+                // Give the authoring workspace the full main area on first launch,
+                // including narrow windows. The normal sidebar toggle stays available.
+                shell.collapseLeft();
                 openAuthor();
+            }
             else
                 openGuide();
         });

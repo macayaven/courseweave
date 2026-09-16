@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from student_pilot import clean_environment, student_environment
+from courseweave.student_launcher import clean_environment, student_environment
 
 
 def main(argv: list[str] | None = None, *, root: Path | None = None) -> None:

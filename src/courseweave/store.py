@@ -9,6 +9,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
@@ -146,6 +147,30 @@ def _request_hash(scope: str, value: Any) -> str:
 
 def _file_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+@contextmanager
+def _exclusive_lock(lock_path: Path, *, check_wait: Callable[[], float] | None = None):
+    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    acquired = False
+    try:
+        if fcntl is not None:
+            if check_wait is None:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            else:
+                while True:
+                    remaining = check_wait()
+                    try:
+                        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        time.sleep(min(0.02, remaining))
+            acquired = True
+        yield
+    finally:
+        if fcntl is not None and acquired:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def resolve_state_dir(course_root: Path, course_id: str) -> Path:
@@ -1141,20 +1166,38 @@ class CourseStore:
             connection.commit()
 
     @contextmanager
+    def author_lock(self) -> Iterator[None]:
+        """Serialize adjacent author artifacts with the canonical course store.
+
+        Callers must not nest store mutations while holding this non-reentrant
+        lock. Author journals use the canonical manifest writer inside it.
+        """
+        with self._locked():
+            yield
+
+    @staticmethod
+    @contextmanager
+    def author_project_lock(course_root: Path, state_dir: Path, *, check_wait: Callable[[], float] | None = None) -> Iterator[str | None]:
+        """The same lock, without requiring a parseable manifest for recovery.
+
+        Yield the registered identity for the Author service to compare before
+        staging/applying a new change. No learner state is initialized or reset.
+        A bounded research caller can check cancellation/deadline while waiting.
+        """
+        root = Path(course_root).resolve()
+        directory, lock_path, _ = _storage_paths(root, empty_manifest_draft(root).id, state_dir)
+        lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with _exclusive_lock(lock_path, check_wait=check_wait):
+            yield _database_identity(root, directory)
+
+    @contextmanager
     def _locked(self, *, validate_identity: bool = True) -> Iterator[None]:
-        descriptor = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            if fcntl is not None:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
+        with _exclusive_lock(self.lock_path):
             if validate_identity:
                 registered = self._stored_identity()
                 if registered is not None and registered != self.course_id:
                     raise CourseIdentityChangedError('Draft identity changed; reopen the course')
             yield
-        finally:
-            if fcntl is not None:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
 
     def _read_state(self, connection: sqlite3.Connection) -> LearnerState:
         row = connection.execute(

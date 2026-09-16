@@ -1,6 +1,7 @@
 import type { AuthorSurface, AuthorNotebookSelector } from "@courseweave/ui";
 import { createSurfaceStart, type DraftSurface } from "./draft";
 import { TextField, SelectField, ArrayFields } from "./field-inputs";
+import { surfaceTypes, surfacePurposes, selectorTypes, selectorMatches } from "./schema-options";
 export function SurfaceFields({
   surface,
   update,
@@ -31,15 +32,7 @@ export function SurfaceFields({
         label="Surface type"
         pointer={p("type")}
         value={surface.type}
-        options={[
-          "html",
-          "markdown",
-          "source",
-          "notebook",
-          "video",
-          "terminal",
-          "external",
-        ]}
+        options={surfaceTypes}
         onChange={(type) =>
           replace({
             ...createSurfaceStart(type),
@@ -53,7 +46,7 @@ export function SurfaceFields({
         label="Surface purpose"
         pointer={p("purpose")}
         value={surface.purpose}
-        options={["primary", "supporting", "reference"]}
+        options={surfacePurposes}
         onChange={(purpose) => update({ purpose })}
       />
       {"path" in surface ? (
@@ -78,7 +71,7 @@ export function SurfaceFields({
             label="Notebook selector"
             pointer={p("selector/type")}
             value={surface.selector.type}
-            options={["whole_notebook", "cell_ids", "cell_tags"]}
+            options={selectorTypes}
             onChange={(type) => {
               const selector: AuthorNotebookSelector =
                 type === "whole_notebook"
@@ -109,7 +102,7 @@ export function SurfaceFields({
               label="Tag matching"
               pointer={p("selector/match")}
               value={surface.selector.match}
-              options={["any", "all"]}
+              options={selectorMatches}
               onChange={(match) =>
                 update({ selector: { ...surface.selector, match } })
               }

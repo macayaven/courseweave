@@ -69,7 +69,7 @@ from courseweave.professor import (
     hints_disabled,
     NO_HINTS_MESSAGE,
 )
-from courseweave.providers import ModelResult, ProviderConfig, create_model, _failure_for
+from courseweave.providers import ModelResult, ProviderConfig, ProviderCompletionError, create_model, _failure_for
 from courseweave.teaching import lesson_scope, lesson_unchanged, teaching_context, TurnContext, replay_dependency
 from courseweave.state_contracts import StateRequest
 from courseweave.store import (
@@ -162,6 +162,9 @@ def create_app(
     *,
     capability_token: str | None = None,
     state_dir: Path | None = None,
+    author_home: Path | None = None,
+    author_project=None,
+    author_student_inputs: Path | None = None,
 ) -> FastAPI:
     """Create the CourseWeave service application.
 
@@ -196,6 +199,9 @@ def create_app(
     app.state.proposal_candidates: dict[str, _ProposalCandidate] = {}
     app.state.provider_config_factory = lambda: ProviderConfig.from_environ(os.environ)
     app.state.professor_model_factory = create_model
+    from .author.api import install_routes
+    install_routes(app, author_home=author_home, author_project=author_project, student_runtime_inputs=author_student_inputs, factory=create_app)
+    # Added last so authentication runs before project selection/path access.
     app.add_middleware(
         _CapabilityTokenMiddleware, capability_token=app.state.capability_token
     )
@@ -323,6 +329,26 @@ def create_app(
             return _validation_issues_response(issues)
         formatted = manifest_bytes(manifest).decode("utf-8")
         return JSONResponse({"manifest": manifest.model_dump(mode="json"), "formatted_json": formatted})
+
+    @app.post("/api/author/compatibility")
+    async def author_compatibility(request: Request) -> Response:
+        from .author.quality import check_manifest, student_profile
+
+        root = _configured_root(app)
+        if root is None:
+            return _error(409, "not_configured", "No course root is configured.")
+        raw = await request.body()
+        if len(raw) > 1024 * 1024:
+            return _error(413, "validation_error", "Request body exceeds the 1 MiB limit.")
+        try:
+            body = json.loads(raw)
+            if not isinstance(body, dict) or "manifest" not in body or set(body) - {"manifest", "student_version"}:
+                raise ValueError()
+            profile = student_profile(body.get("student_version", "0.2.0"))
+            report = check_manifest(body["manifest"], root, profile)
+        except (ValueError, TypeError):
+            return _error(422, "validation_error", "The compatibility request or Student profile is invalid.")
+        return JSONResponse({**report.model_dump(mode="json"), "passed": report.passed})
 
     @app.get("/api/context")
     async def get_context(
@@ -875,6 +901,9 @@ async def _guide_response(
     if request_text is None:
         _clear_shared_run(app, session_id, role, run_input.run_id)
         return _error(422, "validation_error", "The AG-UI request requires a user message.")
+    if role == "author" and app.state.author_project is not None:
+        from .author.api import author_guide_response
+        return await author_guide_response(app, request, run_input, session_id, request_text)
     registry_or_error = _context_registry(app)
     if isinstance(registry_or_error, Response):
         _clear_shared_run(app, session_id, role, run_input.run_id)
@@ -1149,6 +1178,12 @@ def _cleanup_ephemeral_state(app: FastAPI) -> None:
         for key in tuple(mapping):
             if key not in app.state.guide_history_access or key[0] not in app.state.guide_sessions:
                 mapping.pop(key, None)
+    for key in tuple(app.state.author_contexts):
+        if key not in app.state.guide_history_access or key[0] not in app.state.guide_sessions:
+            app.state.author_contexts.pop(key, None)
+    for draft_id, draft in tuple(app.state.author_drafts.items()):
+        if draft.history_key not in app.state.author_contexts:
+            app.state.author_drafts.pop(draft_id, None)
     for key in tuple(app.state.session_actions):
         if key not in app.state.guide_sessions:
             app.state.session_actions.pop(key, None)
@@ -1250,6 +1285,7 @@ async def _guide_events(
     completed = False
     terminal_emitted = False
     provider_started = False
+    author_draft_id = None
     try:
         yield encoder.encode(RunStartedEvent(threadId=thread_id, runId=run_id))
         yield encoder.encode(CustomEvent(name='courseweave.turn_context', value=professor.turn_context.public() | {'assistant_name': 'Course assistant', 'lesson': professor.teaching_data.get('lesson', {}) and {k:v for k,v in professor.teaching_data['lesson'].items() if k != 'excerpt'}, 'workspace_share': {'scope': 'current_run', 'kind': shared.kind, 'label': shared.label} if shared else None}))
@@ -1274,6 +1310,8 @@ async def _guide_events(
                         yield encoder.encode(TextMessageStartEvent(messageId=message_id))
                         started_message = True
                     if shared is None:
+                        if professor.author_context is not None and sum(map(len, chunks)) + len(delta) > professor.author_context.budget.max_output_chars:
+                            raise ProviderCompletionError("truncated")
                         chunks.append(delta)
                     safe_delta = redactor.feed(delta)
                     if safe_delta:
@@ -1292,6 +1330,12 @@ async def _guide_events(
         if isinstance(prepared, ModelResult):
             yield encoder.encode(CustomEvent(name='courseweave.provider_outcome', value=professor.provider_evidence))
         yield encoder.encode(TextMessageEndEvent(messageId=message_id))
+        if professor.author_context is not None:
+            from .author.api import finish_author_turn
+            author_result = await finish_author_turn(app, professor, history_key, content)
+            if author_result is not None:
+                author_draft_id = author_result["draft_id"]
+                yield encoder.encode(CustomEvent(name="courseweave.author_reply", value=author_result))
         if app.state.privacy_epoch != professor.turn_context['privacy_epoch']:
             raise ValueError('privacy context revoked')
         if stager is not None:
@@ -1314,9 +1358,16 @@ async def _guide_events(
         yield encoder.encode(RunFinishedEvent(threadId=thread_id, runId=run_id))
         if app.state.privacy_epoch != professor.turn_context['privacy_epoch']:
             return
+        if professor.author_context is not None:
+            from .author.api import current_author_context
+            from .author.assistant import AuthorAssistantError
+            try:
+                current_author_context(app, history_key, professor.author_context_id)
+            except AuthorAssistantError:
+                return
         if shared is None:
             _append_guide_turn(app, history_key, user_text, content, professor.turn_context.public())
-            if not isinstance(prepared, ProfessorOutcome) or prepared.status == "ok":
+            if professor.author_context is None and (not isinstance(prepared, ProfessorOutcome) or prepared.status == "ok"):
                 app.state.hint_cursors[professor.hint_commit[0]] = professor.hint_commit[1]
             _touch_history(app, history_key)
         completed = True
@@ -1329,12 +1380,17 @@ async def _guide_events(
     except Exception as exc:
         if terminal_emitted:
             raise
-        if isinstance(exc, CourseIdentityChangedError):
+        from .author.assistant import AuthorAssistantError
+        if isinstance(exc, AuthorAssistantError):
+            yield encoder.encode(RunErrorEvent(code="author_reply_invalid", message=str(exc)))
+        elif isinstance(exc, CourseIdentityChangedError):
             yield encoder.encode(RunErrorEvent(code='course_identity_changed', message='The draft identity changed; reopen the course to load its current state.'))
         else:
             failure = _failure_for(exc)
             yield encoder.encode(RunErrorEvent(code=failure.kind, message=failure.message))
     finally:
+        if not completed and author_draft_id is not None:
+            app.state.author_drafts.pop(author_draft_id, None)
         if not completed and stager is not None:
             stager.discard()
             for candidate_id in candidate_ids:

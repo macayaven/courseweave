@@ -1,6 +1,7 @@
 import { Widget } from "@lumino/widgets";
 
 import { parseOpenSurfaceRequest } from "./protocol";
+import { createCourseWeaveIframe } from "./runtime";
 
 export type SurfaceType =
   | "html"
@@ -606,7 +607,7 @@ class ReaderWidget extends Widget {
     }
   }
 
-  navigate(source: string, localHtml: boolean): void {
+  navigate(source: string, localHtml: boolean, localVideo = false): void {
     // Jupyter rejects an opaque-origin or referrer-free navigation to its
     // authenticated /files handler. Local course HTML therefore keeps its
     // Jupyter origin and same-origin referrer while scripts/forms remain off;
@@ -620,30 +621,35 @@ class ReaderWidget extends Widget {
     iframe.referrerPolicy = localHtml ? "same-origin" : "no-referrer";
     this.pendingFragment = true;
     iframe.src = source;
+    if (localVideo) {
+      // Navigating directly to Jupyter /files makes its sandboxed media
+      // document lose the origin needed for authenticated range requests.
+      // Embed only a browser video element in our scripts-disabled frame;
+      // the media bytes never become executable document content.
+      const video = document.createElement("video");
+      video.src = source;
+      video.controls = true;
+      video.preload = "metadata";
+      video.style.cssText = "width:100%;height:100%;object-fit:contain";
+      video.textContent = "Your browser cannot play this video.";
+      iframe.srcdoc = '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; media-src \'self\'; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'"></head><body style="margin:0;height:100vh;background:#000">' + video.outerHTML + '</body></html>';
+    }
     this.iframe = iframe;
     previous.replaceWith(iframe);
   }
 }
 
-class IframeWidget extends Widget {
+class AuthorWidget extends Widget {
   readonly iframe: HTMLIFrameElement;
 
-  constructor(id: string, title: string, src: string) {
+  constructor(serviceOrigin: string) {
     const node = document.createElement("div");
-    const iframe = document.createElement("iframe");
-    Object.assign(iframe.style, {width:'100%',height:'100%',border:'0',display:'block'});
-    iframe.title = title;
-    iframe.src = src;
-    iframe.referrerPolicy = "origin";
-    iframe.setAttribute(
-      "sandbox",
-      "allow-scripts allow-same-origin allow-forms",
-    );
+    const iframe = createCourseWeaveIframe(serviceOrigin, "author");
     node.appendChild(iframe);
     super({ node });
     this.iframe = iframe;
-    this.id = id;
-    this.title.label = title;
+    this.id = "courseweave-author";
+    this.title.label = iframe.title;
     this.title.closable = true;
   }
 }
@@ -709,7 +715,7 @@ export class CourseSurfaceFactory {
   private course: CourseSnapshot | null = null;
   private reader: ReaderWidget | null = null;
   private dashboard: DashboardWidget | null = null;
-  private author: IframeWidget | null = null;
+  private author: AuthorWidget | null = null;
   private readonly terminals = new Map<string, Widget>();
   private readonly metadata = new WeakMap<object, SurfaceMetadata>();
   private readonly jupyterBaseUrl: string;
@@ -884,6 +890,7 @@ export class CourseSurfaceFactory {
       this.reader.navigate(
         source,
         surface.type === "html" || !surface.src?.startsWith("https://"),
+        surface.type === "video" && !surface.src?.startsWith("https://"),
       );
       this.metadata.set(this.reader, {
         activePath: surface.type === "html" ? (surface.path ?? null) : null,
@@ -1064,11 +1071,7 @@ export class CourseSurfaceFactory {
 
   openAuthor(): Widget {
     if (this.author === null || this.author.isDisposed) {
-      this.author = new IframeWidget(
-        "courseweave-author",
-        "CourseWeave author",
-        `${this.options.serviceOrigin}/author/`,
-      );
+      this.author = new AuthorWidget(this.options.serviceOrigin);
       this.options.beforeAuthorAttach?.(this.author, this.author.iframe);
       this.options.shell.add(this.author, "main", { type: "CourseWeave" });
     }
