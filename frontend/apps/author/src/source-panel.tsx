@@ -106,7 +106,7 @@ export function SourcePanel({ client, disabled, onBusyChange, onChanged }: {
       const found = await client.runResearch({ network_enabled: true, policy,
         queries: kind === "discover" ? queryLines : [], urls: kind === "fetch" ? urlLines : [] }, controller.signal);
       if (controller.signal.aborted) return;
-      setReport(found); setSelected([]); setNetwork(false); setNotice(`Research saved: ${found.status}.`);
+      setReport(found); setSelected([]); setNetwork(false); setNotice(`Research run recorded: ${found.status}.`);
       if (found.source_ids.length) onChanged();
       await loadReports(controller);
     } catch (error) { if (!controller.signal.aborted) { setNotice(message(error)); setNetwork(false); } }
@@ -153,7 +153,7 @@ export function SourcePanel({ client, disabled, onBusyChange, onChanged }: {
       {policyError && <p>{policyError}</p>}
       {policy && <details><summary>Review exact source policy</summary><pre>{JSON.stringify(policy, null, 2)}</pre></details>}
       <label>Search queries<textarea value={queries} maxLength={2001} onChange={e => setQueries(e.target.value)} /></label>
-      <p>Up to two queries, one per line; each allows 600 characters and 75 words. Discovery retains at most ten results and does not fetch those pages.</p>
+      <p>Up to two queries, one per line; each allows 600 characters and 75 words. Discovery shows at most ten temporary results and does not fetch those pages. Results are not saved in reports or backups.</p>
       <button type="button" disabled={!network || !policy || !queryValid || !configuration?.brave_configured} onClick={() => void run("discover")}>Discover sources</button>
       <label>Public URLs<textarea value={urls} maxLength={20484} onChange={e => setUrls(e.target.value)} /></label>
       <p>Up to five explicitly chosen URLs, one per line. Fetching these URLs does not repeat the search queries.</p>
@@ -162,7 +162,7 @@ export function SourcePanel({ client, disabled, onBusyChange, onChanged }: {
     <p>Each run allows 60 seconds. Each fetch allows 10 seconds, 3 redirects, and 2 MiB of decompressed content. No automatic retry, refresh, login or browser cookies.</p>
     {(busy === "research" || configuration?.active) && <button type="button" disabled={disabled} onClick={() => void cancel()}>Cancel research</button>}
     <p role="status">{notice}</p>
-    <details open={report !== null}><summary>Saved research reports</summary>
+    <details open={report !== null}><summary>Research results and saved reports</summary>
       <button type="button" disabled={locked} onClick={() => reload()}>Reload research status and reports</button>
       <label>Saved research run<select value={reports.some(r => r.report_id === report?.report_id) ? report?.report_id : ""} disabled={locked} onChange={e => void openReport(e.target.value)}>
         <option value="">Choose a saved report</option>{reports.map(r => <option key={r.report_id} value={r.report_id}>{r.finished_at} · {r.status}</option>)}
@@ -172,7 +172,7 @@ export function SourcePanel({ client, disabled, onBusyChange, onChanged }: {
         <h3>Research outcome: {report.status}</h3><p>Run started: {report.started_at}. Finished: {report.finished_at}.</p>
         <details><summary>Request and policy used for this report</summary><pre>{JSON.stringify(report.request, null, 2)}</pre></details>
         {report.notices.map((notice, index) => <p key={index}>{notice}</p>)}
-        {report.results.length > 0 && <><h4>Discovery results</h4><p>Snippets are discovery evidence. Select at most five URLs and review the current policy before fetching.</p>
+        {report.results.length > 0 && <><h4>Discovery results</h4><p>These results are temporary and disappear when you reopen a report or leave this session. Select at most five URLs and review the current policy before fetching their source pages. Snippets are not substantive source evidence.</p>
           {report.results.map((result, index) => <div className="source-result" key={result.url + index}>
             <label><input aria-label={`Select ${result.title}`} type="checkbox" checked={selected.includes(result.url)}
               disabled={locked || result.policy_decision !== "allowed" || (!selected.includes(result.url) && selected.length >= 5)}
@@ -188,7 +188,8 @@ export function SourcePanel({ client, disabled, onBusyChange, onChanged }: {
           {fetch.source && <p>Saved source: {fetch.source.source_id}, revision {fetch.source.revision}. Review the current source decision below.</p>}
           {fetch.redirects.length > 0 && <details><summary>Redirect destinations</summary><ul>{fetch.redirects.map((url, i) => <li key={i}>{url}</li>)}</ul></details>}
         </div>)}</>}
-        {!report.results.length && !report.fetches.length && <p>No discovery results or fetches were completed in this run.</p>}
+        {!report.results.length && report.request.queries.length > 0 && <p>No discovery results are retained in this saved report. Run a new search explicitly to view results again.</p>}
+        {!report.fetches.length && <p>No source pages were fetched in this run.</p>}
       </article>}
     </details>
   </section>;

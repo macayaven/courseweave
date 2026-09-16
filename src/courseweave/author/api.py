@@ -689,7 +689,7 @@ def install_routes(app, *, author_home: Path | None, author_project=None, studen
             "active": bool(active and active[0] == app.state.author_project.project_id),
             "busy": active is not None,
             "limits": {"queries": 2, "results": 10, "fetches": 5, "redirects": 3, "seconds": 60, "fetch_seconds": 10, "fetch_bytes": 2 * 1024 * 1024},
-            "notice": "Brave Search is optional and uses the author's separate account. The author is responsible for that account's usage and charges. Public URL fetches do not need a search credential."}
+            "notice": "Brave Search is optional and uses the author's separate account. The author is responsible for that account's usage and charges. Discovery results are temporary and excluded from saved reports and backups. Public URL fetches do not need a search credential; respect the publisher's terms when retaining source pages."}
 
     @app.post("/api/author/research")
     async def research_run(request: Request):
@@ -717,7 +717,8 @@ def install_routes(app, *, author_home: Path | None, author_project=None, studen
                 if not task.done() and await request.is_disconnected():
                     control.cancel.set()
             report = await task
-            return report.model_dump(mode="json", exclude={"fetches": {"__all__": {"content"}}})
+            return JSONResponse(report.model_dump(mode="json", exclude={"fetches": {"__all__": {"content"}}}),
+                headers={"Cache-Control": "no-store"})
         finally:
             control.cancel.set()
 

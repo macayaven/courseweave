@@ -68,7 +68,10 @@ use `--search-key-env` to select BRAVE_SEARCH_API_KEY. Existing protected creden
 Keys are kept out of notebook kernels. Text-only model responses are supported; native model tools are not required.
 Model/search calls may incur provider charges. Research stays network-off until an explicit research action and configured permission;
 public URL/redirect policy, allow/deny lists, bounded requests and cancellation still apply. Every source requires human approval.
-Conversation is session-only. Deliberately saved reports, source snapshots and changes persist separately.
+Conversation and Brave discovery results are session-only. Search result URLs, titles and snippets are excluded from saved reports
+and backups; reopening a research report requires a new explicit search to view results. Direct source fetches retain their own
+provenance and review decisions. Respect publisher terms before retaining or redistributing source pages. Each author supplies their
+own search account key; no key is distributed. Deliberately saved reports, source snapshots and changes persist separately.
 
 ## Setup, restart and recovery
 

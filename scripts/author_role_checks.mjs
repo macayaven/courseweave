@@ -9,17 +9,42 @@ export async function verifyAuthorRoles({ page, author, research, report, eviden
       page.waitForResponse(r => r.url().endsWith('/api/author/research') && r.request().method() === 'POST', { timeout: 75_000 }),
       research.getByRole('button', { name: button, exact: true }).click(),
     ]);
-    expect(response.status()).toBe(200); return response.json();
+    expect(response.status()).toBe(200);
+    expect(response.headers()['cache-control']).toBe('no-store');
+    return response.json();
   };
   await research.getByRole('checkbox', { name: 'Enable network for this research run', exact: true }).check();
   await research.getByRole('textbox', { name: 'Allowed origins and paths', exact: true }).fill('https://docs.python.org/3/library');
   if (brave) {
     await research.getByRole('textbox', { name: 'Search queries', exact: true }).fill('site:docs.python.org/3/library/json.html Python JSON decoder');
     const found = await callResearch('Discover sources');
-    report.brave = { report_id: found.report_id, status: found.status, results: found.results.map(r => ({ url: r.url, policy_decision: r.policy_decision })) };
-    if (!found.results.some(r => r.policy_decision === 'allowed')) report.open_gates.push('Actual Brave discovery returned no permitted source.');
+    // Persist only our checks and request identity, never provider result fields.
+    report.brave = { report_id: found.report_id, status: found.status,
+      discovery_succeeded: found.status === 'complete' && found.results.some(r => r.policy_decision === 'allowed') };
+    expect(report.brave.discovery_succeeded, 'Actual Brave discovery must return a permitted source.').toBe(true);
+    const selectedIndex = found.results.findIndex(r => r.policy_decision === 'allowed' && r.url === 'https://docs.python.org/3/library/json.html');
+    expect(selectedIndex >= 0, 'The selected Python JSON reference must be among the actual allowed results.').toBe(true);
+    await research.locator('.source-result input[type="checkbox"]').nth(selectedIndex).check();
+    await research.getByRole('button', { name: 'Use selected URLs', exact: true }).click();
+    await expect(research.getByRole('textbox', { name: 'Public URLs', exact: true })).toHaveValue('https://docs.python.org/3/library/json.html');
+    await research.getByRole('heading', { name: 'Discovery results', exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(evidence, 'brave-discovery-controls.png'), mask: [research.locator('.source-result')] });
+    const saved = JSON.parse(await readFile(join(project, 'author-state/research', found.report_id + '.json'), 'utf8'));
+    expect(Boolean(saved.results?.length), 'Search results must not be persisted.').toBe(false);
+    const [reopened] = await Promise.all([
+      page.waitForResponse(r => r.url().endsWith('/research/reports/' + found.report_id) && r.request().method() === 'GET'),
+      research.getByRole('combobox', { name: 'Saved research run', exact: true }).selectOption(found.report_id),
+    ]);
+    expect((await reopened.json()).results).toEqual([]);
+    await expect(research.getByRole('heading', { name: 'Discovery results', exact: true })).toHaveCount(0);
+    await expect(research.getByText('No discovery results are retained in this saved report. Run a new search explicitly to view results again.', { exact: true })).toBeVisible();
+    report.brave.explicit_result_selection = true;
+    report.brave.reopened_without_results = true;
+    report.brave.result_content_saved = false;
+    await page.screenshot({ path: join(evidence, 'brave-reopened-report.png') });
   } else report.open_gates.push('Actual Brave discovery requires the owner-selected BRAVE_SEARCH_API_KEY.');
   await research.getByRole('textbox', { name: 'Public URLs', exact: true }).fill('https://docs.python.org/3/library/json.html');
+  await research.getByRole('checkbox', { name: 'Enable network for this research run', exact: true }).check();
   const fetched = await callResearch('Fetch entered URLs');
   const source = fetched.fetches.find(item => item.source)?.source;
   report.public_fetch = { report_id: fetched.report_id, status: fetched.status,

@@ -699,6 +699,8 @@ def run_research(project, request, *, search=None, fetcher=None, control=None) -
     search = search if search is not None else BraveSearch.from_environ(control=control)
     fetcher = fetcher if fetcher is not None else PublicFetcher(control=control)
     results, fetches, source_ids, notices = [], [], [], []
+    if request.queries:
+        notices.append("Discovery results are temporary and are not saved in reports or backups. A new explicit search is required to see results again after reopening a report.")
     status, errors, completed = "complete", False, False
     seen = set()
     try:
@@ -715,7 +717,7 @@ def run_research(project, request, *, search=None, fetcher=None, control=None) -
                     except SourceError:
                         identity = row.url
                     if identity in seen:
-                        notices.append("A repeated search URL was omitted from retained discovery results.")
+                        notices.append("A repeated search URL was omitted from this discovery response.")
                         continue
                     seen.add(identity)
                     allowed = request.policy.permits(row.url)
@@ -782,5 +784,7 @@ def run_research(project, request, *, search=None, fetcher=None, control=None) -
     # The API admits only one active research run per Author home.
     if len(_report_names(project)) >= 500:
         raise SourceError("Research report limit reached; completed source snapshots remain in the private registry.")
-    atomic_json(project.state_root / "research" / (report.report_id + ".json"), report.model_dump(mode="json", exclude={"fetches": {"__all__": {"content"}}}))
+    # Brave permits transient operation, not a durable search-result archive.
+    # Keep the author's request and our outcome; return discovery only in memory.
+    atomic_json(project.state_root / "research" / (report.report_id + ".json"), report.model_dump(mode="json", exclude={"results": True, "fetches": {"__all__": {"content"}}}))
     return report

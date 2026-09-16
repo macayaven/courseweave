@@ -1,7 +1,9 @@
 """Real Author routing with synthetic network adapters; no external requests."""
 from pathlib import Path
+import json
 import threading
 import time
+import pytest
 
 from fastapi.testclient import TestClient
 from courseweave.api import create_app
@@ -32,6 +34,39 @@ def test_network_off_and_separate_connector_status_never_call_transport(tmp_path
     assert c.post("/api/author/research", headers=auth, json={**request(), "network_enabled": False}).status_code == 422
     assert c.post("/api/author/research", headers=auth, json={**request(), "urls": request()["urls"] * 6}).status_code == 422
     assert not calls
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_search_results_are_transient_but_request_and_outcome_survive_restart(tmp_path, monkeypatch, partial):
+    from courseweave.author import sources
+    payload = {"web": {"results": [{"url": "https://docs.example.org/transient-result",
+        "title": "Transient provider title", "description": "Transient provider snippet"}]}}
+    def search_response(self, url, control, **kwargs):
+        if "second" in url:
+            return sources.HttpResult(429, {}, b"provider error body")
+        return sources.HttpResult(200, {"content-type": "application/json"}, json.dumps(payload).encode())
+    monkeypatch.setattr(sources.PublicHttpsTransport, "get", search_response)
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "synthetic-transient-search-key")
+    c, auth = client(tmp_path)
+    body = {**request(), "queries": ["first", "second"] if partial else ["first"], "urls": []}
+    response = c.post("/api/author/research", headers=auth, json=body)
+    assert response.status_code == 200
+    live = response.json()
+    assert live["results"][0]["title"] == "Transient provider title"
+    assert live["results"][0]["policy_decision"] == "allowed"
+    assert live["status"] == ("partial" if partial else "complete")
+    saved = tmp_path / "home/projects/one/author-state/research" / (live["report_id"] + ".json")
+    durable = saved.read_text()
+    assert not json.loads(durable).get("results")
+    for value in ("transient-result", "Transient provider title", "Transient provider snippet", "synthetic-transient-search-key"):
+        assert value not in durable
+    assert response.headers["cache-control"] == "no-store"
+    restarted = TestClient(create_app(capability_token="author-research-test", author_home=tmp_path / "home"))
+    restored = restarted.get(f'/api/author/research/reports/{live["report_id"]}', headers=auth).json()
+    assert restored["results"] == []
+    assert restored["status"] == live["status"]
+    assert restored["request"] == live["request"]
+    assert any("not saved" in notice for notice in restored["notices"])
 
 
 def test_fetched_source_report_and_excerpt_are_project_bound_and_restartable(tmp_path, monkeypatch):

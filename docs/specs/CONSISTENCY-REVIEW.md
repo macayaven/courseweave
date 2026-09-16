@@ -199,3 +199,17 @@ archive acceptance, actual Brave discovery and independent review remain open.
 ## Task 11 packaging self-review (acceptance in progress)
 
 The separate Author launcher and archive consume existing project, provider, delivery and preview services. No course schema, progress, assistance policy or mutation authority changes. Source/runtime inputs and both Student versions are explicit; model/search selection is opt-in and backups remain distinct from Student state. Current release guidance distinguishes released Student0.2 from unaccepted Author0.3. Normative requirements and traceability remain unchanged. Final installed/live/course evidence and bounded independent review remain required.
+
+
+## Search retention correction, 2026-09-16
+
+The owner supplied the separate Brave credential and a bounded authentication
+check succeeded. Review of the current provider terms identified a mismatch:
+the development implementation persisted discovery results in research reports.
+The correction keeps discovery results transient, sends them with no-store, and
+retains only the author request and application outcome in the research record.
+Explicit direct publisher fetches retain independent source provenance and human
+approval/distribution decisions. Shared, Author and Student specifications now
+state that distinction without changing schema-v2 or adding a provider. The exact
+installed candidate, live discovery/fetch, backup exclusion and independent review
+remain required before final acceptance.

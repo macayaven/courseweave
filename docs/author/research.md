@@ -24,7 +24,7 @@ and is responsible for its usage and charges; no price or entitlement is assumed
    descendants on that exact origin. Or deliberately select **Public web**.
    Deny rules always take precedence. Review the displayed policy.
 2. Enter up to two queries and explicitly enable network access. **Discover
-   sources** sends those queries to Brave, retaining at most ten results. Each
+   sources** sends those queries to Brave, showing at most ten temporary results. Each
    query allows 600 characters and 75 words. No returned pages are fetched.
 3. Select up to five allowed results and choose **Use selected URLs**, or enter
    your own URLs. Review the current policy, enable network access and choose
@@ -40,14 +40,29 @@ and is responsible for its usage and charges; no price or entitlement is assumed
 
 The connector uses Brave's documented Web Search endpoint
 `https://api.search.brave.com/res/v1/web/search` with its own subscription header.
-It retains the returned URL, title, snippet and actual retrieval time. Unknown
+It shows the returned URL, title, snippet and actual retrieval time in the current
+session only. Unknown
 publication dates remain unknown; a relative result age is not a publication
 date. See the [official Web Search API reference](https://api-dashboard.search.brave.com/api-reference/web/search/get).
+
+Brave's [terms](https://api-dashboard.search.brave.com/documentation/resources/terms-of-service),
+checked on 2026-09-16, permit transient operation but restrict storing search
+results. CourseWeave excludes all discovery result fields from saved reports and
+backups, sends the live response with `Cache-Control: no-store`, and does not pass
+search snippets to the model. Reopening a report or leaving the session discards
+its displayed results. Seeing results again requires another explicit search.
+There is no automatic result cache or refresh.
+
+Fetching an explicitly selected URL is a separate direct request to its publisher.
+The page snapshot and provenance are governed by that publisher's terms and your
+source decisions; a Brave account grants no rights to that content. Search keys
+are private runtime configuration and are never distributed with CourseWeave or
+a course. Each author who enables discovery uses their own account.
 
 ## Bounds and unavailable sources
 
 One research run may be active per Author home. Each run allows at most two
-queries, ten retained results, five explicitly chosen fetches and sixty seconds
+queries, ten results held in memory, five explicitly chosen fetches and sixty seconds
 of research work. A fetch allows ten seconds, three redirects and two MiB of
 decompressed content. DNS waits, socket activity and waiting to publish a source
 under the course lock check the deadline and cancellation. Small local terminal
@@ -91,8 +106,9 @@ Prior snapshots remain immutable. A new revision revokes old assistant context a
 pending-change dependencies. Different origins retain separate identities even
 when their bytes match. Rejected or stale sources cannot be permitted to the model.
 
-Saved research reports retain the actual request/policy, returned URLs, fetch
-statuses, timestamps and source revision references. They exclude response bodies;
+Saved research reports retain the author's request/policy, run outcome, direct
+fetch URLs/statuses, timestamps and source revision references. They exclude all
+search result fields and fetch response bodies;
 raw source bytes stay in the private snapshot directory. Reports survive restart
 and are listed twenty at a time, with a maximum of 500 per project. After an
 interrupted browser response, reload these reports before making another explicit

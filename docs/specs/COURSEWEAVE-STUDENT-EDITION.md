@@ -60,6 +60,8 @@ Navigation changes activity policy. An explicitly selected lesson source has its
 
 The assistant may guide and explain within policy; it has no authority to execute notebook code, accept its own proposals, write student files, mark work complete, or infer mastery. Students perform those actions themselves through supported controls. The author preview uses the same boundaries, with synthetic actions clearly identified in its receipt.
 
+Temporary Author search results and search credentials are excluded from Student bundles and model context. Separately fetched source material reaches students only through deliberate author incorporation and the existing distribution and sharing boundaries.
+
 ## Practical protocols and evidence
 
 For Agent Harness Path, S13's rebuild audit and S14's cold acceptance/human pilot remain optional, with their authored prerequisites and assistance restrictions. The software can record preparation and after-the-fact evidence references. It cannot verify that a consenting human participated or that an unaided sitting was actually unaided. A test may simulate an interaction to check the interface and policy; it cannot claim the human activity occurred.

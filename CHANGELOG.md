@@ -6,6 +6,8 @@ releases.
 
 ## Unreleased
 
+- Kept Brave discovery results transient and excluded their URLs, titles and snippets from saved research reports and backups. Retained explicit direct-source fetch provenance and clarified separate account and publisher rights.
+
 ### Author Edition v0.3.0 work in progress
 
 - Fixed two defects found by independent candidate review: revoked sources now

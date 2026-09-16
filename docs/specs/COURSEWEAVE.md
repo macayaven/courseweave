@@ -121,6 +121,8 @@ flowchart LR
 
 Author state is not runtime policy. A source rule in the author project controls author research, not the student's tutor. The current student tutor receives authored learning metadata and explicitly selected lesson text; it does not search the author's source catalogue. Approved source extracts become available to it only when the author deliberately includes them in learner-facing lesson content or supported manifest metadata.
 
+Discovery results are temporary Author session data, not durable evidence. Saved research records retain the author request and application outcome; separately selected direct source fetches have their own retained provenance and review decisions. Search provider terms do not confer publisher redistribution rights. This distinction changes neither schema-v2 nor Student context or state.
+
 ## Boundaries and deferred work
 
 Deferred: hosted multi-tenant SaaS, billing, cohorts/gradebooks, student surveillance, a managed vector database or knowledge graph, automatic background source updates, student browsing/RAG, mastery certification, secure/proctored assessment, autonomous notebook/shell execution by the assistant, arbitrary rich document conversion/OCR, multi-user editing, and a ChatGPT integration. Each requires its own scope and acceptance evidence. [Future interfaces](../superpowers/specs/2026-09-14-chatgpt-courseweave-feasibility.md) records the current custom GPT assessment.

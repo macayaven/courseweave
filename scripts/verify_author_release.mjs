@@ -311,6 +311,11 @@ try {
   await expect(author.getByRole('textbox', { name: 'Course title', exact: true })).toHaveValue('Python data validation');
   report.restore_interaction.editor_enabled_after_restore = true;
   expect(await readFile(join(home, 'workspace/projects/restored-validation/course/lessons/validate.md'), 'utf8')).toBe(correctLesson);
+  if (report.brave?.discovery_succeeded) {
+    const restoredResearch = JSON.parse(await readFile(join(home, 'workspace/projects/restored-validation/author-state/research', report.brave.report_id + '.json'), 'utf8'));
+    expect(Boolean(restoredResearch.results?.length), 'Restored backups must not contain search results.').toBe(false);
+    report.brave.backup_restore_without_results = true;
+  }
   report.checks.push('Exact one-spelling-change review/apply; original instructor material preserved; standard course export; both generic Student bundles; explicit inspected backup/new-project restore.');
   stage = 'actual restart';
   await current.stop(); current = await launch(); ({ page, author } = current);
@@ -330,7 +335,8 @@ try {
   report.status = report.open_gates.length ? 'performed-checks-passed-open-gates' : 'passed-awaiting-visual-review';
 } catch (error) {
   report.status = 'failed'; report.failed_stage = stage; report.failure = sanitize(error);
-  if (current) await current.page.screenshot({ path: join(evidence, 'failure.png') }).catch(() => {});
+  if (current) await current.page.screenshot({ path: join(evidence, 'failure.png'),
+    mask: [current.page.frameLocator('iframe[title="CourseWeave author"]').locator('.source-result')] }).catch(() => {});
 } finally {
   report.cleanup_failures = [];
   for (const stop of sessions.reverse()) try { await stop(); } catch (error) { report.cleanup_failures.push(sanitize(error)); }
