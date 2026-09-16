@@ -229,8 +229,11 @@ def ready(url):
 supervisor=LaunchSupervisor(Path(sys.argv[1]),port=0,mode='author',browser_opener=ready,readiness_timeout=30)
 raise SystemExit(supervisor.run())
 '''
+    # The supervisor prefers XDG_RUNTIME_DIR over TMPDIR for its course lock.
+    # Both processes must address the same owned lock directory on Linux too.
     owner=subprocess.Popen([sys.executable,'-c',script,str(course),str(marker)],start_new_session=True,
-        env=dict(os.environ,TMPDIR=str(runtime)),stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        env=dict(os.environ,TMPDIR=str(runtime),XDG_RUNTIME_DIR=str(runtime)),
+        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     witness=subprocess.Popen([sys.executable,'-c','import time;time.sleep(90)'])
     child=None
     def alive(pid):
