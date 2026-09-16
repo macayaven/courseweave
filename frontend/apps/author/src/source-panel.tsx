@@ -53,6 +53,7 @@ export function SourcePanel({ client, disabled, onBusyChange, onChanged }: {
   const [reports, setReports] = useState<ReportSummary[]>([]);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [report, setReport] = useState<ResearchReport | null>(null);
+  const currentReport = useRef(report); currentReport.current = report;
   const [selected, setSelected] = useState<string[]>([]);
   const active = useRef<AbortController | null>(null);
   const reads = useRef<AbortController | null>(null);
@@ -77,7 +78,9 @@ export function SourcePanel({ client, disabled, onBusyChange, onChanged }: {
     if (listing.status === "fulfilled") {
       setReports(current => offset ? [...current, ...listing.value.reports] : listing.value.reports);
       setNextOffset(listing.value.next_offset);
-      if (openFirst && listing.value.reports[0]) await openReport(listing.value.reports[0].report_id, controller);
+      // Sibling reads can briefly disable this panel. Refresh its history without
+      // replacing an in-memory discovery response with the persisted run record.
+      if (openFirst && !currentReport.current && listing.value.reports[0]) await openReport(listing.value.reports[0].report_id, controller);
     } else setNotice(message(listing.reason));
   }
   async function openReport(id: string, controller?: AbortController) {

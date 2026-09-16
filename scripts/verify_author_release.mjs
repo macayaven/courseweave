@@ -28,9 +28,11 @@ const material = join(owned, 'instructor-material');
 const hash = value => createHash('sha256').update(value).digest('hex');
 const metadata = JSON.parse(await readFile(join(release, 'release.json'), 'utf8'));
 const secrets = [provider?.credential, brave, 'synthetic-unselected-author-model', 'synthetic-unselected-author-search'].filter(Boolean);
+let transientResultText = [];
 const sanitize = error => {
   let value = String(error?.message ?? error).replace(/\u001b\[[0-9;]*m/g, '').slice(0, 3500);
   for (const secret of secrets) value = value.replaceAll(secret, '[redacted]');
+  for (const field of transientResultText) value = value.replaceAll(field, '[temporary result omitted]');
   return value.replace(/https?:\/\/\S+/g, '[URL omitted]');
 };
 const report = { status: 'running', category: live ? 'fresh installed UI with real text-only provider' : 'fresh installed manual/provider-off UI',
@@ -193,7 +195,8 @@ try {
   report.checks.push('Fresh installed Start Author; UI import into private project; explicit local reference/excerpt inspection and approval; network default off.');
   if (live) {
     const { verifyAuthorRoles } = await import('./author_role_checks.mjs');
-    await verifyAuthorRoles({ page, author, research, report, evidence, secrets, brave: Boolean(brave), correctLesson, project });
+    await verifyAuthorRoles({ page, author, research, report, evidence, secrets, brave: Boolean(brave), correctLesson, project,
+      onDiscovery: rows => { transientResultText = rows.flatMap(row => [row.url, row.title, row.snippet]).filter(Boolean); } });
   } else report.open_gates.push('Real provider roles and Brave discovery/fetch are separate explicit live checks.');
   stage = 'reviewed lesson edit';
   const editor = author.getByRole('region', { name: 'Lesson files', exact: true });

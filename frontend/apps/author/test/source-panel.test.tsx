@@ -44,6 +44,29 @@ it("keeps networking off until a reviewed explicit action, then requires enablin
   expect(api.runResearch.mock.calls[1]?.[0].queries).toEqual([]);
 });
 
+it("keeps transient discovery and selected URLs across a sibling panel refresh", async () => {
+  const api = client();
+  api.getResearchReports.mockResolvedValue({ reports: [{ report_id: report.report_id, status: report.status,
+    started_at: report.started_at, finished_at: report.finished_at }], next_offset: null });
+  api.getResearchReport.mockResolvedValue({ ...report, results: [] });
+  const props = { client: api, onBusyChange: vi.fn(), onChanged: vi.fn() };
+  const view = render(<SourcePanel {...props} disabled={false} />);
+  await screen.findByText(/Brave discovery: configured/);
+  fireEvent.change(screen.getByLabelText("Search queries"), { target: { value: "Python validation" } });
+  fireEvent.change(screen.getByLabelText("Research policy"), { target: { value: "public_web" } });
+  fireEvent.click(screen.getByLabelText("Enable network for this research run"));
+  fireEvent.click(screen.getByRole("button", { name: "Discover sources" }));
+  await screen.findByText("Python docs");
+  fireEvent.click(screen.getByLabelText("Select Python docs"));
+  await act(async () => view.rerender(<SourcePanel {...props} disabled />));
+  await act(async () => view.rerender(<SourcePanel {...props} disabled={false} />));
+  expect(screen.getByLabelText("Select Python docs")).toBeChecked();
+  expect(screen.getByLabelText("Select Python docs")).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Use selected URLs" }));
+  expect(screen.getByLabelText("Public URLs")).toHaveValue("https://docs.example.org/python");
+  expect(screen.getByLabelText("Enable network for this research run")).not.toBeChecked();
+});
+
 it("allows offline local references and explicit URLs when discovery is unavailable", async () => {
   const api = client();
   api.getResearchStatus.mockResolvedValue({ network_enabled: false, brave_configured: false, active: false, busy: false, notice: "Missing search key." });

@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect } from '../frontend/node_modules/playwright/test.mjs';
 
-export async function verifyAuthorRoles({ page, author, research, report, evidence, secrets, brave, correctLesson, project }) {
+export async function verifyAuthorRoles({ page, author, research, report, evidence, secrets, brave, correctLesson, project, onDiscovery }) {
   const callResearch = async button => {
     const [response] = await Promise.all([
       page.waitForResponse(r => r.url().endsWith('/api/author/research') && r.request().method() === 'POST', { timeout: 75_000 }),
@@ -18,6 +18,7 @@ export async function verifyAuthorRoles({ page, author, research, report, eviden
   if (brave) {
     await research.getByRole('textbox', { name: 'Search queries', exact: true }).fill('site:docs.python.org/3/library/json.html Python JSON decoder');
     const found = await callResearch('Discover sources');
+    onDiscovery(found.results);
     // Persist only our checks and request identity, never provider result fields.
     report.brave = { report_id: found.report_id, status: found.status,
       discovery_succeeded: found.status === 'complete' && found.results.some(r => r.policy_decision === 'allowed') };
