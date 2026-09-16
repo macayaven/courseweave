@@ -138,5 +138,5 @@ export async function verifyAuthorRoles({ page, author, research, report, eviden
     if (secrets.some(secret => secret && encoded.includes(secret))) throw new Error('Protected value in model evidence; evidence was not saved.');
     await writeFile(join(evidence, 'private-role-replies.json'), encoded, { mode: 0o600 });
   }
-  report.checks.push('Six explicit real-provider role requests; validated replies and separately saved reports are individually recorded. Live role quality still requires evaluator inspection.');
+  report.checks.push(`${report.roles.length} explicit real-provider role requests; validated replies and separately saved reports are individually recorded. Live role quality still requires evaluator inspection.`);
 }
